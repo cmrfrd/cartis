@@ -12,6 +12,7 @@ export {
   ArcaneTypeLine,
   RARITIES,
   type RarityId,
+  rarityFrom,
 } from './arcane/parts';
 export { arcaneTemplate } from './arcane/template';
 export { CARD_HEIGHT, CARD_WIDTH, CardSurface, HoloFoil } from './base/CardSurface';

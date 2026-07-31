@@ -8,7 +8,7 @@ import {
   ArcaneStatBadge,
   ArcaneTitleBar,
   ArcaneTypeLine,
-  type RarityId,
+  rarityFrom,
 } from './parts';
 
 /**
@@ -54,7 +54,7 @@ export class ArcaneCard extends Component {
     return (
       <ArcaneTypeLine
         text={String(data.typeLine ?? '')}
-        rarity={(data.rarity ?? 'common') as RarityId}
+        rarity={rarityFrom(data.rarity)}
         palette={palette}
       />
     );

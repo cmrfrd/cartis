@@ -9,6 +9,11 @@ export const RARITIES: readonly { value: RarityId; label: string }[] = [
   { value: 'mythic', label: 'Mythic' },
 ];
 
+/** Card data is user-authored JSON — never trust a rarity string without checking. */
+export function rarityFrom(value: unknown): RarityId {
+  return RARITIES.some((r) => r.value === value) ? (value as RarityId) : 'common';
+}
+
 const RARITY_GEM: Record<RarityId, string> = {
   common: 'bg-[#3a3a40]',
   uncommon: 'bg-gradient-to-br from-[#c0c8d0] to-[#707880]',
