@@ -27,12 +27,13 @@ bun run check      # auto-format + lint fixes
 
 Both are off by default; the app is fully offline without them.
 
-- **Real image generation** — flux-kontext-pro via Replicate:
-  `REPLICATE_API_TOKEN=r8_… bun run dev`. Without it, a local canvas "stub
-  stylizer" fakes the effect.
+- **Real image generation** — flux-kontext-pro via Replicate: put
+  `REPLICATE_API_TOKEN=r8_…` in `.env` (see `.env.example`) or prefix the dev
+  command. Without it, a local canvas "stub stylizer" fakes the effect and
+  photos never leave your machine.
 - **Code Lab agent** — [opencode](https://opencode.ai) writes card TSX:
-  install opencode, run `opencode auth login` once, then optionally pick a
-  model with `OPENCODE_MODEL=anthropic/claude-fable-5 bun run dev`.
+  install opencode, run `opencode auth login` once, then optionally pin a
+  model with `OPENCODE_MODEL=anthropic/claude-fable-5` in `.env`.
 
 ## Vocabulary
 
