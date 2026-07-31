@@ -18,7 +18,11 @@ export type FieldSpec =
     }
   | { kind: 'image'; key: string; label: string };
 
-export type CardRenderProps = { data: CardData; holo?: boolean };
+/**
+ * `data` is optional because expressive Component fields surface as optional JSX
+ * props — renderers must tolerate missing data (and default it internally).
+ */
+export type CardRenderProps = { data?: CardData; holo?: boolean };
 export type CardRenderer = ComponentType<CardRenderProps>;
 
 /**
