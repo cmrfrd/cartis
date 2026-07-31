@@ -27,6 +27,20 @@ export class BuilderView extends Component {
     if (first) this.pickTemplate(first.id);
   }
 
+  mount() {
+    const { shell } = this;
+    if (!shell) return;
+    const consumePending = () => {
+      const card = shell.pendingCard;
+      if (card) {
+        this.loadCard(card);
+        shell.pendingCard = undefined;
+      }
+    };
+    consumePending(); // a card may already be waiting when the builder mounts
+    return shell.set('pendingCard', consumePending);
+  }
+
   get template(): CardTemplate {
     return getTemplate(this.templateId);
   }
