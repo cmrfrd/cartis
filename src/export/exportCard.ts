@@ -1,6 +1,14 @@
 import { toCanvas } from 'html-to-image';
-import { CARD_WIDTH } from '../cards/base/CardSurface';
+import { CARD_WIDTH, POINTER_VARS } from '../cards/base/CardSurface';
 import type { ExportFormat } from '../storage/CardArchive';
+
+/** Prints must not depend on where the pointer happens to be — force rest state. */
+function clearInteractiveVars(node: HTMLElement): void {
+  const targets = [node, ...Array.from(node.querySelectorAll<HTMLElement>('[data-card-root]'))];
+  for (const el of targets) {
+    for (const name of POINTER_VARS) el.style.removeProperty(name);
+  }
+}
 
 /** 2.5" × 300 DPI. Height follows the node's aspect (525 → 1050). */
 export const CARD_EXPORT_WIDTH = 750;
@@ -30,6 +38,7 @@ export async function renderCardBlob(
   format: ExportFormat,
   quality = 0.95,
 ): Promise<Blob> {
+  clearInteractiveVars(node);
   const canvas = await toCanvas(node, { pixelRatio: exportPixelRatio(node.offsetWidth) });
   return new Promise<Blob>((resolve, reject) => {
     canvas.toBlob(

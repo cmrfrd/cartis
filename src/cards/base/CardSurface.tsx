@@ -7,7 +7,8 @@ export const CARD_HEIGHT = 525;
 /** Printed black border around the frame, like a real card. */
 export const CARD_BORDER = 12;
 
-const POINTER_VARS = ['--holo-x', '--holo-y', '--tilt-x', '--tilt-y'];
+/** Interactive-only CSS vars; exports strip these so prints always use rest defaults. */
+export const POINTER_VARS = ['--holo-x', '--holo-y', '--tilt-x', '--tilt-y'];
 
 /** Imperative CSS-var writes: no state, no re-render, and the export always sees rest defaults. */
 function trackPointer(e: PointerEvent<HTMLDivElement>) {

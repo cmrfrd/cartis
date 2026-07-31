@@ -51,15 +51,15 @@
   background-image:
     radial-gradient(
       circle at var(--holo-x, 38%) var(--holo-y, 26%),
-      rgba(255, 255, 255, 0.5) 0%,
+      rgba(255, 255, 255, 0.38) 0%,
       rgba(255, 255, 255, 0) 32%
     ),
     linear-gradient(
       115deg,
       transparent 12%,
-      rgba(255, 0, 128, 0.26) 32%,
-      rgba(0, 255, 255, 0.3) 50%,
-      rgba(255, 220, 0, 0.26) 68%,
+      rgba(255, 0, 128, 0.18) 32%,
+      rgba(0, 255, 255, 0.2) 50%,
+      rgba(255, 220, 0, 0.18) 68%,
       transparent 88%
     );
   background-size:
