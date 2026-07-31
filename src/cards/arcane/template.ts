@@ -25,6 +25,7 @@ export const arcaneTemplate: CardTemplate = {
     { kind: 'number', key: 'might', label: 'Might', min: 0, max: 20 },
     { kind: 'number', key: 'ward', label: 'Ward', min: 0, max: 20 },
     { kind: 'select', key: 'rarity', label: 'Rarity', options: RARITIES },
+    { kind: 'text', key: 'collector', label: 'Collector line', maxLength: 40 },
   ],
   defaults: {
     name: 'Nyra, Ember Sage',
@@ -36,6 +37,7 @@ export const arcaneTemplate: CardTemplate = {
     might: 2,
     ward: 3,
     rarity: 'rare',
+    collector: '001/001 · Cartis Original',
   },
   artStylePrompt: (data) =>
     [

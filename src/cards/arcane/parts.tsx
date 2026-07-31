@@ -1,4 +1,6 @@
+import type { CSSProperties } from 'react';
 import { plateStyle } from '../base/textures';
+import { EssenceGlyph } from './glyphs';
 import type { EssencePalette } from './palette';
 import { ENGRAVED_SHADOW, titleSizeFor } from './typography';
 
@@ -16,12 +18,21 @@ export function rarityFrom(value: unknown): RarityId {
   return RARITIES.some((r) => r.value === value) ? (value as RarityId) : 'common';
 }
 
-const RARITY_GEM: Record<RarityId, string> = {
-  common: 'bg-[#3a3a40]',
-  uncommon: 'bg-gradient-to-br from-[#c0c8d0] to-[#707880]',
-  rare: 'bg-gradient-to-br from-[#f0d060] to-[#a08020]',
-  mythic: 'bg-gradient-to-br from-[#f08030] to-[#c02020]',
+const GEM_COLORS: Record<RarityId, [string, string, string]> = {
+  common: ['#5a5a64', '#2e2e34', '#7a7a84'],
+  uncommon: ['#e8eef4', '#8a94a0', '#c6ced8'],
+  rare: ['#f6df8a', '#a5821f', '#ffd75e'],
+  mythic: ['#ffb45e', '#c22525', '#ff7a2f'],
 };
+
+/** Faceted gem: conic facets + a specular highlight dot. */
+export function rarityGemStyle(rarity: RarityId): CSSProperties {
+  const [a, b, c] = GEM_COLORS[rarity];
+  return {
+    backgroundImage: `radial-gradient(circle at 30% 28%, rgba(255, 255, 255, 0.95) 0%, transparent 28%), conic-gradient(from 45deg, ${a}, ${b} 25%, ${c} 50%, ${b} 75%, ${a})`,
+    boxShadow: 'inset 0 0 2px rgba(0, 0, 0, 0.6), 0 1px 2px rgba(0, 0, 0, 0.5)',
+  };
+}
 
 export function ArcaneCostPips(props: { cost: number; palette: EssencePalette }) {
   const pips = Math.max(0, Math.min(9, Math.round(props.cost)));
@@ -68,7 +79,12 @@ export function ArcaneArtWindow(props: { art?: string; alt: string; palette: Ess
   );
 }
 
-export function ArcaneTypeLine(props: { text: string; rarity: RarityId; palette: EssencePalette }) {
+export function ArcaneTypeLine(props: {
+  text: string;
+  rarity: RarityId;
+  palette: EssencePalette;
+  essenceId?: string;
+}) {
   return (
     <div
       className={`flex items-center justify-between rounded-md px-2.5 py-0.5 ${props.palette.plate}`}
@@ -80,10 +96,19 @@ export function ArcaneTypeLine(props: { text: string; rarity: RarityId; palette:
       >
         {props.text}
       </span>
-      <span
-        data-testid="rarity-gem"
-        className={`h-3 w-3 shrink-0 rotate-45 rounded-[2px] shadow ${RARITY_GEM[props.rarity]}`}
-      />
+      <span className="flex shrink-0 items-center gap-1.5">
+        <span
+          data-testid="set-symbol"
+          className={`flex h-4 w-4 items-center justify-center rounded-full ${props.palette.pip}`}
+        >
+          <EssenceGlyph essence={props.essenceId ?? 'relic'} size={10} />
+        </span>
+        <span
+          data-testid="rarity-gem"
+          className="h-3 w-3 shrink-0 rotate-45 rounded-[2px]"
+          style={rarityGemStyle(props.rarity)}
+        />
+      </span>
     </div>
   );
 }
@@ -92,24 +117,36 @@ export function ArcaneRulesBox(props: {
   ability: string;
   flavor: string;
   palette: EssencePalette;
+  essenceId?: string;
 }) {
   return (
     <div
-      className={`flex-1 space-y-1.5 overflow-hidden rounded-md px-2.5 py-2 ${props.palette.plate}`}
+      className={`relative flex-1 overflow-hidden rounded-md px-2.5 py-2 ${props.palette.plate}`}
       style={plateStyle()}
     >
-      <p
-        className={`whitespace-pre-wrap font-card text-[13.5px] leading-snug ${props.palette.plateText}`}
-      >
-        {props.ability}
-      </p>
-      {props.flavor && (
-        <p
-          className={`font-card text-[12.5px] italic leading-snug opacity-80 ${props.palette.plateText}`}
+      {props.essenceId && (
+        <div
+          data-testid="watermark"
+          className={`pointer-events-none absolute inset-0 flex items-center justify-center ${props.palette.plateText}`}
+          style={{ opacity: 0.08 }}
         >
-          {props.flavor}
-        </p>
+          <EssenceGlyph essence={props.essenceId} size={120} />
+        </div>
       )}
+      <div className="relative space-y-1.5">
+        <p
+          className={`whitespace-pre-wrap font-card text-[13.5px] leading-snug ${props.palette.plateText}`}
+        >
+          {props.ability}
+        </p>
+        {props.flavor && (
+          <p
+            className={`font-card text-[12.5px] italic leading-snug opacity-80 ${props.palette.plateText}`}
+          >
+            {props.flavor}
+          </p>
+        )}
+      </div>
     </div>
   );
 }
@@ -118,12 +155,33 @@ export function ArcaneStatBadge(props: { might: number; ward: number; palette: E
   return (
     <div
       data-testid="stat-badge"
-      className={`absolute bottom-2.5 right-3.5 whitespace-nowrap rounded-full px-3 py-0.5 font-display text-[15px] font-bold shadow-lg ${props.palette.plate}`}
-      style={plateStyle()}
+      className="absolute right-3 bottom-[22px] rounded-full p-[2px] shadow-lg"
+      style={{
+        backgroundImage:
+          'conic-gradient(from 210deg, #f0e0a0, #8a6a2f 25%, #f6df8a 50%, #6a4f1f 75%, #f0e0a0)',
+      }}
     >
-      <span className={props.palette.plateText}>
-        {props.might} / {props.ward}
-      </span>
+      <div
+        className={`whitespace-nowrap rounded-full px-3 py-0.5 font-display text-[15px] font-bold ${props.palette.plate}`}
+        style={plateStyle()}
+      >
+        <span className={props.palette.plateText} style={{ textShadow: ENGRAVED_SHADOW }}>
+          {props.might} / {props.ward}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+/** Tiny print line at the card foot — collector number, dedication, year. */
+export function ArcaneCollectorStrip(props: { text: string }) {
+  return (
+    <div
+      data-testid="collector-strip"
+      className="flex items-center justify-between px-1 pt-1 font-card text-[8px] tracking-[0.14em] text-white/70 uppercase"
+    >
+      <span className="truncate">{props.text}</span>
+      <span className="shrink-0 pl-2">Cartis</span>
     </div>
   );
 }

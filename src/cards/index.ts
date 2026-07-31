@@ -2,9 +2,11 @@ import { arcaneTemplate } from './arcane/template';
 import { listTemplates, registerTemplate } from './registry';
 
 export { ArcaneCard } from './arcane/ArcaneCard';
+export { CornerFiligree, EssenceGlyph } from './arcane/glyphs';
 export { ESSENCES, type EssenceId, type EssencePalette, paletteFor } from './arcane/palette';
 export {
   ArcaneArtWindow,
+  ArcaneCollectorStrip,
   ArcaneCostPips,
   ArcaneRulesBox,
   ArcaneStatBadge,
@@ -13,6 +15,7 @@ export {
   RARITIES,
   type RarityId,
   rarityFrom,
+  rarityGemStyle,
 } from './arcane/parts';
 export { arcaneTemplate } from './arcane/template';
 export { ENGRAVED_SHADOW, titleSizeFor } from './arcane/typography';

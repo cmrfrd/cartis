@@ -1,9 +1,11 @@
 import { Component } from '@expressive/react';
 import { CardSurface } from '../base/CardSurface';
 import type { CardData } from '../types';
+import { CornerFiligree } from './glyphs';
 import { paletteFor } from './palette';
 import {
   ArcaneArtWindow,
+  ArcaneCollectorStrip,
   ArcaneRulesBox,
   ArcaneStatBadge,
   ArcaneTitleBar,
@@ -56,6 +58,7 @@ export class ArcaneCard extends Component {
         text={String(data.typeLine ?? '')}
         rarity={rarityFrom(data.rarity)}
         palette={palette}
+        essenceId={String(data.essence ?? 'relic')}
       />
     );
   }
@@ -67,6 +70,7 @@ export class ArcaneCard extends Component {
         ability={String(data.ability ?? '')}
         flavor={String(data.flavor ?? '')}
         palette={palette}
+        essenceId={String(data.essence ?? 'relic')}
       />
     );
   }
@@ -82,17 +86,28 @@ export class ArcaneCard extends Component {
     );
   }
 
+  CollectorStrip() {
+    const { data } = this;
+    return <ArcaneCollectorStrip text={String(data.collector ?? '001/001')} />;
+  }
+
   render() {
     const { holo, palette } = this;
     return (
       <CardSurface holo={holo} frameClass={palette.frame}>
-        <div className="flex h-full flex-col gap-1.5 p-3.5">
+        <div className="flex h-full flex-col gap-1.5 p-3 pb-1.5">
           <this.TitleBar />
           <this.ArtWindow />
           <this.TypeLine />
           <this.RulesBox />
+          <this.CollectorStrip />
         </div>
         <this.StatBadge />
+        <CornerFiligree className="pointer-events-none absolute top-1 left-1 text-[#d4af37]/45" />
+        <CornerFiligree
+          className="pointer-events-none absolute top-1 right-1 text-[#d4af37]/45"
+          style={{ transform: 'scaleX(-1)' }}
+        />
       </CardSurface>
     );
   }
