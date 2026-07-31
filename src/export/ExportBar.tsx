@@ -1,8 +1,9 @@
 import { Component, get } from '@expressive/react';
 import { AppShell } from '../app/AppShell';
 import type { CardArchive, ExportFormat } from '../storage/CardArchive';
-import { Button } from '../ui';
-import { downloadBlob, exportFileName, renderCardBlob } from './exportCard';
+import { Button, SelectInput } from '../ui';
+import type { ExportDpi } from './exportCard';
+import { downloadBlob, exportFileName, renderCardBlob, renderSheetBlob } from './exportCard';
 
 const FORMATS: readonly ExportFormat[] = ['png', 'webp', 'jpeg'];
 
@@ -12,6 +13,22 @@ export class ExportBar extends Component {
   cardName = '';
   target?: () => HTMLElement | null = undefined;
   note = '';
+  dpi: ExportDpi = 300;
+  bleed = false;
+
+  async #deliver(blob: Blob, fileName: string, format: ExportFormat, intoArchive?: CardArchive) {
+    downloadBlob(blob, fileName);
+    const archive = intoArchive ?? this.shell?.archive;
+    if (archive) {
+      await archive.saveExport({
+        name: fileName,
+        format,
+        bytes: await blob.arrayBuffer(),
+        type: blob.type,
+      });
+    }
+    this.note = `Exported ${fileName} — saved to Gallery.`;
+  }
 
   /** `intoArchive` is the DI seam for headless tests; context supplies the default. */
   async exportAs(format: ExportFormat, intoArchive?: CardArchive) {
@@ -22,26 +39,42 @@ export class ExportBar extends Component {
     }
     this.note = 'Rendering…';
     try {
-      const blob = await renderCardBlob(node, format);
-      const fileName = exportFileName(this.cardName, format);
-      downloadBlob(blob, fileName);
-      const archive = intoArchive ?? this.shell?.archive;
-      if (archive) {
-        await archive.saveExport({
-          name: fileName,
-          format,
-          bytes: await blob.arrayBuffer(),
-          type: blob.type,
-        });
-      }
-      this.note = `Exported ${fileName} — saved to Gallery.`;
+      const blob = await renderCardBlob(node, format, { dpi: this.dpi, bleed: this.bleed });
+      const suffix = `${this.dpi === 600 ? '-600dpi' : ''}${this.bleed ? '-bleed' : ''}`;
+      await this.#deliver(
+        blob,
+        exportFileName(this.cardName + suffix, format),
+        format,
+        intoArchive,
+      );
+    } catch (cause) {
+      this.note = cause instanceof Error ? cause.message : String(cause);
+    }
+  }
+
+  /** 3×3 cut sheet on A4 at 300 DPI. */
+  async exportSheet(intoArchive?: CardArchive) {
+    const node = this.target?.();
+    if (!node) {
+      this.note = 'Nothing to export yet.';
+      return;
+    }
+    this.note = 'Rendering sheet…';
+    try {
+      const blob = await renderSheetBlob(node);
+      await this.#deliver(
+        blob,
+        exportFileName(`${this.cardName}-sheet`, 'png'),
+        'png',
+        intoArchive,
+      );
     } catch (cause) {
       this.note = cause instanceof Error ? cause.message : String(cause);
     }
   }
 
   render() {
-    const { note } = this;
+    const { note, dpi, bleed } = this;
     return (
       <div className="flex flex-col items-center gap-2">
         <div className="flex items-center gap-2">
@@ -51,6 +84,31 @@ export class ExportBar extends Component {
               {format.toUpperCase()}
             </Button>
           ))}
+          <Button tone="ghost" onClick={() => void this.exportSheet()}>
+            Sheet 3×3
+          </Button>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="w-28">
+            <SelectInput
+              value={String(dpi)}
+              onValue={(v) => {
+                this.dpi = v === '600' ? 600 : 300;
+              }}
+              options={[
+                { value: '300', label: '300 DPI' },
+                { value: '600', label: '600 DPI' },
+              ]}
+            />
+          </div>
+          <Button
+            tone={bleed ? 'accent' : 'ghost'}
+            onClick={() => {
+              this.bleed = !this.bleed;
+            }}
+          >
+            {bleed ? 'Bleed + marks: on' : 'Bleed + marks: off'}
+          </Button>
         </div>
         {note && <p className="text-xs text-ink-dim">{note}</p>}
       </div>
