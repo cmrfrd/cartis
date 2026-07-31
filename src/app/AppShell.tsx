@@ -1,5 +1,7 @@
 import { Component } from '@expressive/react';
 import type { ReactNode } from 'react';
+import { CardArchive, type StoredCard } from '../storage/CardArchive';
+import { ImageLibrary } from '../storage/ImageLibrary';
 import { EmptyState, TabBar } from '../ui';
 
 export type ViewId = 'builder' | 'editor' | 'images' | 'gallery';
@@ -13,6 +15,11 @@ const VIEW_TABS: readonly { id: ViewId; label: string }[] = [
 
 export class AppShell extends Component {
   view: ViewId = 'builder';
+  /** Adopted child models — AppShell owns their lifecycle (skills: child States attach as class fields). */
+  library = new ImageLibrary();
+  archive = new CardArchive();
+  /** Set by the Gallery to hand a saved card to the Builder (consumed in BuilderView.mount, Task 10). */
+  pendingCard?: StoredCard = undefined;
 
   render() {
     const { view } = this;
