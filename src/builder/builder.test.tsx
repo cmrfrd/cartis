@@ -61,16 +61,21 @@ describe('BuilderView', () => {
     unmount();
   });
 
-  it('toggling stats off hides the badge and the might/ward inputs', async () => {
+  it('toggling stats off hides the badge and nests might/ward inside the section', async () => {
     const { container, unmount } = await mountApp();
     const visiblePane = () => container.querySelector('main > div:not(.hidden)');
+    const numberInputs = () => container.querySelectorAll('aside input[type="number"]');
+    const section = () => container.querySelector('[data-testid="toggle-section"]');
+    expect(section()).not.toBeNull();
+    expect(section()?.querySelectorAll('input[type="number"]')).toHaveLength(2); // might + ward
     expect(visiblePane()?.querySelector('[data-testid="stat-badge"]')).not.toBeNull();
-    expect(container.textContent).toContain('Might');
+    expect(numberInputs()).toHaveLength(3); // cost + might + ward
     await click(container.querySelector('aside [role="switch"]'));
     expect(visiblePane()?.querySelector('[data-testid="stat-badge"]')).toBeNull();
-    expect(container.textContent).not.toContain('Might');
+    expect(numberInputs()).toHaveLength(1); // cost only
     await click(container.querySelector('aside [role="switch"]'));
     expect(visiblePane()?.querySelector('[data-testid="stat-badge"]')).not.toBeNull();
+    expect(numberInputs()).toHaveLength(3);
     unmount();
   });
 

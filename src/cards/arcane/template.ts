@@ -23,7 +23,7 @@ export const arcaneTemplate: CardTemplate = {
     { kind: 'text', key: 'typeLine', label: 'Type line', placeholder: 'Hero — Baker' },
     { kind: 'textarea', key: 'ability', label: 'Ability', rows: 3 },
     { kind: 'textarea', key: 'flavor', label: 'Flavor text', rows: 2 },
-    { kind: 'toggle', key: 'showStats', label: 'Include might / ward' },
+    { kind: 'toggle', key: 'showStats', label: 'Might / Ward' },
     {
       kind: 'number',
       key: 'might',
