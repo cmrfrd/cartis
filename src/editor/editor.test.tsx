@@ -31,6 +31,41 @@ describe('EditorView (headless)', () => {
   });
 });
 
+describe('EditorView agent', () => {
+  it('applies agent-returned code to the buffer and recompiles', async () => {
+    const editor = EditorView.new({ debounceMs: 0 });
+    editor.prompt = 'a spooky umbral card';
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({ code: 'export default function Spooky() { return <p>boo</p> }' }),
+        ),
+    ) as unknown as typeof fetch;
+    await editor.runAgent(fetchImpl);
+    expect(editor.source).toContain('Spooky');
+    await vi.waitFor(() => {
+      expect(editor.compileError).toBe('');
+      expect(editor.card).toBeDefined();
+    });
+    expect(editor.agentNote).toContain('Applied');
+    editor.set(null);
+  });
+
+  it('surfaces agent errors without touching the buffer', async () => {
+    const editor = EditorView.new({ debounceMs: 0 });
+    editor.prompt = 'anything';
+    const before = editor.source;
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ error: 'opencode is not running' }), { status: 500 }),
+    ) as unknown as typeof fetch;
+    await editor.runAgent(fetchImpl);
+    expect(editor.source).toBe(before);
+    expect(editor.agentNote).toContain('opencode is not running');
+    editor.set(null);
+  });
+});
+
 describe('Sandbox', () => {
   it('renders the compiled card', async () => {
     const result = compileCardSource('export default function C() { return <p>sandboxed</p> }');
