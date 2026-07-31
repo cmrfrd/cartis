@@ -5,6 +5,7 @@ import { Component, get, ref } from '@expressive/react';
 import { AppShell } from '../app/AppShell';
 import { getTemplate, listTemplates } from '../cards/registry';
 import type { CardData, CardTemplate, FieldValue } from '../cards/types';
+import { ExportBar } from '../export/ExportBar';
 import type { StoredCard } from '../storage/CardArchive';
 import { Button, Panel, SelectInput } from '../ui';
 import { FormRenderer } from './FormRenderer';
@@ -148,7 +149,7 @@ function PortraitSlot(props: { fieldKey: string }) {
 }
 
 function BuilderPreview() {
-  const { is: builder, template, resolved, holo, previewEl } = BuilderView.get();
+  const { is: builder, template, resolved, holo, data, previewEl } = BuilderView.get();
   const Render = template.Render;
   return (
     <section className="flex min-w-0 flex-1 items-center justify-center overflow-auto p-6">
@@ -166,6 +167,10 @@ function BuilderPreview() {
             {holo ? 'Holo: on' : 'Holo: off'}
           </Button>
         </div>
+        <ExportBar
+          cardName={String(data.name ?? 'card')}
+          target={() => previewEl.current ?? null}
+        />
       </div>
     </section>
   );
