@@ -1,9 +1,10 @@
 import type { CSSProperties } from 'react';
 
 /**
- * Procedural print textures: SVG feTurbulence encoded as data-URIs.
- * Zero binary assets, deterministic (fixed seeds), fully offline, and they
- * rasterize through html-to-image — the preview IS the print.
+ * Procedural print textures. Authored as SVG feTurbulence data-URIs, then
+ * pre-rasterized to PNG data-URIs at app startup (prepareTextures) because the
+ * export pipeline (html-to-image) cannot rasterize SVG filters — it painted
+ * them as solid black. With plain PNGs, the preview IS the print.
  */
 
 function svgDataUrl(svg: string): string {
@@ -29,40 +30,69 @@ export function noiseTextureUrl(opts: {
   return svgDataUrl(svg);
 }
 
-/** Soft large-scale mottling — aged parchment discoloration. */
-export const PARCHMENT_MOTTLE = noiseTextureUrl({
-  frequency: '0.012 0.017',
-  octaves: 5,
-  seed: 7,
-  alpha: 0.1,
-});
+const TILE = 240;
 
-/** Fine paper grain. */
-export const PAPER_GRAIN = noiseTextureUrl({
-  frequency: '0.9',
-  octaves: 2,
-  seed: 11,
-  alpha: 0.05,
-});
+/** Mutable registry: starts as SVG URIs, upgraded to PNG URIs by prepareTextures(). */
+export const TEXTURES = {
+  /** Soft large-scale mottling — aged parchment discoloration. */
+  parchment: noiseTextureUrl({ frequency: '0.012 0.017', octaves: 5, seed: 7, alpha: 0.1 }),
+  /** Fine paper grain. */
+  grain: noiseTextureUrl({ frequency: '0.9', octaves: 2, seed: 11, alpha: 0.05 }),
+  /** Directional weave for the frame — printed linen stock. */
+  linen: noiseTextureUrl({ frequency: '0.09 0.55', octaves: 3, seed: 23, alpha: 0.16 }),
+};
 
-/** Directional weave for the frame — printed linen stock. */
-export const LINEN_TEXTURE = noiseTextureUrl({
-  frequency: '0.09 0.55',
-  octaves: 3,
-  seed: 23,
-  alpha: 0.16,
-});
+async function rasterizeToPng(cssUrl: string): Promise<string> {
+  const src = cssUrl.slice('url("'.length, -'")'.length);
+  const image = new Image();
+  await new Promise<void>((resolve, reject) => {
+    image.onload = () => resolve();
+    image.onerror = () => reject(new Error('texture image failed to load'));
+    image.src = src;
+  });
+  const canvas = document.createElement('canvas');
+  canvas.width = TILE;
+  canvas.height = TILE;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('canvas 2d unavailable');
+  ctx.drawImage(image, 0, 0, TILE, TILE);
+  return `url("${canvas.toDataURL('image/png')}")`;
+}
+
+/**
+ * Upgrade every texture to a plain PNG before first render (called from main.tsx).
+ * Environments without canvas (tests) keep the SVG originals — fidelity there is
+ * asserted visually, not in unit tests.
+ */
+export async function prepareTextures(): Promise<void> {
+  await Promise.all(
+    (Object.keys(TEXTURES) as (keyof typeof TEXTURES)[]).map(async (key) => {
+      try {
+        TEXTURES[key] = await rasterizeToPng(TEXTURES[key]);
+      } catch {
+        // keep the SVG fallback
+      }
+    }),
+  );
+}
 
 /** Plate material: parchment mottle + grain, ink-darkened rim, raised bevel. */
-export const plateSurface: CSSProperties = {
-  backgroundImage: `${PARCHMENT_MOTTLE}, ${PAPER_GRAIN}`,
-  boxShadow: [
-    'inset 0 0 8px rgba(62, 38, 16, 0.28)', // ink pooling at the rim
-    'inset 0 1px 1px rgba(255, 255, 255, 0.55)', // bevel light (top)
-    'inset 0 -1px 2px rgba(62, 38, 16, 0.3)', // bevel shade (bottom)
-    '0 1px 2px rgba(0, 0, 0, 0.4)', // lift off the frame
-  ].join(', '),
-};
+export function plateStyle(): CSSProperties {
+  return {
+    backgroundImage: `${TEXTURES.parchment}, ${TEXTURES.grain}`,
+    boxShadow: [
+      'inset 0 0 8px rgba(62, 38, 16, 0.28)', // ink pooling at the rim
+      'inset 0 1px 1px rgba(255, 255, 255, 0.55)', // bevel light (top)
+      'inset 0 -1px 2px rgba(62, 38, 16, 0.3)', // bevel shade (bottom)
+      '0 1px 2px rgba(0, 0, 0, 0.4)', // lift off the frame
+    ].join(', '),
+  };
+}
+
+/** Frame stock: linen weave at plain alpha (no blend modes — they break in export). */
+export function frameLinenStyle(): CSSProperties {
+  return { backgroundImage: TEXTURES.linen, opacity: 0.55 };
+}
 
 /** Press-dot micro pattern; use at very low opacity over the whole card. */
 export const halftoneSurface: CSSProperties = {

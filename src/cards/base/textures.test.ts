@@ -1,20 +1,21 @@
 import { describe, expect, it } from 'vitest';
 import {
+  frameLinenStyle,
   halftoneSurface,
-  LINEN_TEXTURE,
   noiseTextureUrl,
-  PAPER_GRAIN,
-  PARCHMENT_MOTTLE,
-  plateSurface,
+  plateStyle,
+  prepareTextures,
+  TEXTURES,
 } from './textures';
 
 describe('procedural textures', () => {
-  it('produces css url() data-URIs with an encoded turbulence filter', () => {
-    for (const texture of [PARCHMENT_MOTTLE, PAPER_GRAIN, LINEN_TEXTURE]) {
-      expect(texture.startsWith('url("data:image/svg+xml,')).toBe(true);
-      expect(texture).toContain(encodeURIComponent('feTurbulence'));
-      expect(texture).toContain('%23n'); // filter reference survives encoding
+  it('authors css url() data-URIs with an encoded turbulence filter', () => {
+    for (const texture of Object.values(TEXTURES)) {
+      expect(texture.startsWith('url("data:image/')).toBe(true);
     }
+    const fresh = noiseTextureUrl({ frequency: '0.5', octaves: 3, seed: 1, alpha: 0.2 });
+    expect(fresh).toContain(encodeURIComponent('feTurbulence'));
+    expect(fresh).toContain('%23n'); // filter reference survives encoding
   });
 
   it('is deterministic for fixed options', () => {
@@ -23,9 +24,17 @@ describe('procedural textures', () => {
     expect(a).toBe(b);
   });
 
-  it('exposes layered plate material and halftone pattern', () => {
-    expect(plateSurface.backgroundImage).toContain('data:image/svg+xml');
-    expect(String(plateSurface.boxShadow)).toContain('inset');
+  it('prepareTextures resolves even without canvas support (keeps svg fallback)', async () => {
+    await expect(prepareTextures()).resolves.toBeUndefined();
+    for (const texture of Object.values(TEXTURES)) {
+      expect(texture.startsWith('url("data:image/')).toBe(true);
+    }
+  });
+
+  it('exposes layered material styles', () => {
+    expect(plateStyle().backgroundImage).toContain('data:image/');
+    expect(String(plateStyle().boxShadow)).toContain('inset');
+    expect(frameLinenStyle().backgroundImage).toContain('data:image/');
     expect(halftoneSurface.backgroundSize).toBe('4px 4px');
   });
 });

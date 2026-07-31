@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { halftoneSurface, LINEN_TEXTURE } from './textures';
+import { frameLinenStyle, halftoneSurface } from './textures';
 
 /** Trading-card preview geometry: 2.5"×3.5" at 150 px/inch; exports double it to 300 DPI. */
 export const CARD_WIDTH = 375;
@@ -25,8 +25,8 @@ export function CardSurface(props: { holo?: boolean; frameClass?: string; childr
       >
         {/* linen stock texture over the frame gradient */}
         <div
-          className="pointer-events-none absolute inset-0 rounded-[9px] opacity-70 mix-blend-overlay"
-          style={{ backgroundImage: LINEN_TEXTURE }}
+          className="pointer-events-none absolute inset-0 rounded-[9px]"
+          style={frameLinenStyle()}
         />
         <div className="relative h-full">{props.children}</div>
       </div>
