@@ -1,12 +1,14 @@
 import type { Component } from '@expressive/react';
+import { Button as NbButton } from '@/components/ui/button';
 
-const TONES = {
-  accent: 'bg-accent text-surface hover:brightness-110',
-  ghost: 'border border-edge text-ink hover:border-accent hover:text-accent',
-  danger: 'border border-red-900 text-red-300 hover:bg-red-950',
+/** Cartis tones mapped onto neobrutalism variants. */
+const TONE_VARIANT = {
+  accent: 'default',
+  ghost: 'neutral',
+  danger: 'neutral',
 } as const;
 
-export type ButtonTone = keyof typeof TONES;
+export type ButtonTone = keyof typeof TONE_VARIANT;
 
 export function Button(props: {
   onClick: () => void;
@@ -14,14 +16,16 @@ export function Button(props: {
   tone?: ButtonTone;
   disabled?: boolean;
 }) {
+  const tone = props.tone ?? 'accent';
   return (
-    <button
-      type="button"
+    <NbButton
+      size="sm"
+      variant={TONE_VARIANT[tone]}
       disabled={props.disabled === true}
       onClick={props.onClick}
-      className={`rounded px-3 py-1.5 text-sm font-medium transition disabled:opacity-40 ${TONES[props.tone ?? 'accent']}`}
+      className={tone === 'danger' ? 'text-red-400' : undefined}
     >
       {props.children}
-    </button>
+    </NbButton>
   );
 }

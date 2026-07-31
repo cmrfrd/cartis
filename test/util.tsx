@@ -23,9 +23,14 @@ export async function tick(ms = 0): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
+/** Full press sequence like a real browser — Radix components activate on mousedown/focus. */
 export async function click(el: Element | null): Promise<void> {
   if (!el) throw new Error('click: element not found');
-  el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+  const init: MouseEventInit = { bubbles: true, cancelable: true, button: 0 };
+  el.dispatchEvent(new MouseEvent('mousedown', init));
+  if (el instanceof HTMLElement) el.focus();
+  el.dispatchEvent(new MouseEvent('mouseup', init));
+  el.dispatchEvent(new MouseEvent('click', init));
   await tick();
 }
 

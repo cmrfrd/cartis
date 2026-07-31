@@ -31,6 +31,48 @@
   src: url("../assets/fonts/eb-garamond-latin-600-normal.woff2") format("woff2");
 }
 
+/* ---- neobrutalism system (app chrome only; cards keep their own tokens) ---- */
+:root {
+  --border-radius: 5px;
+  --box-shadow-x: 3px;
+  --box-shadow-y: 3px;
+  --reverse-box-shadow-x: -3px;
+  --reverse-box-shadow-y: -3px;
+  --heading-font-weight: 700;
+  --base-font-weight: 500;
+
+  --background: #14161f;
+  --secondary-background: #1d2130;
+  --foreground: #e8e4d8;
+  --main: #d9a441;
+  --main-foreground: #14161f;
+  --border: #000000;
+  --ring: #e8e4d8;
+  --overlay: rgba(0, 0, 0, 0.8);
+  --shadow: var(--box-shadow-x) var(--box-shadow-y) 0px 0px var(--border);
+}
+
+@theme inline {
+  --color-main: var(--main);
+  --color-background: var(--background);
+  --color-secondary-background: var(--secondary-background);
+  --color-foreground: var(--foreground);
+  --color-main-foreground: var(--main-foreground);
+  --color-border: var(--border);
+  --color-overlay: var(--overlay);
+  --color-ring: var(--ring);
+
+  --spacing-boxShadowX: var(--box-shadow-x);
+  --spacing-boxShadowY: var(--box-shadow-y);
+  --spacing-reverseBoxShadowX: var(--reverse-box-shadow-x);
+  --spacing-reverseBoxShadowY: var(--reverse-box-shadow-y);
+
+  --radius-base: var(--border-radius);
+  --shadow-shadow: var(--shadow);
+  --font-weight-base: var(--base-font-weight);
+  --font-weight-heading: var(--heading-font-weight);
+}
+
 @theme {
   --color-surface: #14161f;
   --color-panel: #1d2130;

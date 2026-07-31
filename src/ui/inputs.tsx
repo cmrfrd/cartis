@@ -1,5 +1,6 @@
-const INPUT_CLASS =
-  'w-full rounded border border-edge bg-surface px-2.5 py-1.5 text-sm text-ink placeholder:text-ink-dim focus:border-accent focus:outline-none';
+import { Input as NbInput } from '@/components/ui/input';
+import { Switch as NbSwitch } from '@/components/ui/switch';
+import { Textarea as NbTextarea } from '@/components/ui/textarea';
 
 export function TextInput(props: {
   value: string;
@@ -8,9 +9,8 @@ export function TextInput(props: {
   maxLength?: number;
 }) {
   return (
-    <input
+    <NbInput
       type="text"
-      className={INPUT_CLASS}
       value={props.value}
       placeholder={props.placeholder}
       maxLength={props.maxLength}
@@ -26,11 +26,11 @@ export function TextAreaInput(props: {
   placeholder?: string;
 }) {
   return (
-    <textarea
-      className={`${INPUT_CLASS} resize-none`}
+    <NbTextarea
       value={props.value}
       rows={props.rows ?? 3}
       placeholder={props.placeholder}
+      className="resize-none"
       onChange={(e) => props.onValue(e.target.value)}
     />
   );
@@ -43,9 +43,8 @@ export function NumberInput(props: {
   max: number;
 }) {
   return (
-    <input
+    <NbInput
       type="number"
-      className={INPUT_CLASS}
       value={props.value}
       min={props.min}
       max={props.max}
@@ -58,26 +57,7 @@ export function NumberInput(props: {
   );
 }
 
-export function ToggleInput(props: { value: boolean; onValue: (v: boolean) => void }) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={props.value}
-      onClick={() => props.onValue(!props.value)}
-      className={`relative h-6 w-11 shrink-0 rounded-full border transition ${
-        props.value ? 'border-accent bg-accent/80' : 'border-edge bg-surface'
-      }`}
-    >
-      <span
-        className={`absolute top-0.5 left-0.5 h-[18px] w-[18px] rounded-full bg-ink transition-transform ${
-          props.value ? 'translate-x-5' : ''
-        }`}
-      />
-    </button>
-  );
-}
-
+/** Native select restyled neobrutalist — keeps tests and keyboard UX simple. */
 export function SelectInput(props: {
   value: string;
   onValue: (v: string) => void;
@@ -85,7 +65,7 @@ export function SelectInput(props: {
 }) {
   return (
     <select
-      className={INPUT_CLASS}
+      className="w-full rounded-base border-2 border-border bg-secondary-background px-2.5 py-1.5 font-base text-foreground text-sm shadow-shadow focus:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
       value={props.value}
       onChange={(e) => props.onValue(e.target.value)}
     >
@@ -96,4 +76,8 @@ export function SelectInput(props: {
       ))}
     </select>
   );
+}
+
+export function ToggleInput(props: { value: boolean; onValue: (v: boolean) => void }) {
+  return <NbSwitch checked={props.value} onCheckedChange={props.onValue} />;
 }

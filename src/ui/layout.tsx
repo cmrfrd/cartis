@@ -1,12 +1,15 @@
 import type { Component } from '@expressive/react';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Label } from '@/components/ui/label';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 export function FieldRow(props: { label: string; children?: Component.Node }) {
   return (
     // biome-ignore lint/a11y/noLabelWithoutControl: the control is nested via children (implicit association)
-    <label className="flex flex-col gap-1">
-      <span className="text-xs font-medium uppercase tracking-wide text-ink-dim">
-        {props.label}
-      </span>
+    <label className="flex flex-col gap-1.5">
+      <Label asChild>
+        <span className="text-xs uppercase tracking-wide">{props.label}</span>
+      </Label>
       {props.children}
     </label>
   );
@@ -14,14 +17,16 @@ export function FieldRow(props: { label: string; children?: Component.Node }) {
 
 export function Panel(props: { title?: string; children?: Component.Node; className?: string }) {
   return (
-    <section className={`rounded-lg border border-edge bg-panel p-4 ${props.className ?? ''}`}>
+    <Card className={`gap-3 py-4 ${props.className ?? ''}`}>
       {props.title && (
-        <h2 className="mb-3 font-display text-sm uppercase tracking-widest text-accent">
-          {props.title}
-        </h2>
+        <CardHeader className="px-4">
+          <CardTitle className="font-display text-sm uppercase tracking-widest">
+            {props.title}
+          </CardTitle>
+        </CardHeader>
       )}
-      {props.children}
-    </section>
+      <CardContent className="px-4">{props.children}</CardContent>
+    </Card>
   );
 }
 
@@ -31,22 +36,15 @@ export function TabBar<Id extends string>(props: {
   onSelect: (id: Id) => void;
 }) {
   return (
-    <nav className="flex gap-1">
-      {props.tabs.map((tab) => (
-        <button
-          key={tab.id}
-          type="button"
-          onClick={() => props.onSelect(tab.id)}
-          className={`rounded px-3 py-1.5 text-sm transition ${
-            tab.id === props.active
-              ? 'bg-panel font-semibold text-accent'
-              : 'text-ink-dim hover:text-ink'
-          }`}
-        >
-          {tab.label}
-        </button>
-      ))}
-    </nav>
+    <Tabs value={props.active} onValueChange={(id) => props.onSelect(id as Id)}>
+      <TabsList>
+        {props.tabs.map((tab) => (
+          <TabsTrigger key={tab.id} value={tab.id}>
+            {tab.label}
+          </TabsTrigger>
+        ))}
+      </TabsList>
+    </Tabs>
   );
 }
 
@@ -56,16 +54,18 @@ export function Spinner(props: { 'data-testid'?: string }) {
       data-testid={props['data-testid']}
       role="status"
       aria-label="loading"
-      className="inline-block h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-accent border-t-transparent"
+      className="inline-block h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-border border-t-main"
     />
   );
 }
 
 export function EmptyState(props: { message: string; hint?: string }) {
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-1 p-8 text-center">
-      <p className="text-sm text-ink-dim">{props.message}</p>
-      {props.hint && <p className="text-xs text-ink-dim/70">{props.hint}</p>}
+    <div className="flex h-full flex-col items-center justify-center gap-2 p-8 text-center">
+      <div className="rounded-base border-2 border-border bg-secondary-background px-5 py-4 shadow-shadow">
+        <p className="font-base text-foreground/80 text-sm">{props.message}</p>
+        {props.hint && <p className="mt-1 text-foreground/50 text-xs">{props.hint}</p>}
+      </div>
     </div>
   );
 }
