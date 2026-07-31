@@ -13,6 +13,10 @@ import {
   rarityFrom,
 } from './parts';
 
+/** Prismatic outer glow reserved for mythics; the 1.5px ring survives print crops. */
+const MYTHIC_AURA =
+  '0 0 0 1.5px rgba(255, 150, 60, 0.85), 0 0 16px 2px rgba(194, 37, 37, 0.55), 0 0 30px 8px rgba(255, 180, 94, 0.28), 0 10px 24px rgba(0, 0, 0, 0.5)';
+
 /**
  * The Arcane kit's card. The PascalCase methods here PASS the skills' extension test
  * (react/component.md): each is a renderer a subclass would genuinely replace — that is
@@ -92,9 +96,15 @@ export class ArcaneCard extends Component {
   }
 
   render() {
-    const { holo, palette } = this;
+    const { data, holo, palette } = this;
+    const mythic = rarityFrom(data.rarity) === 'mythic';
     return (
-      <CardSurface holo={holo} frameClass={palette.frame}>
+      <CardSurface
+        holo={holo}
+        foilVariant={data.foilStyle === 'etched' ? 'etched' : 'full'}
+        frameClass={palette.frame}
+        aura={mythic ? MYTHIC_AURA : undefined}
+      >
         <div className="flex h-full flex-col gap-1.5 p-3 pb-1.5">
           <this.TitleBar />
           <this.ArtWindow />

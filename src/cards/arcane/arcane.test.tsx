@@ -69,6 +69,34 @@ describe('ArcaneCard', () => {
   });
 });
 
+describe('foil variants and mythic aura', () => {
+  it('selects the etched foil layer from card data', async () => {
+    const { container, unmount } = mount(
+      <ArcaneCard data={{ ...arcaneTemplate.defaults, foilStyle: 'etched' }} holo />,
+    );
+    await tick();
+    expect(container.querySelector('[data-holo-variant="etched"]')).not.toBeNull();
+    unmount();
+  });
+
+  it('defaults to the full-gloss foil layer', async () => {
+    const { container, unmount } = mount(<ArcaneCard data={arcaneTemplate.defaults} holo />);
+    await tick();
+    expect(container.querySelector('[data-holo-variant="full"]')).not.toBeNull();
+    unmount();
+  });
+
+  it('gives mythic cards a prismatic aura', async () => {
+    const { container, unmount } = mount(
+      <ArcaneCard data={{ ...arcaneTemplate.defaults, rarity: 'mythic' }} />,
+    );
+    await tick();
+    const root = container.querySelector('[data-card-root="true"]') as HTMLElement;
+    expect(root.style.boxShadow).toContain('rgba(194, 37, 37');
+    unmount();
+  });
+});
+
 describe('essence glyphs and rarity gems', () => {
   it('renders a distinct glyph for every essence', async () => {
     for (const essence of ESSENCES) {
