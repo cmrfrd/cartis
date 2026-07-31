@@ -141,7 +141,7 @@ describe('ExportBar', () => {
       expect(archive.ready).toBe(true);
     });
     const node = document.createElement('div');
-    const bar = ExportBar.new({ cardName: 'Nyra', target: () => node });
+    const bar = ExportBar.new({ cardName: 'Nyra', target: { current: node } });
     await bar.exportAs('png', archive);
     expect(archive.exports).toHaveLength(1);
     expect(archive.exports[0]?.name).toBe('nyra.png');
@@ -157,7 +157,7 @@ describe('ExportBar', () => {
       expect(archive.ready).toBe(true);
     });
     const node = document.createElement('div');
-    const bar = ExportBar.new({ cardName: 'Nyra', target: () => node });
+    const bar = ExportBar.new({ cardName: 'Nyra', target: { current: node } });
     bar.dpi = 600;
     // bleed composition needs a canvas; keep bleed off in this happy-dom test
     await bar.exportAs('png', archive);

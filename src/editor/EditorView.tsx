@@ -95,7 +95,7 @@ export class EditorView extends Component {
               <Sandbox card={card} />
             </div>
           </PreviewStage>
-          <ExportBar cardName="code-lab-card" target={() => previewEl.current ?? null} />
+          <ExportBar cardName="code-lab-card" target={previewEl} />
         </section>
       </div>
     );

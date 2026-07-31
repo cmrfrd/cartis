@@ -1,6 +1,6 @@
-import type { ReactNode } from 'react';
+import type { Component } from '@expressive/react';
 
-export function FieldRow(props: { label: string; children?: ReactNode }) {
+export function FieldRow(props: { label: string; children?: Component.Node }) {
   return (
     // biome-ignore lint/a11y/noLabelWithoutControl: the control is nested via children (implicit association)
     <label className="flex flex-col gap-1">
@@ -12,7 +12,7 @@ export function FieldRow(props: { label: string; children?: ReactNode }) {
   );
 }
 
-export function Panel(props: { title?: string; children?: ReactNode; className?: string }) {
+export function Panel(props: { title?: string; children?: Component.Node; className?: string }) {
   return (
     <section className={`rounded-lg border border-edge bg-panel p-4 ${props.className ?? ''}`}>
       {props.title && (
@@ -72,7 +72,7 @@ export function EmptyState(props: { message: string; hint?: string }) {
 
 /** Presentation surround for card previews: ambient light + floor shadow.
  *  Lives OUTSIDE the export target so none of it prints. */
-export function PreviewStage(props: { children?: ReactNode }) {
+export function PreviewStage(props: { children?: Component.Node }) {
   return (
     <div className="relative flex flex-col items-center">
       <div className="-z-10 absolute -inset-16 bg-[radial-gradient(ellipse_at_50%_42%,rgba(212,175,55,0.07),transparent_62%)]" />

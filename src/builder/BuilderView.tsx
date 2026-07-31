@@ -111,7 +111,7 @@ export class BuilderView extends Component {
 /** Implementation scoping per the skills: freestanding function components + .get(),
  *  NOT subcomponent methods (those are reserved for extension points like ArcaneCard's). */
 function BuilderForm() {
-  const { is: builder, template, templateId, data, savedNote, portraitKey } = BuilderView.get();
+  const { is: builder, template, templateId, savedNote, portraitKey } = BuilderView.get();
   return (
     <aside className="flex w-96 shrink-0 flex-col gap-4 overflow-y-auto border-r border-edge p-4">
       <Panel title="Template">
@@ -123,12 +123,7 @@ function BuilderForm() {
         <p className="mt-2 text-xs text-ink-dim">{template.description}</p>
       </Panel>
       <Panel title="Details">
-        <FormRenderer
-          fields={template.fields}
-          data={data}
-          onField={builder.setField}
-          imageSlot={(spec) => <PortraitSlot fieldKey={spec.key} />}
-        />
+        <FormRenderer />
       </Panel>
       {portraitKey && <PortraitSection fieldKey={portraitKey} />}
       <div className="flex items-center gap-3">
@@ -139,7 +134,7 @@ function BuilderForm() {
   );
 }
 
-function PortraitSlot(props: { fieldKey: string }) {
+export function PortraitSlot(props: { fieldKey: string }) {
   const { is: builder, data, portraitKey, shell } = BuilderView.get();
   const current = data[props.fieldKey];
   const url = (shell?.library.urls ?? {})[typeof current === 'string' ? current : ''];
@@ -196,7 +191,7 @@ function BuilderPreview() {
         </div>
         <ExportBar
           cardName={showBack ? 'cartis-card-back' : String(data.name ?? 'card')}
-          target={() => previewEl.current ?? null}
+          target={previewEl}
         />
       </div>
     </section>

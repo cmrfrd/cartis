@@ -11,7 +11,8 @@ const FORMATS: readonly ExportFormat[] = ['png', 'webp', 'jpeg'];
 export class ExportBar extends Component {
   shell = get(AppShell, false);
   cardName = '';
-  target?: () => HTMLElement | null = undefined;
+  /** The preview's ref() object — expressive data flow instead of a fetch closure. */
+  target?: { current: HTMLElement | null } = undefined;
   note = '';
   dpi: ExportDpi = 300;
   bleed = false;
@@ -32,7 +33,7 @@ export class ExportBar extends Component {
 
   /** `intoArchive` is the DI seam for headless tests; context supplies the default. */
   async exportAs(format: ExportFormat, intoArchive?: CardArchive) {
-    const node = this.target?.();
+    const node = this.target?.current ?? null;
     if (!node) {
       this.note = 'Nothing to export yet.';
       return;
@@ -54,7 +55,7 @@ export class ExportBar extends Component {
 
   /** 3×3 cut sheet on A4 at 300 DPI. */
   async exportSheet(intoArchive?: CardArchive) {
-    const node = this.target?.();
+    const node = this.target?.current ?? null;
     if (!node) {
       this.note = 'Nothing to export yet.';
       return;

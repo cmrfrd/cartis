@@ -1,4 +1,6 @@
-import type { PointerEvent, ReactNode } from 'react';
+import type { Component } from '@expressive/react';
+// PointerEvent stays a host (DOM) type — expressive has no equivalent.
+import type { PointerEvent } from 'react';
 import { frameLinenStyle, halftoneSurface } from './textures';
 
 /** Trading-card preview geometry: 2.5"×3.5" at 150 px/inch; exports double it to 300 DPI. */
@@ -34,7 +36,7 @@ export function CardSurface(props: {
   frameClass?: string;
   /** Extra outer glow (e.g. mythic aura); replaces the default drop shadow. */
   aura?: string;
-  children?: ReactNode;
+  children?: Component.Node;
 }) {
   return (
     <div

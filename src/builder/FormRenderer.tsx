@@ -1,45 +1,36 @@
-import type { ReactNode } from 'react';
-import type { CardData, FieldSpec, FieldValue } from '../cards/types';
+import type { FieldSpec } from '../cards/types';
 import { FieldRow, NumberInput, SelectInput, TextAreaInput, TextInput } from '../ui';
+// Deliberate module cycle (BuilderView renders FormRenderer) — benign, see BuilderView.tsx.
+import { BuilderView, PortraitSlot } from './BuilderView';
 
-type ImageSpec = Extract<FieldSpec, { kind: 'image' }>;
-
-export function FormRenderer(props: {
-  fields: readonly FieldSpec[];
-  data: CardData;
-  onField: (key: string, value: FieldValue) => void;
-  imageSlot?: (spec: ImageSpec) => ReactNode;
-}) {
+/**
+ * Schema-driven form for the active template. Contextual per the expressive
+ * skills: reads BuilderView via .get() and writes through it directly —
+ * no drilled data/callback props.
+ */
+export function FormRenderer() {
+  const { template } = BuilderView.get();
   return (
     <div className="flex flex-col gap-3">
-      {props.fields.map((spec) => (
+      {template.fields.map((spec) => (
         <FieldRow key={spec.key} label={spec.label}>
-          <FieldControl
-            spec={spec}
-            data={props.data}
-            onField={props.onField}
-            imageSlot={props.imageSlot}
-          />
+          <FieldControl spec={spec} />
         </FieldRow>
       ))}
     </div>
   );
 }
 
-function FieldControl(props: {
-  spec: FieldSpec;
-  data: CardData;
-  onField: (key: string, value: FieldValue) => void;
-  imageSlot?: (spec: ImageSpec) => ReactNode;
-}) {
-  const { spec, data, onField } = props;
+function FieldControl(props: { spec: FieldSpec }) {
+  const { is: builder, data } = BuilderView.get();
+  const { spec } = props;
   const raw = data[spec.key];
   switch (spec.kind) {
     case 'text':
       return (
         <TextInput
           value={String(raw ?? '')}
-          onValue={(v) => onField(spec.key, v)}
+          onValue={(v) => builder.setField(spec.key, v)}
           placeholder={spec.placeholder}
           maxLength={spec.maxLength}
         />
@@ -48,7 +39,7 @@ function FieldControl(props: {
       return (
         <TextAreaInput
           value={String(raw ?? '')}
-          onValue={(v) => onField(spec.key, v)}
+          onValue={(v) => builder.setField(spec.key, v)}
           rows={spec.rows}
           placeholder={spec.placeholder}
         />
@@ -57,7 +48,7 @@ function FieldControl(props: {
       return (
         <NumberInput
           value={Number(raw ?? spec.min)}
-          onValue={(v) => onField(spec.key, v)}
+          onValue={(v) => builder.setField(spec.key, v)}
           min={spec.min}
           max={spec.max}
         />
@@ -66,15 +57,11 @@ function FieldControl(props: {
       return (
         <SelectInput
           value={String(raw ?? spec.options[0]?.value ?? '')}
-          onValue={(v) => onField(spec.key, v)}
+          onValue={(v) => builder.setField(spec.key, v)}
           options={spec.options}
         />
       );
     case 'image':
-      return props.imageSlot ? (
-        <>{props.imageSlot(spec)}</>
-      ) : (
-        <p className="text-xs text-ink-dim">Portrait tools arrive with the image pipeline.</p>
-      );
+      return <PortraitSlot fieldKey={spec.key} />;
   }
 }

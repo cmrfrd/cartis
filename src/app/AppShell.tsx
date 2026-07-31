@@ -1,5 +1,4 @@
 import { Component } from '@expressive/react';
-import type { ReactNode } from 'react';
 import { BuilderView } from '../builder/BuilderView';
 import { EditorView } from '../editor/EditorView';
 import { GalleryView } from '../gallery/GalleryView';
@@ -59,6 +58,6 @@ export class AppShell extends Component {
 }
 
 /** Panes stay mounted and merely hide so view-local state survives tab switches. */
-function Pane(props: { active: boolean; children?: ReactNode }) {
+function Pane(props: { active: boolean; children?: Component.Node }) {
   return <div className={props.active ? 'h-full' : 'hidden'}>{props.children}</div>;
 }

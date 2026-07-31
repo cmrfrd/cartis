@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import type { Component } from '@expressive/react';
 
 const TONES = {
   accent: 'bg-accent text-surface hover:brightness-110',
@@ -10,7 +10,7 @@ export type ButtonTone = keyof typeof TONES;
 
 export function Button(props: {
   onClick: () => void;
-  children?: ReactNode;
+  children?: Component.Node;
   tone?: ButtonTone;
   disabled?: boolean;
 }) {
