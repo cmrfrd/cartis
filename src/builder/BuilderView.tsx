@@ -3,11 +3,12 @@ import { Component, get, ref } from '@expressive/react';
 // Safe: neither module touches the other's binding during module evaluation — only
 // inside method bodies at runtime, which ESM live bindings resolve correctly.
 import { AppShell } from '../app/AppShell';
+import { ArcaneCardBack } from '../cards/arcane/ArcaneCardBack';
 import { getTemplate, listTemplates } from '../cards/registry';
 import type { CardData, CardTemplate, FieldValue } from '../cards/types';
 import { ExportBar } from '../export/ExportBar';
 import type { StoredCard } from '../storage/CardArchive';
-import { Button, Panel, SelectInput } from '../ui';
+import { Button, Panel, PreviewStage, SelectInput } from '../ui';
 import { FormRenderer } from './FormRenderer';
 import { PortraitSection } from './PortraitSection';
 
@@ -20,6 +21,8 @@ export class BuilderView extends Component {
   savedNote = '';
   /** Which image field's portrait tools are open (Task 8). */
   portraitKey?: string = undefined;
+  /** Preview the shared card back instead of the front (both export). */
+  showBack = false;
   previewEl = ref<HTMLDivElement>();
 
   protected new() {
@@ -163,14 +166,16 @@ function PortraitSlot(props: { fieldKey: string }) {
 }
 
 function BuilderPreview() {
-  const { is: builder, template, resolved, holo, data, previewEl } = BuilderView.get();
+  const { is: builder, template, resolved, holo, data, previewEl, showBack } = BuilderView.get();
   const Render = template.Render;
   return (
     <section className="flex min-w-0 flex-1 items-center justify-center overflow-auto p-6">
       <div className="flex flex-col items-center gap-4">
-        <div ref={previewEl}>
-          <Render data={resolved} holo={holo} />
-        </div>
+        <PreviewStage>
+          <div ref={previewEl}>
+            {showBack ? <ArcaneCardBack holo={holo} /> : <Render data={resolved} holo={holo} />}
+          </div>
+        </PreviewStage>
         <div className="flex items-center gap-3">
           <Button
             tone="ghost"
@@ -180,9 +185,17 @@ function BuilderPreview() {
           >
             {holo ? 'Holo: on' : 'Holo: off'}
           </Button>
+          <Button
+            tone="ghost"
+            onClick={() => {
+              builder.showBack = !builder.showBack;
+            }}
+          >
+            {showBack ? 'Show front' : 'Show back'}
+          </Button>
         </div>
         <ExportBar
-          cardName={String(data.name ?? 'card')}
+          cardName={showBack ? 'cartis-card-back' : String(data.name ?? 'card')}
           target={() => previewEl.current ?? null}
         />
       </div>

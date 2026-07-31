@@ -69,6 +69,39 @@ describe('ArcaneCard', () => {
   });
 });
 
+describe('full-art template and card back', () => {
+  it('registers the showcase template alongside the classic frame', () => {
+    expect(getTemplate('arcane-hero-fullart').Render).toBeDefined();
+    expect(getTemplate('arcane-hero-fullart').fields).toEqual(arcaneTemplate.fields);
+  });
+
+  it('renders full-bleed art layer with floating plates', async () => {
+    const { ArcaneFullArtCard } = await import('./ArcaneFullArtCard');
+    const { container, unmount } = mount(
+      <ArcaneFullArtCard data={{ ...arcaneTemplate.defaults, name: 'Nyra, Unbound' }} />,
+    );
+    await tick();
+    expect(container.querySelector('[data-testid="fullart-art"]')).not.toBeNull();
+    expect(container.textContent).toContain('Nyra, Unbound');
+    expect(container.querySelector('[data-testid="stat-badge"]')).not.toBeNull();
+    unmount();
+  });
+
+  it('renders the Cartis card back', async () => {
+    const { ArcaneCardBack } = await import('./ArcaneCardBack');
+    const { container, unmount } = mount(<ArcaneCardBack />);
+    await tick();
+    expect(container.querySelector('[data-testid="card-back"]')).not.toBeNull();
+    expect(container.textContent).toContain('CARTIS');
+    expect(container.querySelectorAll('[data-testid="filigree"]').length).toBe(4);
+    unmount();
+  });
+
+  it('bakes canvas texture into the art prompt', () => {
+    expect(arcaneTemplate.artStylePrompt({})).toContain('oil brushwork');
+  });
+});
+
 describe('foil variants and mythic aura', () => {
   it('selects the etched foil layer from card data', async () => {
     const { container, unmount } = mount(

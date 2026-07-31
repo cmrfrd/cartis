@@ -1,5 +1,6 @@
 import type { CardTemplate } from '../types';
 import { ArcaneCard } from './ArcaneCard';
+import { ArcaneFullArtCard } from './ArcaneFullArtCard';
 import { ESSENCES, paletteFor } from './palette';
 import { RARITIES } from './parts';
 
@@ -53,7 +54,18 @@ export const arcaneTemplate: CardTemplate = {
     [
       'Fantasy oil painting portrait of the person, head and shoulders',
       paletteFor(String(data.essence ?? 'relic')).artFlavor,
-      'dramatic lighting, painterly brushwork, ornate trading card illustration',
+      'dramatic lighting, visible canvas texture, painterly oil brushwork',
+      'ornate trading card illustration',
     ].join(', '),
   Render: ArcaneCard,
+};
+
+/** Showcase variant: same fields and data, art fills the whole card. */
+export const arcaneFullArtTemplate: CardTemplate = {
+  ...arcaneTemplate,
+  id: 'arcane-hero-fullart',
+  name: 'Arcane Hero — Full Art',
+  description: 'Showcase frame: the portrait fills the card, plates float translucent above it.',
+  defaults: { ...arcaneTemplate.defaults, name: 'Nyra, Unbound', flavor: '' },
+  Render: ArcaneFullArtCard,
 };

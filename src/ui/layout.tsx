@@ -58,3 +58,15 @@ export function EmptyState(props: { message: string; hint?: string }) {
     </div>
   );
 }
+
+/** Presentation surround for card previews: ambient light + floor shadow.
+ *  Lives OUTSIDE the export target so none of it prints. */
+export function PreviewStage(props: { children?: ReactNode }) {
+  return (
+    <div className="relative flex flex-col items-center">
+      <div className="-z-10 absolute -inset-16 bg-[radial-gradient(ellipse_at_50%_42%,rgba(212,175,55,0.07),transparent_62%)]" />
+      {props.children}
+      <div className="mt-[-10px] h-5 w-72 rounded-[50%] bg-black/55 blur-md" />
+    </div>
+  );
+}

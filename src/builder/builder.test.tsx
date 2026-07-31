@@ -46,6 +46,21 @@ describe('BuilderView', () => {
     unmount();
   });
 
+  it('flips the preview to the shared card back', async () => {
+    const { container, unmount } = await mountApp();
+    const flip = Array.from(container.querySelectorAll('button')).find(
+      (b) => b.textContent === 'Show back',
+    );
+    await click(flip ?? null);
+    expect(container.querySelector('[data-testid="card-back"]')).not.toBeNull();
+    const flipBack = Array.from(container.querySelectorAll('button')).find(
+      (b) => b.textContent === 'Show front',
+    );
+    await click(flipBack ?? null);
+    expect(container.querySelector('[data-testid="card-back"]')).toBeNull();
+    unmount();
+  });
+
   it('saves the current card into the archive', async () => {
     const { container, shell, unmount } = await mountApp();
     await vi.waitFor(() => {

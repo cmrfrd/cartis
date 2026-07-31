@@ -1,6 +1,6 @@
 import { Component, ref } from '@expressive/react';
 import { ExportBar } from '../export/ExportBar';
-import { Button, TextAreaInput } from '../ui';
+import { Button, PreviewStage, TextAreaInput } from '../ui';
 import { CodePane } from './CodePane';
 import type { CompiledCard } from './compile';
 import { compileCardSource } from './compile';
@@ -86,9 +86,11 @@ export class EditorView extends Component {
           )}
         </section>
         <section className="flex w-[440px] shrink-0 flex-col items-center gap-4 overflow-y-auto p-5">
-          <div ref={previewEl}>
-            <Sandbox card={card} />
-          </div>
+          <PreviewStage>
+            <div ref={previewEl}>
+              <Sandbox card={card} />
+            </div>
+          </PreviewStage>
           <ExportBar cardName="code-lab-card" target={() => previewEl.current ?? null} />
         </section>
       </div>

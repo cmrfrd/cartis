@@ -67,7 +67,12 @@ export function ArcaneTitleBar(props: { name: string; cost: number; palette: Ess
 
 export function ArcaneArtWindow(props: { art?: string; alt: string; palette: EssencePalette }) {
   return (
-    <div className={`h-[210px] overflow-hidden rounded-sm bg-black/40 ${props.palette.artEdge}`}>
+    <div
+      className={`h-[210px] overflow-hidden rounded-sm bg-black/40 ${props.palette.artEdge}`}
+      style={{
+        boxShadow: 'inset 0 2px 8px rgba(0, 0, 0, 0.55), inset 0 -1px 4px rgba(0, 0, 0, 0.4)',
+      }}
+    >
       {props.art ? (
         <img src={props.art} alt={props.alt} className="h-full w-full object-cover" />
       ) : (
