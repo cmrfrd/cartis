@@ -5,6 +5,7 @@ import type { ImageLibrary } from '../storage/ImageLibrary';
 import { Button, EmptyState, FieldRow, Panel, SelectInput, TextAreaInput } from '../ui';
 import { CameraCapture } from './CameraCapture';
 import { bytesToDataUrl } from './codec';
+import { PhotoPicker } from './PhotoPicker';
 import type { ImageProvider } from './provider';
 import { selectImageProvider } from './provider';
 
@@ -117,18 +118,7 @@ function LabSource() {
         {useCamera ? (
           <CameraCapture onFrame={(bytes, type) => lab.acceptSource(bytes, type)} />
         ) : (
-          <input
-            type="file"
-            accept="image/*"
-            className="text-xs text-ink-dim file:mr-3 file:rounded file:border-0 file:bg-accent file:px-3 file:py-1.5 file:text-surface"
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (!file) return;
-              void file
-                .arrayBuffer()
-                .then((bytes) => lab.acceptSource(bytes, file.type || 'image/png'));
-            }}
-          />
+          <PhotoPicker onPhoto={(bytes, type) => lab.acceptSource(bytes, type)} />
         )}
         {sourcePreview && (
           <img src={sourcePreview} alt="source" className="h-28 w-28 rounded object-cover" />

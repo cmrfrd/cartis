@@ -2,6 +2,7 @@ import { Component, get } from '@expressive/react';
 import { AppShell } from '../app/AppShell';
 import { CameraCapture } from '../images/CameraCapture';
 import { bytesToDataUrl } from '../images/codec';
+import { PhotoPicker } from '../images/PhotoPicker';
 import type { Persona } from '../images/prompt';
 import { buildPortraitPrompt } from '../images/prompt';
 import type { ImageProvider } from '../images/provider';
@@ -134,16 +135,7 @@ function PortraitSourcePicker() {
         ))}
       </div>
       {source === 'upload' && (
-        <input
-          type="file"
-          accept="image/*"
-          className="text-xs text-ink-dim file:mr-3 file:rounded file:border-0 file:bg-accent file:px-3 file:py-1.5 file:text-surface"
-          onChange={(e) => {
-            const file = e.target.files?.[0];
-            if (!file) return;
-            void file.arrayBuffer().then((b) => section.acceptSource(b, file.type || 'image/png'));
-          }}
-        />
+        <PhotoPicker onPhoto={(bytes, type) => section.acceptSource(bytes, type)} />
       )}
       {source === 'camera' && (
         <CameraCapture onFrame={(bytes, type) => section.acceptSource(bytes, type)} />

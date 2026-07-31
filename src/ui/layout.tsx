@@ -50,6 +50,17 @@ export function TabBar<Id extends string>(props: {
   );
 }
 
+export function Spinner(props: { 'data-testid'?: string }) {
+  return (
+    <span
+      data-testid={props['data-testid']}
+      role="status"
+      aria-label="loading"
+      className="inline-block h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-accent border-t-transparent"
+    />
+  );
+}
+
 export function EmptyState(props: { message: string; hint?: string }) {
   return (
     <div className="flex h-full flex-col items-center justify-center gap-1 p-8 text-center">
