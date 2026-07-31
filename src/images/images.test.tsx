@@ -84,8 +84,10 @@ describe('CameraCapture', () => {
   it('reports camera unavailability when getUserMedia is missing', async () => {
     // happy-dom ships a working getUserMedia stub — inject a bare environment instead.
     const { container, unmount } = mount(<CameraCapture getMedia={() => undefined} />);
-    await tick();
-    expect(container.textContent).toContain('Camera unavailable');
+    // The error is set in mount() and rendered on the NEXT flush — poll, don't fixed-sleep.
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('Camera unavailable');
+    });
     unmount();
   });
 });

@@ -8,6 +8,7 @@ import type { CardData, CardTemplate, FieldValue } from '../cards/types';
 import type { StoredCard } from '../storage/CardArchive';
 import { Button, Panel, SelectInput } from '../ui';
 import { FormRenderer } from './FormRenderer';
+import { PortraitSection } from './PortraitSection';
 
 export class BuilderView extends Component {
   shell = get(AppShell, false);
@@ -92,7 +93,7 @@ export class BuilderView extends Component {
 /** Implementation scoping per the skills: freestanding function components + .get(),
  *  NOT subcomponent methods (those are reserved for extension points like ArcaneCard's). */
 function BuilderForm() {
-  const { is: builder, template, templateId, data, savedNote } = BuilderView.get();
+  const { is: builder, template, templateId, data, savedNote, portraitKey } = BuilderView.get();
   return (
     <aside className="flex w-96 shrink-0 flex-col gap-4 overflow-y-auto border-r border-edge p-4">
       <Panel title="Template">
@@ -104,13 +105,45 @@ function BuilderForm() {
         <p className="mt-2 text-xs text-ink-dim">{template.description}</p>
       </Panel>
       <Panel title="Details">
-        <FormRenderer fields={template.fields} data={data} onField={builder.setField} />
+        <FormRenderer
+          fields={template.fields}
+          data={data}
+          onField={builder.setField}
+          imageSlot={(spec) => <PortraitSlot fieldKey={spec.key} />}
+        />
       </Panel>
+      {portraitKey && <PortraitSection fieldKey={portraitKey} />}
       <div className="flex items-center gap-3">
         <Button onClick={() => void builder.saveCard()}>Save to gallery</Button>
         {savedNote && <span className="text-xs text-ink-dim">{savedNote}</span>}
       </div>
     </aside>
+  );
+}
+
+function PortraitSlot(props: { fieldKey: string }) {
+  const { is: builder, data, portraitKey, shell } = BuilderView.get();
+  const current = data[props.fieldKey];
+  const url = (shell?.library.urls ?? {})[typeof current === 'string' ? current : ''];
+  const open = portraitKey === props.fieldKey;
+  return (
+    <div className="flex items-center gap-3">
+      {url ? (
+        <img src={url} alt="portrait" className="h-14 w-14 rounded object-cover" />
+      ) : (
+        <div className="flex h-14 w-14 items-center justify-center rounded bg-surface text-ink-dim">
+          ✶
+        </div>
+      )}
+      <Button
+        tone="ghost"
+        onClick={() => {
+          builder.portraitKey = open ? undefined : props.fieldKey;
+        }}
+      >
+        {open ? 'Close portrait tools' : 'Portrait tools'}
+      </Button>
+    </div>
   );
 }
 
