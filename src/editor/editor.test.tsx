@@ -43,6 +43,9 @@ describe('EditorView agent', () => {
     ) as unknown as typeof fetch;
     await editor.runAgent(fetchImpl);
     expect(editor.source).toContain('Spooky');
+    // One-way flow contract: agent rewrites reach CodeMirror ONLY via the
+    // `external` signal — a live source prop once stomped fast typing.
+    expect(editor.external?.text).toContain('Spooky');
     await vi.waitFor(() => {
       expect(editor.compileError).toBe('');
       expect(editor.card).toBeDefined();

@@ -9,6 +9,8 @@ import { STARTER_CARD_SOURCE } from './starter';
 
 export class EditorView extends Component {
   source = STARTER_CARD_SOURCE;
+  /** External rewrite signal for CodePane (agent apply/reset) — never live-synced while typing. */
+  external?: { text: string } = undefined;
   card?: CompiledCard = undefined;
   compileError = '';
   debounceMs = 250;
@@ -58,7 +60,8 @@ export class EditorView extends Component {
       if (!res.ok || !body.code) {
         throw new Error(body.error ?? `agent request failed (${String(res.status)})`);
       }
-      this.source = body.code; // CodePane picks this up; the source watcher recompiles
+      this.source = body.code; // recompiles via the source watcher
+      this.external = { text: body.code }; // pushes the rewrite into CodeMirror
       this.agentNote = 'Applied — the code is yours to edit.';
     } catch (cause) {
       this.agentNote = cause instanceof Error ? cause.message : String(cause);
@@ -68,12 +71,13 @@ export class EditorView extends Component {
   }
 
   render() {
-    const { source, card, compileError, previewEl } = this;
+    const { card, compileError, external, previewEl } = this;
     return (
       <div className="flex h-full">
         <section className="flex min-w-0 flex-1 flex-col border-r border-edge">
           <CodePane
-            source={source}
+            initial={STARTER_CARD_SOURCE}
+            external={external}
             onSource={(next) => {
               this.source = next;
             }}
