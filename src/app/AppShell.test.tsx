@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { click, mountApp } from '../../test/util';
+import { click, mountApp, tick } from '../../test/util';
 
 describe('AppShell', () => {
   it('shows four view tabs and switches the visible pane', async () => {
@@ -15,6 +15,18 @@ describe('AppShell', () => {
     const panes = Array.from(container.querySelectorAll('main > div'));
     expect(panes).toHaveLength(4);
     expect(panes.filter((p) => p.className.includes('hidden'))).toHaveLength(3);
+    // activity bar: idle by default, drawer opens with pushed events
+    expect(container.textContent).toContain('AI activity');
+    shell.activity.push({ at: Date.now(), source: 'image', message: 'prediction created' });
+    await tick();
+    expect(container.querySelector('[data-testid="activity-latest"]')?.textContent).toContain(
+      'prediction created',
+    );
+    const logButton = Array.from(container.querySelectorAll('footer button')).find((b) =>
+      b.textContent?.startsWith('Log'),
+    );
+    await click(logButton ?? null);
+    expect(container.querySelector('[data-testid="activity-drawer"]')).not.toBeNull();
     unmount();
   });
 });

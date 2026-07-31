@@ -35,6 +35,10 @@ Both are off by default; the app is fully offline without them.
   install opencode, run `opencode auth login` once, then optionally pin a
   model with `OPENCODE_MODEL=anthropic/claude-fable-5` in `.env`.
 
+Every AI action streams into the **AI activity bar** at the bottom of the app
+(latest step in the strip, full timestamped log behind the Log button) and
+mirrors to the dev-server terminal as `[cartis:agent]` / `[cartis:image]` lines.
+
 ## Vocabulary
 
 - **Kit** — a style library of composable card part components (`src/cards/arcane`).

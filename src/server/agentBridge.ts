@@ -1,6 +1,7 @@
 import type { ServerResponse } from 'node:http';
 import type { Plugin } from 'vite';
 import { bytesToDataUrl } from '../images/codec.ts';
+import { activityHistory, emitActivity, subscribeActivity } from './activity.ts';
 
 // ---------- agent prompt ----------
 
@@ -66,20 +67,34 @@ export async function runCardAgent(
   client: AgentClient,
   userPrompt: string,
   currentCode: string,
+  log: (message: string) => void = (m) => emitActivity('agent', m),
 ): Promise<string> {
+  const startedAt = Date.now();
+  log(`request: “${userPrompt.slice(0, 80)}${userPrompt.length > 80 ? '…' : ''}”`);
   const created = await client.session.create({ body: { title: 'cartis card edit' } });
   const createdData = rec(rec(created)?.data) ?? rec(created);
   const id = typeof createdData?.id === 'string' ? createdData.id : undefined;
   if (!id) throw new Error('opencode session did not return an id');
-  const result = await client.session.prompt({
-    path: { id },
-    body: {
-      parts: [{ type: 'text', text: buildAgentPrompt(userPrompt, currentCode) }],
-    },
-  });
-  const code = extractCode(result);
-  if (!code) throw new Error('agent returned no code');
-  return code;
+  log(`session ${id} created — prompting model`);
+  const heartbeat = setInterval(() => {
+    log(`still generating… (${Math.round((Date.now() - startedAt) / 1000)}s)`);
+  }, 5000);
+  try {
+    const result = await client.session.prompt({
+      path: { id },
+      body: {
+        parts: [{ type: 'text', text: buildAgentPrompt(userPrompt, currentCode) }],
+      },
+    });
+    const code = extractCode(result);
+    if (!code) throw new Error('agent returned no code');
+    log(
+      `done in ${Math.round((Date.now() - startedAt) / 1000)}s — ${String(code.length)} chars of card code`,
+    );
+    return code;
+  } finally {
+    clearInterval(heartbeat);
+  }
 }
 
 let agentClient: Promise<AgentClient> | undefined;
@@ -99,38 +114,72 @@ function getAgentClient(): Promise<AgentClient> {
 
 const REPLICATE_URL =
   'https://api.replicate.com/v1/models/black-forest-labs/flux-kontext-pro/predictions';
+const POLL_INTERVAL_MS = 1500;
+const POLL_TIMEOUT_MS = 120_000;
 
+function outputUrlOf(prediction: Record<string, unknown> | undefined): string | undefined {
+  const output = prediction?.output;
+  if (typeof output === 'string') return output;
+  if (Array.isArray(output) && typeof output[0] === 'string') return output[0];
+  return undefined;
+}
+
+/** Create-and-poll (not Prefer:wait) so progress is observable while it runs. */
 export async function generateWithReplicate(
   token: string,
   prompt: string,
   imageDataUrl: string,
   fetchImpl: typeof fetch = fetch,
+  log: (message: string) => void = (m) => emitActivity('image', m),
+  sleep: (ms: number) => Promise<void> = (ms) => new Promise((r) => setTimeout(r, ms)),
 ): Promise<string> {
-  const started = await fetchImpl(REPLICATE_URL, {
+  const startedAt = Date.now();
+  const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+  log('sending photo + prompt to replicate (flux-kontext-pro)');
+  const created = await fetchImpl(REPLICATE_URL, {
     method: 'POST',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
-      Prefer: 'wait',
-    },
+    headers,
     body: JSON.stringify({ input: { prompt, input_image: imageDataUrl, output_format: 'png' } }),
   });
-  if (!started.ok) {
-    throw new Error(`replicate error ${String(started.status)}: ${await started.text()}`);
+  if (!created.ok) {
+    throw new Error(`replicate error ${String(created.status)}: ${await created.text()}`);
   }
-  const prediction = rec(await started.json());
-  const output = prediction?.output;
-  const url =
-    typeof output === 'string'
-      ? output
-      : Array.isArray(output) && typeof output[0] === 'string'
-        ? output[0]
-        : undefined;
+  let prediction = rec(await created.json());
+  const pollUrl =
+    typeof rec(prediction?.urls)?.get === 'string'
+      ? String(rec(prediction?.urls)?.get)
+      : `https://api.replicate.com/v1/predictions/${String(prediction?.id ?? '')}`;
+  log(`prediction ${String(prediction?.id ?? '?')} created`);
+  let lastStatus = '';
+  while (true) {
+    const status = String(prediction?.status ?? 'unknown');
+    if (status !== lastStatus) {
+      lastStatus = status;
+      log(`status: ${status} (${Math.round((Date.now() - startedAt) / 1000)}s)`);
+    }
+    if (status === 'succeeded') break;
+    if (status === 'failed' || status === 'canceled') {
+      throw new Error(`replicate ${status}: ${String(prediction?.error ?? 'no detail')}`);
+    }
+    if (Date.now() - startedAt > POLL_TIMEOUT_MS) {
+      throw new Error('replicate timed out after 120s');
+    }
+    await sleep(POLL_INTERVAL_MS);
+    const polled = await fetchImpl(pollUrl, { headers });
+    if (!polled.ok) {
+      throw new Error(`replicate poll error ${String(polled.status)}`);
+    }
+    prediction = rec(await polled.json());
+  }
+  const url = outputUrlOf(prediction);
   if (!url) {
-    throw new Error(`replicate returned no output (status ${String(prediction?.status)})`);
+    throw new Error('replicate succeeded but returned no output');
   }
   const image = await fetchImpl(url);
   const bytes = await image.arrayBuffer();
+  log(
+    `output downloaded (${String(Math.round(bytes.byteLength / 1024))}KB) in ${Math.round((Date.now() - startedAt) / 1000)}s`,
+  );
   return bytesToDataUrl(bytes, image.headers.get('content-type') ?? 'image/png');
 }
 
@@ -173,6 +222,20 @@ export function cartisBridge(): Plugin {
   return {
     name: 'cartis-bridge',
     configureServer(server) {
+      server.middlewares.use('/api/activity', (req, res) => {
+        const sse = res as ServerResponse;
+        sse.statusCode = 200;
+        sse.setHeader('Content-Type', 'text/event-stream');
+        sse.setHeader('Cache-Control', 'no-cache');
+        sse.setHeader('Connection', 'keep-alive');
+        for (const event of activityHistory().slice(-50)) {
+          sse.write(`data: ${JSON.stringify(event)}\n\n`);
+        }
+        const stop = subscribeActivity((event) => {
+          sse.write(`data: ${JSON.stringify(event)}\n\n`);
+        });
+        req.on('close', stop);
+      });
       server.middlewares.use('/api/status', (_req, res) => {
         sendJson(res as ServerResponse, 200, {
           image: process.env.REPLICATE_API_TOKEN ? 'replicate' : 'stub',

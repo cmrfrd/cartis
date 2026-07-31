@@ -70,50 +70,97 @@ describe('runCardAgent', () => {
         prompt: promptSpy,
       },
     };
-    const code = await runCardAgent(client, 'do a thing', 'old code');
+    const log: string[] = [];
+    const code = await runCardAgent(client, 'do a thing', 'old code', (m) => log.push(m));
     expect(code).toContain('function X');
     const call = promptSpy.mock.calls[0]?.[0] as
       | { path: { id: string }; body: { parts: { text: string }[] } }
       | undefined;
     expect(call?.path.id).toBe('session-1');
     expect(call?.body.parts[0]?.text).toContain('do a thing');
+    expect(log.some((m) => m.includes('session session-1 created'))).toBe(true);
+    expect(log.some((m) => m.startsWith('done in'))).toBe(true);
   });
 
   it('throws a clear error when the session has no id', async () => {
     const client: AgentClient = {
       session: { create: vi.fn(async () => ({})), prompt: vi.fn(async () => ({})) },
     };
-    await expect(runCardAgent(client, 'p', 'c')).rejects.toThrow(/session/i);
+    await expect(runCardAgent(client, 'p', 'c', () => {})).rejects.toThrow(/session/i);
   });
 });
 
 describe('generateWithReplicate', () => {
-  it('POSTs the model, waits, and returns the fetched image as a data url', async () => {
+  const instantSleep = async () => {};
+
+  it('creates a prediction, polls to success, and logs progress', async () => {
     const imageBytes = new TextEncoder().encode('img').buffer as ArrayBuffer;
+    let polls = 0;
     const fetchImpl = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
-      if (String(url).includes('predictions')) {
-        expect(init?.method).toBe('POST');
+      const u = String(url);
+      if (init?.method === 'POST') {
         const headers = init?.headers as Record<string, string>;
         expect(headers.Authorization).toBe('Bearer tok');
-        expect(headers.Prefer).toBe('wait');
         const body = JSON.parse(String(init?.body)) as {
           input: { prompt: string; input_image: string };
         };
         expect(body.input.prompt).toBe('stylize me');
         expect(body.input.input_image.startsWith('data:')).toBe(true);
         return new Response(
-          JSON.stringify({ status: 'succeeded', output: 'https://img.example/out.png' }),
+          JSON.stringify({
+            id: 'pred-1',
+            status: 'starting',
+            urls: { get: 'https://api.replicate.com/v1/predictions/pred-1' },
+          }),
+        );
+      }
+      if (u.includes('/predictions/pred-1')) {
+        polls++;
+        return new Response(
+          JSON.stringify(
+            polls < 2
+              ? { id: 'pred-1', status: 'processing' }
+              : { id: 'pred-1', status: 'succeeded', output: 'https://img.example/out.png' },
+          ),
         );
       }
       return new Response(imageBytes, { headers: { 'content-type': 'image/png' } });
     }) as unknown as typeof fetch;
+    const log: string[] = [];
     const dataUrl = await generateWithReplicate(
       'tok',
       'stylize me',
       'data:image/png;base64,QQ==',
       fetchImpl,
+      (m) => log.push(m),
+      instantSleep,
     );
     expect(dataUrl.startsWith('data:image/png;base64,')).toBe(true);
+    expect(log.some((m) => m.includes('prediction pred-1 created'))).toBe(true);
+    expect(log.some((m) => m.includes('status: processing'))).toBe(true);
+    expect(log.some((m) => m.includes('status: succeeded'))).toBe(true);
+    expect(log.some((m) => m.includes('output downloaded'))).toBe(true);
+  });
+
+  it('surfaces failed predictions with their error detail', async () => {
+    const fetchImpl = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        return new Response(
+          JSON.stringify({ id: 'pred-2', status: 'starting', urls: { get: 'https://x/p/2' } }),
+        );
+      }
+      return new Response(JSON.stringify({ id: 'pred-2', status: 'failed', error: 'nsfw block' }));
+    }) as unknown as typeof fetch;
+    await expect(
+      generateWithReplicate(
+        'tok',
+        'p',
+        'data:image/png;base64,QQ==',
+        fetchImpl,
+        () => {},
+        instantSleep,
+      ),
+    ).rejects.toThrow(/nsfw block/);
   });
 
   it('surfaces replicate errors with status detail', async () => {
@@ -121,7 +168,14 @@ describe('generateWithReplicate', () => {
       async () => new Response('nope', { status: 401 }),
     ) as unknown as typeof fetch;
     await expect(
-      generateWithReplicate('bad', 'p', 'data:image/png;base64,QQ==', fetchImpl),
+      generateWithReplicate(
+        'bad',
+        'p',
+        'data:image/png;base64,QQ==',
+        fetchImpl,
+        () => {},
+        instantSleep,
+      ),
     ).rejects.toThrow(/401/);
   });
 });
