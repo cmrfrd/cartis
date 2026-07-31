@@ -1,6 +1,7 @@
 // Sanctioned react-dom use: tests must mount into a real root (see Global Constraints).
 import type { ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
+import { AppShell } from '../src/app/AppShell';
 
 export function mount(node: ReactNode): { container: HTMLElement; unmount(): void } {
   const container = document.createElement('div');
@@ -45,4 +46,23 @@ export async function setInput(el: Element | null, value: string): Promise<void>
 export async function setSelect(el: Element | null, value: string): Promise<void> {
   setNativeValue(el, value).dispatchEvent(new Event('change', { bubbles: true }));
   await tick();
+}
+
+/** Mount the whole app and capture the AppShell instance via the `is` special prop. */
+export async function mountApp(): Promise<{
+  container: HTMLElement;
+  shell: AppShell;
+  unmount(): void;
+}> {
+  let shell: AppShell | undefined;
+  const mounted = mount(
+    <AppShell
+      is={(instance: AppShell) => {
+        shell = instance;
+      }}
+    />,
+  );
+  await tick();
+  if (!shell) throw new Error('mountApp: AppShell instance was not captured');
+  return { ...mounted, shell };
 }

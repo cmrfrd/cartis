@@ -1,12 +1,20 @@
 import { describe, expect, it } from 'vitest';
-import { mount, tick } from '../../test/util';
-import { AppShell } from './AppShell';
+import { click, mountApp } from '../../test/util';
 
 describe('AppShell', () => {
-  it('renders the app title', async () => {
-    const { container, unmount } = mount(<AppShell />);
-    await tick();
+  it('shows four view tabs and switches the visible pane', async () => {
+    const { container, shell, unmount } = await mountApp();
     expect(container.textContent).toContain('CARTIS');
+    for (const label of ['Builder', 'Code Lab', 'Image Lab', 'Gallery']) {
+      expect(container.textContent).toContain(label);
+    }
+    expect(shell.view).toBe('builder');
+    const tabs = Array.from(container.querySelectorAll('header button'));
+    await click(tabs.find((b) => b.textContent === 'Gallery') ?? null);
+    expect(shell.view).toBe('gallery');
+    const panes = Array.from(container.querySelectorAll('main > div'));
+    expect(panes).toHaveLength(4);
+    expect(panes.filter((p) => p.className.includes('hidden'))).toHaveLength(3);
     unmount();
   });
 });
