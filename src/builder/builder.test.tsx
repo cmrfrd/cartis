@@ -61,6 +61,19 @@ describe('BuilderView', () => {
     unmount();
   });
 
+  it('toggling stats off hides the badge and the might/ward inputs', async () => {
+    const { container, unmount } = await mountApp();
+    const visiblePane = () => container.querySelector('main > div:not(.hidden)');
+    expect(visiblePane()?.querySelector('[data-testid="stat-badge"]')).not.toBeNull();
+    expect(container.textContent).toContain('Might');
+    await click(container.querySelector('aside [role="switch"]'));
+    expect(visiblePane()?.querySelector('[data-testid="stat-badge"]')).toBeNull();
+    expect(container.textContent).not.toContain('Might');
+    await click(container.querySelector('aside [role="switch"]'));
+    expect(visiblePane()?.querySelector('[data-testid="stat-badge"]')).not.toBeNull();
+    unmount();
+  });
+
   it('saves the current card into the archive', async () => {
     const { container, shell, unmount } = await mountApp();
     await vi.waitFor(() => {

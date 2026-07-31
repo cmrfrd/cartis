@@ -69,6 +69,35 @@ describe('ArcaneCard', () => {
   });
 });
 
+describe('optional card sections', () => {
+  it('hides the stat badge when showStats is false', async () => {
+    const { container, unmount } = mount(
+      <ArcaneCard data={{ ...arcaneTemplate.defaults, showStats: false }} />,
+    );
+    await tick();
+    expect(container.querySelector('[data-testid="stat-badge"]')).toBeNull();
+    unmount();
+  });
+
+  it('keeps the stat badge for cards saved before the toggle existed', async () => {
+    const { showStats: _omit, ...legacy } = arcaneTemplate.defaults;
+    const { container, unmount } = mount(<ArcaneCard data={legacy} />);
+    await tick();
+    expect(container.querySelector('[data-testid="stat-badge"]')).not.toBeNull();
+    unmount();
+  });
+
+  it('hides type line and collector strip when their fields are empty', async () => {
+    const { container, unmount } = mount(
+      <ArcaneCard data={{ ...arcaneTemplate.defaults, typeLine: '', collector: '  ' }} />,
+    );
+    await tick();
+    expect(container.querySelector('[data-testid="rarity-gem"]')).toBeNull();
+    expect(container.querySelector('[data-testid="collector-strip"]')).toBeNull();
+    unmount();
+  });
+});
+
 describe('full-art template and card back', () => {
   it('registers the showcase template alongside the classic frame', () => {
     expect(getTemplate('arcane-hero-fullart').Render).toBeDefined();

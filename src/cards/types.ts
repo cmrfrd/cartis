@@ -6,7 +6,13 @@ export type FieldValue = string | number | boolean | undefined;
 /** The data record a template's form edits and its renderer consumes. */
 export type CardData = Record<string, FieldValue>;
 
-export type FieldSpec =
+/** Show a field only while another field holds a specific value. */
+export interface FieldCondition {
+  key: string;
+  equals: FieldValue;
+}
+
+export type FieldSpec = (
   | { kind: 'text'; key: string; label: string; placeholder?: string; maxLength?: number }
   | { kind: 'textarea'; key: string; label: string; rows?: number; placeholder?: string }
   | { kind: 'number'; key: string; label: string; min: number; max: number }
@@ -16,7 +22,9 @@ export type FieldSpec =
       label: string;
       options: readonly { value: string; label: string }[];
     }
-  | { kind: 'image'; key: string; label: string };
+  | { kind: 'image'; key: string; label: string }
+  | { kind: 'toggle'; key: string; label: string }
+) & { showIf?: FieldCondition };
 
 /**
  * `data` is optional because expressive Component fields surface as optional JSX

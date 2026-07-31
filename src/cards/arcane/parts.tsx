@@ -90,6 +90,7 @@ export function ArcaneTypeLine(props: {
   palette: EssencePalette;
   essenceId?: string;
 }) {
+  if (props.text.trim().length === 0) return null;
   return (
     <div
       className={`flex items-center justify-between rounded-md px-2.5 py-0.5 ${props.palette.plate}`}
@@ -139,11 +140,13 @@ export function ArcaneRulesBox(props: {
         </div>
       )}
       <div className="relative space-y-1.5">
-        <p
-          className={`whitespace-pre-wrap font-card text-[13.5px] leading-snug ${props.palette.plateText}`}
-        >
-          {props.ability}
-        </p>
+        {props.ability.trim().length > 0 && (
+          <p
+            className={`whitespace-pre-wrap font-card text-[13.5px] leading-snug ${props.palette.plateText}`}
+          >
+            {props.ability}
+          </p>
+        )}
         {props.flavor && (
           <p
             className={`font-card text-[12.5px] italic leading-snug opacity-80 ${props.palette.plateText}`}
@@ -178,8 +181,9 @@ export function ArcaneStatBadge(props: { might: number; ward: number; palette: E
   );
 }
 
-/** Tiny print line at the card foot — collector number, dedication, year. */
+/** Tiny print line at the card foot — collector number, dedication, year. Empty = excluded. */
 export function ArcaneCollectorStrip(props: { text: string }) {
+  if (props.text.trim().length === 0) return null;
   return (
     <div
       data-testid="collector-strip"

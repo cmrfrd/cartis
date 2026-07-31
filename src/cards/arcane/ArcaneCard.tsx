@@ -81,6 +81,7 @@ export class ArcaneCard extends Component {
 
   StatBadge() {
     const { data, palette } = this;
+    if (data.showStats === false) return null;
     return (
       <ArcaneStatBadge
         might={Number(data.might ?? 0)}

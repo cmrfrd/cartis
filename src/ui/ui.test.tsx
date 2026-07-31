@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { click, mount, setInput, setSelect, tick } from '../../test/util';
-import { Button, NumberInput, SelectInput, TabBar, TextInput } from './index';
+import { Button, NumberInput, SelectInput, TabBar, TextInput, ToggleInput } from './index';
 
 describe('ui kit', () => {
   it('Button fires onClick', async () => {
@@ -46,6 +46,17 @@ describe('ui kit', () => {
     await tick();
     await setSelect(container.querySelector('select'), 'b');
     expect(onValue).toHaveBeenCalledWith('b');
+    unmount();
+  });
+
+  it('ToggleInput flips its value', async () => {
+    const onValue = vi.fn();
+    const { container, unmount } = mount(<ToggleInput value={false} onValue={onValue} />);
+    await tick();
+    const toggle = container.querySelector('[role="switch"]');
+    expect(toggle?.getAttribute('aria-checked')).toBe('false');
+    await click(toggle);
+    expect(onValue).toHaveBeenCalledWith(true);
     unmount();
   });
 

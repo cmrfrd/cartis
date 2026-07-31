@@ -1,5 +1,5 @@
 import type { FieldSpec } from '../cards/types';
-import { FieldRow, NumberInput, SelectInput, TextAreaInput, TextInput } from '../ui';
+import { FieldRow, NumberInput, SelectInput, TextAreaInput, TextInput, ToggleInput } from '../ui';
 // Deliberate module cycle (BuilderView renders FormRenderer) — benign, see BuilderView.tsx.
 import { BuilderView, PortraitSlot } from './BuilderView';
 
@@ -9,10 +9,13 @@ import { BuilderView, PortraitSlot } from './BuilderView';
  * no drilled data/callback props.
  */
 export function FormRenderer() {
-  const { template } = BuilderView.get();
+  const { template, data } = BuilderView.get();
+  const visible = template.fields.filter(
+    (spec) => !spec.showIf || data[spec.showIf.key] === spec.showIf.equals,
+  );
   return (
     <div className="flex flex-col gap-3">
-      {template.fields.map((spec) => (
+      {visible.map((spec) => (
         <FieldRow key={spec.key} label={spec.label}>
           <FieldControl spec={spec} />
         </FieldRow>
@@ -63,5 +66,7 @@ function FieldControl(props: { spec: FieldSpec }) {
       );
     case 'image':
       return <PortraitSlot fieldKey={spec.key} />;
+    case 'toggle':
+      return <ToggleInput value={raw !== false} onValue={(v) => builder.setField(spec.key, v)} />;
   }
 }

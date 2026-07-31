@@ -58,6 +58,26 @@ export function NumberInput(props: {
   );
 }
 
+export function ToggleInput(props: { value: boolean; onValue: (v: boolean) => void }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={props.value}
+      onClick={() => props.onValue(!props.value)}
+      className={`relative h-6 w-11 shrink-0 rounded-full border transition ${
+        props.value ? 'border-accent bg-accent/80' : 'border-edge bg-surface'
+      }`}
+    >
+      <span
+        className={`absolute top-0.5 left-0.5 h-[18px] w-[18px] rounded-full bg-ink transition-transform ${
+          props.value ? 'translate-x-5' : ''
+        }`}
+      />
+    </button>
+  );
+}
+
 export function SelectInput(props: {
   value: string;
   onValue: (v: string) => void;

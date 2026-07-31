@@ -68,18 +68,20 @@ export class ArcaneFullArtCard extends Component {
             <ArcaneCostPips cost={Number(data.cost ?? 0)} palette={palette} />
           </div>
           <div className="space-y-1.5">
-            <div className={`flex items-center justify-between ${SMOKE_PLATE}`}>
-              <span
-                className="truncate font-card text-[12px] font-semibold text-white/90"
-                style={{ fontVariant: 'small-caps' }}
-              >
-                {String(data.typeLine ?? '')}
-              </span>
-              <span
-                className="h-3 w-3 shrink-0 rotate-45 rounded-[2px]"
-                style={rarityGemStyle(rarityFrom(data.rarity))}
-              />
-            </div>
+            {String(data.typeLine ?? '').trim().length > 0 && (
+              <div className={`flex items-center justify-between ${SMOKE_PLATE}`}>
+                <span
+                  className="truncate font-card text-[12px] font-semibold text-white/90"
+                  style={{ fontVariant: 'small-caps' }}
+                >
+                  {String(data.typeLine ?? '')}
+                </span>
+                <span
+                  className="h-3 w-3 shrink-0 rotate-45 rounded-[2px]"
+                  style={rarityGemStyle(rarityFrom(data.rarity))}
+                />
+              </div>
+            )}
             {Boolean(data.ability) && (
               <p className={`font-card text-[13px] leading-snug text-white/95 ${SMOKE_PLATE}`}>
                 {String(data.ability)}
@@ -95,6 +97,7 @@ export class ArcaneFullArtCard extends Component {
 
   Stats() {
     const { data, palette } = this;
+    if (data.showStats === false) return null;
     return (
       <ArcaneStatBadge
         might={Number(data.might ?? 0)}
