@@ -1,6 +1,6 @@
 import type { ServerResponse } from 'node:http';
 import type { Plugin } from 'vite';
-import { bytesToDataUrl } from '../images/codec';
+import { bytesToDataUrl } from '../images/codec.ts';
 
 // ---------- agent prompt ----------
 
