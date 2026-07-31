@@ -1,5 +1,36 @@
 @import "tailwindcss";
 
+/* Vendored OFL fonts (src/assets/fonts/LICENSE.md). @font-face fonts embed into
+   html-to-image exports — system fonts do not, so cards must only use these. */
+@font-face {
+  font-family: "Cinzel";
+  font-style: normal;
+  font-weight: 700;
+  font-display: block;
+  src: url("../assets/fonts/cinzel-latin-700-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "EB Garamond";
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  src: url("../assets/fonts/eb-garamond-latin-400-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "EB Garamond";
+  font-style: italic;
+  font-weight: 400;
+  font-display: block;
+  src: url("../assets/fonts/eb-garamond-latin-400-italic.woff2") format("woff2");
+}
+@font-face {
+  font-family: "EB Garamond";
+  font-style: normal;
+  font-weight: 600;
+  font-display: block;
+  src: url("../assets/fonts/eb-garamond-latin-600-normal.woff2") format("woff2");
+}
+
 @theme {
   --color-surface: #14161f;
   --color-panel: #1d2130;
@@ -8,8 +39,9 @@
   --color-ink-dim: #9aa0b5;
   --color-accent: #d9a441;
   --color-accent-soft: #8a6a2f;
-  --font-display: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  --font-display: "Cinzel", "Iowan Old Style", Palatino, Georgia, serif;
   --font-body: ui-sans-serif, system-ui, sans-serif;
+  --font-card: "EB Garamond", "Iowan Old Style", Georgia, serif;
 }
 
 @utility holo-sheen {

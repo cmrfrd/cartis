@@ -1,4 +1,5 @@
 import type { EssencePalette } from './palette';
+import { ENGRAVED_SHADOW, titleSizeFor } from './typography';
 
 export type RarityId = 'common' | 'uncommon' | 'rare' | 'mythic';
 
@@ -41,7 +42,8 @@ export function ArcaneTitleBar(props: { name: string; cost: number; palette: Ess
       className={`flex items-center justify-between gap-2 rounded-md px-2.5 py-1 ${props.palette.plate}`}
     >
       <span
-        className={`truncate font-display text-[15px] font-semibold ${props.palette.plateText}`}
+        className={`truncate font-display font-bold tracking-wide ${props.palette.plateText}`}
+        style={{ fontSize: titleSizeFor(props.name), textShadow: ENGRAVED_SHADOW }}
       >
         {props.name}
       </span>
@@ -69,7 +71,10 @@ export function ArcaneTypeLine(props: { text: string; rarity: RarityId; palette:
     <div
       className={`flex items-center justify-between rounded-md px-2.5 py-0.5 ${props.palette.plate}`}
     >
-      <span className={`truncate text-[11px] font-medium italic ${props.palette.plateText}`}>
+      <span
+        className={`truncate font-card text-[12px] font-semibold ${props.palette.plateText}`}
+        style={{ fontVariant: 'small-caps', textShadow: ENGRAVED_SHADOW }}
+      >
         {props.text}
       </span>
       <span
@@ -89,11 +94,15 @@ export function ArcaneRulesBox(props: {
     <div
       className={`flex-1 space-y-1.5 overflow-hidden rounded-md px-2.5 py-2 ${props.palette.plate}`}
     >
-      <p className={`whitespace-pre-wrap text-[12px] leading-snug ${props.palette.plateText}`}>
+      <p
+        className={`whitespace-pre-wrap font-card text-[13.5px] leading-snug ${props.palette.plateText}`}
+      >
         {props.ability}
       </p>
       {props.flavor && (
-        <p className={`text-[11px] italic leading-snug opacity-75 ${props.palette.plateText}`}>
+        <p
+          className={`font-card text-[12.5px] italic leading-snug opacity-80 ${props.palette.plateText}`}
+        >
           {props.flavor}
         </p>
       )}

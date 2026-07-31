@@ -15,6 +15,7 @@ export {
   rarityFrom,
 } from './arcane/parts';
 export { arcaneTemplate } from './arcane/template';
+export { ENGRAVED_SHADOW, titleSizeFor } from './arcane/typography';
 export { CARD_HEIGHT, CARD_WIDTH, CardSurface, HoloFoil } from './base/CardSurface';
 export { getTemplate, listTemplates, registerTemplate } from './registry';
 export type {
