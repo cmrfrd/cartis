@@ -13,13 +13,25 @@
 Copied from the spec — every task implicitly includes these:
 
 - Stack is exactly "bun + typescript + tailwind + vite" plus expressive (https://expressive.dev / gabeklein/expressive-mvc).
-- "**do not use react** use expressive": no `useState`/`useEffect`/any React hook, no `React.Component` subclassing, no react imports in app code. All state lives in expressive `State`/`Component` classes. Sanctioned React substrate uses, exactly four: (1) `react-dom/client` `createRoot` in `src/main.tsx` and in `test/util.tsx`, (2) type-only imports `import type { ReactNode, ComponentType } from 'react'`, (3) the invisible `react/jsx-runtime` emitted by TSX compilation, (4) JSX callback refs (`ref={el => ...}`) to reach host elements.
+- "**do not use react** use expressive": no `useState`/`useEffect`/any React hook, no `React.Component` subclassing, no react imports in app code. All state lives in expressive `State`/`Component` classes. Sanctioned React substrate uses, exactly four: (1) `react-dom/client` `createRoot` in `src/main.tsx` and in `test/util.tsx`, (2) type-only imports `import type { ReactNode, ComponentType } from 'react'`, (3) the invisible `react/jsx-runtime` emitted by TSX compilation, (4) passing expressive `ref()` objects to JSX `ref` attributes.
 - "minimal set of dependencies": runtime deps are exactly `react`, `react-dom`, `@expressive/react`, `codemirror`, `@codemirror/lang-javascript`, `sucrase`, `html-to-image`. Dev deps only as listed in Task 1. Do not add others.
 - "It should have tests" + "tests, proper typing, and linting and formatting automatically": `bun run verify` (biome ci + tsc --noEmit + vitest run) must pass before **every** commit.
 - "do not push to github, keep everything purely locally run": commit locally; never `git push`, never add a remote, never call external services except the explicitly optional Replicate/opencode paths.
 - "This UI should be in one consistent style": only Tailwind utilities + the `@theme` tokens defined in `src/app/theme.css`; UI chrome built from the `src/ui` kit.
 - Expressive state discipline: reactive collections are **replaced immutably** (`this.data = { ...this.data, k: v }`, `this.images = [img, ...this.images]`), never mutated in place — expressive detects assignment, not mutation.
-- Views (`*View`, stateful widgets) are `Component` subclasses; leaf presentational pieces are plain function components taking props. Cross-model reads inside a Component are mirrored into own fields via `otherModel.get(effect)` in `mount()` (renders only reliably track `this`).
+- Views (`*View`, stateful widgets) are `Component` subclasses; leaf presentational pieces are plain function components taking props. Never create paired `FooState` + `FooView` classes — the view *is* the state.
+- Cross-model access uses the `get()` **field instruction**: `shell = get(AppShell, false)` as a class field (the `, false` optional form keeps headless `.new()` tests working without context). Reads through it — `this.shell.library.images` — subscribe **transitively** through nested States (skills: `react/patterns.md`). Never hand-mirror foreign state into local fields with effects.
+- PascalCase methods on a `Component` are **extension points only** — keep one only if a subclass would plausibly override it (e.g. `ArcaneCard.TitleBar`). Implementation-scoped chunks of a view are freestanding function components calling `TheView.get()` (skills: `react/component.md`).
+- Expressive style rules (skills: `react/style.md`): destructure every reactive read at the top of `render()` / function components (retain the root only via `is:` alongside siblings); affirmative conditionals with `condition && <Node />`; render fallthrough without explicit `return null`; one binding per line in multi-value destructures.
+- Ownership: child models are **adopted** — `library = new ImageLibrary()` as an `AppShell` field (parent adopts and destroys). `.new()` creates root instances and belongs only in `main.tsx` and headless tests.
+- DOM handles use the `ref()` field instruction (`previewEl = ref<HTMLDivElement>()` passed straight to JSX `ref`; read `.current` imperatively), not callback refs writing reactive fields.
+- Async operations that need injectable collaborators take them as trailing optional parameters (`generate(provider?, intoLibrary?)`) — context supplies the default, headless tests inject fakes. `get()` fields are lookups, not assignment slots.
+- Layering: `src/cards/` imports nothing from `app/`, `builder/`, `storage/`, `images/`, `editor/`, `export/`, `gallery/`, `server/` — kits are pure data-to-pixels. Enforced mechanically by `src/cards/layering.test.ts`.
+- The test suite passes on an airplane: no network, no opencode, no canvas, no camera required — every boundary has an injected fake (`ImageProvider`, `fetchImpl`, `PaintFn`, `AgentClient`).
+- No silent failures: every async user action lands its outcome in a visible reactive field (`note`, `savedNote`, `compileError`, `agentNote`, or a `catch()` fallback).
+- Persistence: never rename or repurpose a stored field without bumping `DB_VERSION` and migrating in `openDatabase`'s upgrade handler.
+- The dev server **is** the app: Cartis runs via `bun run dev` (the `/api` bridge exists only there). `bun run build` is kept as a compile smoke test, not a deployment story.
+- Deliberate deviations from the skills docs, on purpose: storage models expose explicit `ready` booleans instead of `set(async)`/Suspense (simpler headless assertions); `Date.now()`/`crypto.randomUUID()` are called inline (no injected clocks at this scale); the Code Lab `eval` is a controlled import surface, not a security boundary.
 - Vocabulary (user asked us to pick names): **Kit** = a style library of card part components (e.g. `arcane`). **Template** = a registered card definition inside a kit (id, form-field schema, defaults, art-style prompt, renderer). The Builder's dropdown lists Templates.
 - Card geometry: preview renders at exactly 375×525 CSS px (`CARD_WIDTH`/`CARD_HEIGHT`); exports upscale to 750×1050 px = 2.5"×3.5" at 300 DPI (standard trading-card print size).
 - Environment variables (all optional, read by the dev-server bridge only): `REPLICATE_API_TOKEN` enables real image generation, `OPENCODE_MODEL` (e.g. `anthropic/claude-fable-5`) overrides the opencode model. With neither set the app is fully offline (stub image provider; agent endpoint returns a clear error).
@@ -28,7 +40,8 @@ Copied from the spec — every task implicitly includes these:
 
 Consult when a task touches the area — do not guess APIs:
 
-- Expressive State API (`.new()`, `set()`, `get()`, lifecycle): https://expressive.dev/docs/api/state
+- **Expressive skills (canonical — outranks every other expressive source, read `SKILL.md` first):** https://github.com/gabeklein/expressive-mvc/tree/main/skills — especially `react/component.md`, `react/patterns.md`, `react/style.md`, `field/get.md`, `field/ref.md`
+- Expressive State API reference: https://expressive.dev/docs/api/state
 - Expressive Component API (`render()`, `catch()`, `fallback`, subcomponents, special props `is`/`ref`): https://expressive.dev/docs/api/component
 - opencode SDK: https://opencode.ai/docs/sdk/ (also read `node_modules/@opencode-ai/sdk` types after install — the plan's structural types are defensive)
 - Replicate model HTTP API: https://replicate.com/black-forest-labs/flux-kontext-pro/api
@@ -37,32 +50,48 @@ Consult when a task touches the area — do not guess APIs:
 - Tailwind v4 theme tokens: https://tailwindcss.com/docs/theme
 - CodeMirror 6: https://codemirror.net/docs/
 
-## Expressive Cheat Sheet (memorize before Task 1)
+## Expressive Cheat Sheet (memorize before Task 1; skills repo is the source of truth)
 
 ```tsx
-import State, { Component } from '@expressive/react'
+import State, { Component, get, ref } from '@expressive/react'
 
-class CounterModel extends State {        // plain reactive model
-  count = 0                               // reactive field (must be initialized, even `= undefined`)
+class CounterModel extends State {        // headless reactive model
+  count = 0                               // reactive field (always initialize, even `= undefined`)
   bump() { this.count++ }                 // methods auto-bound
-  get double() { return this.count * 2 }  // computed, tracks reads
-  protected new() {                       // runs once on activation; return cleanup
+  get double() { return this.count * 2 }  // computed: memoized + tracked
+  protected new() {                       // one-shot setup (server-safe); return cleanup
     return this.set('count', () => { /* key watcher */ })
   }
 }
-const m = CounterModel.new()              // standalone activation (headless tests!)
+const m = CounterModel.new()              // ROOT instance: main.tsx + headless tests only
 m.bump(); await m.set()                   // await update flush
-const stop = m.get(cur => { cur.count })  // tracked effect (runs now + on change); stop() unsubs
 m.set(null)                               // destroy
 
-class ClickerView extends Component {     // renderable state; provides itself as context
-  n = 0                                   // reactive field, doubles as optional JSX prop
-  mount() { return () => {/* unmount */} }// client commit; context lookups go here: this.get(AppShell)
+class ShellView extends Component {       // renderable state; provides itself as context
+  child = new CounterModel()              // ADOPTED child model — destroyed with parent
+  box = ref<HTMLDivElement>()             // DOM handle: <div ref={this.box}/>; .current after mount
+  mount() { return () => {/* unmount */} }// browser-only commit hook (media, subscriptions)
   async catch(error: Error) { this.fallback = <p>boom</p>; /* await = stay in fallback */ }
-  Row() { return <li>{this.n}</li> }      // capital-letter method = subcomponent <this.Row/>
-  render() { return <button onClick={() => { this.n++ }}>{this.n}</button> }
+  Slot() { return <i /> }                 // PascalCase method = OVERRIDABLE subcomponent (extension points ONLY)
+  render() {
+    const { child } = this                // snapshot-destructure reads at the top
+    return <button onClick={() => child.bump()}>{child.count}</button>
+  }
 }
-// <ClickerView n={5} is={i => ref = i} />  — fields as props; `is` captures the instance
+
+class InsideView extends Component {
+  shell = get(ShellView, false)           // context lookup as a FIELD; `, false` = optional (headless-safe)
+  render() {
+    const { shell } = this
+    return shell && <p>{shell.child.count}</p>  // nested reads subscribe TRANSITIVELY — never mirror
+  }
+}
+
+function InsidePanel() {                  // implementation scoping: function component + .get()
+  const { is: shellView, child } = ShellView.get()   // `is:` retains the root alongside siblings
+  return <button onClick={() => { shellView.view = 'x' }}>{child.count}</button>
+}
+// <ShellView is={i => captured = i} />   // `is` special prop captures the instance (tests)
 ```
 
 ## File Map
@@ -377,10 +406,10 @@ export async function setSelect(el: Element | null, value: string): Promise<void
 
 - [ ] **Step 5: Write the failing tests**
 
-`src/app/expressive-probe.test.tsx` — proves expressive works under this exact toolchain (models headless, components mounted) before anything is built on it:
+`src/app/expressive-probe.test.tsx` — probes **every framework behavior the architecture depends on** before anything is built on it: headless models, mounted rendering, `get(Type)` context fields with transitive subscription through adopted child models, and `ref()` DOM handles:
 
 ```tsx
-import State, { Component } from '@expressive/react'
+import State, { Component, get, ref } from '@expressive/react'
 import { describe, expect, it } from 'vitest'
 import { click, mount, tick } from '../../test/util'
 
@@ -397,16 +426,39 @@ class ProbeModel extends State {
 class ProbeView extends Component {
   n = 0
   render() {
+    const { n } = this
     return (
       <button type="button" onClick={() => { this.n++ }}>
-        clicks:{this.n}
+        clicks:{n}
       </button>
     )
   }
 }
 
-describe('expressive under vite/vitest toolchain', () => {
-  it('standalone model: fields update and flush awaits', async () => {
+class ProbeHost extends Component {
+  inner = new ProbeModel() // adopted child model
+  render() {
+    return <ProbeReader />
+  }
+}
+
+class ProbeReader extends Component {
+  host = get(ProbeHost, false) // context lookup as a field (optional form)
+  render() {
+    const { host } = this
+    return <span>value:{host ? host.inner.count : 'none'}</span>
+  }
+}
+
+class ProbeRef extends Component {
+  box = ref<HTMLDivElement>()
+  render() {
+    return <div data-probe ref={this.box} />
+  }
+}
+
+describe('expressive probes (every idiom the app is built on)', () => {
+  it('standalone model: fields update, flush awaits, getters compute', async () => {
     const probe = ProbeModel.new()
     probe.bump()
     await probe.set()
@@ -421,6 +473,37 @@ describe('expressive under vite/vitest toolchain', () => {
     expect(container.textContent).toContain('clicks:0')
     await click(container.querySelector('button'))
     expect(container.textContent).toContain('clicks:1')
+    unmount()
+  })
+
+  it('get(Type) field + transitive subscription through an adopted child model', async () => {
+    let host: ProbeHost | undefined
+    const { container, unmount } = mount(
+      <ProbeHost
+        is={(instance: ProbeHost) => {
+          host = instance
+        }}
+      />,
+    )
+    await tick()
+    expect(container.textContent).toContain('value:0')
+    host?.inner.bump()
+    await tick()
+    expect(container.textContent).toContain('value:1')
+    unmount()
+  })
+
+  it('ref() field instruction captures DOM nodes', async () => {
+    let probe: ProbeRef | undefined
+    const { unmount } = mount(
+      <ProbeRef
+        is={(instance: ProbeRef) => {
+          probe = instance
+        }}
+      />,
+    )
+    await tick()
+    expect(probe?.box.current).toBeInstanceOf(HTMLElement)
     unmount()
   })
 })
@@ -445,7 +528,7 @@ describe('AppShell', () => {
 
 - [ ] **Step 6: Run tests — expect fail, then pass**
 
-Run: `bun run test`. Before Step 3's files exist the suite cannot even collect (module not found) — that is the failing state. With all files in place, expect: **4 tests pass**. If the probe test fails, stop and fix the toolchain now (this is the whole point of Task 1).
+Run: `bun run test`. Before Step 3's files exist the suite cannot even collect (module not found) — that is the failing state. With all files in place, expect: **5 tests pass** (4 probes + shell). If ANY probe fails — especially transitive subscription or `ref()` — STOP: the entire architecture leans on these behaviors. Investigate against the skills docs (`react/patterns.md`, `field/ref.md`) before writing another line.
 
 - [ ] **Step 7: Verify toolchain gates**
 
@@ -785,29 +868,30 @@ export class AppShell extends Component {
   view: ViewId = 'builder'
 
   render() {
+    const { view } = this
     return (
       <div className="flex h-screen flex-col bg-surface font-body text-ink">
         <header className="flex items-center gap-6 border-b border-edge px-6 py-3">
           <h1 className="font-display text-xl tracking-widest text-accent">CARTIS</h1>
           <TabBar
             tabs={VIEW_TABS}
-            active={this.view}
+            active={view}
             onSelect={(id) => {
               this.view = id as ViewId
             }}
           />
         </header>
         <main className="min-h-0 flex-1">
-          <Pane active={this.view === 'builder'}>
+          <Pane active={view === 'builder'}>
             <EmptyState message="Builder arrives in Task 6." />
           </Pane>
-          <Pane active={this.view === 'editor'}>
+          <Pane active={view === 'editor'}>
             <EmptyState message="Code Lab arrives in Task 12." />
           </Pane>
-          <Pane active={this.view === 'images'}>
+          <Pane active={view === 'images'}>
             <EmptyState message="Image Lab arrives in Task 7." />
           </Pane>
-          <Pane active={this.view === 'gallery'}>
+          <Pane active={view === 'gallery'}>
             <EmptyState message="Gallery arrives in Task 10." />
           </Pane>
         </main>
@@ -854,7 +938,7 @@ export async function mountApp(): Promise<{
 
 - [ ] **Step 6: Run tests to verify they pass**
 
-Run: `bun run test`. Expected: PASS — 5 ui tests + 1 shell test + 2 probe tests.
+Run: `bun run test`. Expected: PASS — 5 ui tests + 1 shell test + 4 probe tests.
 
 - [ ] **Step 7: Verify and commit**
 
@@ -1117,9 +1201,9 @@ git commit -m "feat: add card template types, registry, and base card surface"
   - `db.ts`: `type StoreName = 'images' | 'cards' | 'exports'`; `openDatabase(): Promise<IDBDatabase>`; `dbPut<T extends { id: string }>(store: StoreName, value: T): Promise<void>`; `dbGetAll<T>(store: StoreName): Promise<T[]>`; `dbDelete(store: StoreName, id: string): Promise<void>`; `__resetDbForTests(): void`
   - `ImageLibrary.ts`: `interface StoredImage { id: string; kind: 'source' | 'generated'; prompt?: string; styleId?: string; bytes: ArrayBuffer; type: string; createdAt: number }`; `type NewImage = Omit<StoredImage, 'id' | 'createdAt'>`; `class ImageLibrary extends State` with fields `images: StoredImage[]`, `urls: Record<string, string>`, `ready: boolean` and methods `add(input: NewImage): Promise<StoredImage>`, `remove(id: string): Promise<void>`, `url(id: string): string | undefined`
   - `CardArchive.ts`: `type ExportFormat = 'png' | 'jpeg' | 'webp'`; `interface StoredCard { id: string; name: string; templateId: string; data: CardData; holo: boolean; updatedAt: number }`; `interface StoredExport { id: string; name: string; format: ExportFormat; bytes: ArrayBuffer; type: string; createdAt: number }`; `interface SaveCardInput { id?: string; name: string; templateId: string; data: CardData; holo: boolean }`; `class CardArchive extends State` with fields `cards: StoredCard[]`, `exports: StoredExport[]`, `exportUrls: Record<string, string>`, `ready: boolean` and methods `saveCard(input: SaveCardInput): Promise<StoredCard>`, `deleteCard(id: string): Promise<void>`, `saveExport(input: { name: string; format: ExportFormat; bytes: ArrayBuffer; type: string }): Promise<StoredExport>`, `deleteExport(id: string): Promise<void>`, `exportUrl(id: string): string | undefined`
-  - `AppShell` gains fields `library = ImageLibrary.new()`, `archive = CardArchive.new()`, `pendingCard?: StoredCard = undefined` — descendants reach them via `this.get(AppShell).library` etc.
+  - `AppShell` gains adopted-child fields `library = new ImageLibrary()`, `archive = new CardArchive()`, plus `pendingCard?: StoredCard = undefined` — descendants reach them via a `shell = get(AppShell, false)` field and read `this.shell.library.…` directly (transitive subscription).
 
-Design notes: image payloads are stored as `ArrayBuffer + mime type` (not `Blob`) so structured-clone works identically in browser, node, and fake-indexeddb. Object URLs are derived, kept in a `urls` map, and revoked on remove.
+Design notes: image payloads are stored as `ArrayBuffer + mime type` (not `Blob`) so structured-clone works identically in browser, node, and fake-indexeddb. Object URLs are derived, kept in a `urls` map, and revoked on remove. Migration rule (permanent): never rename or repurpose a stored field — bump `DB_VERSION` and convert existing rows in `openDatabase`'s `onupgradeneeded` handler.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1478,12 +1562,15 @@ import { ImageLibrary } from '../storage/ImageLibrary'
 ```tsx
 export class AppShell extends Component {
   view: ViewId = 'builder'
-  library = ImageLibrary.new()
-  archive = CardArchive.new()
-  /** Set by the Gallery to hand a saved card to the Builder (consumed in BuilderView.mount). */
+  /** Adopted child models — AppShell owns their lifecycle (skills: child States attach as class fields). */
+  library = new ImageLibrary()
+  archive = new CardArchive()
+  /** Set by the Gallery to hand a saved card to the Builder (consumed in BuilderView.mount, Task 10). */
   pendingCard?: StoredCard = undefined
   // render() unchanged
 ```
+
+(`.new()` stays correct for **root** instances — which is why the storage tests below use `ImageLibrary.new()`/`CardArchive.new()` directly.)
 
 - [ ] **Step 8: Run tests to verify they pass**
 
@@ -1507,7 +1594,7 @@ Style brief: evoke the referenced Magic frame — layered colored border, parchm
 **Files:**
 - Create: `src/cards/arcane/palette.ts`, `src/cards/arcane/parts.tsx`, `src/cards/arcane/ArcaneCard.tsx`, `src/cards/arcane/template.ts`, `src/cards/index.ts`
 - Modify: `test/setup.ts` (register builtin templates per test)
-- Test: `src/cards/arcane/arcane.test.tsx`
+- Test: `src/cards/arcane/arcane.test.tsx`, `src/cards/layering.test.ts`
 
 **Interfaces:**
 - Consumes: `CardSurface`/`HoloFoil`/`CARD_WIDTH` (Task 3), `CardTemplate`/`CardData` types, `registerTemplate`/`listTemplates` (Task 3).
@@ -1517,6 +1604,7 @@ Style brief: evoke the referenced Magic frame — layered colored border, parchm
   - `ArcaneCard.tsx`: `class ArcaneCard extends Component` with fields `data: CardData = {}`, `holo = false`, getter `palette`, overridable subcomponent methods `TitleBar() ArtWindow() TypeLine() RulesBox() StatBadge()`
   - `template.ts`: `arcaneTemplate: CardTemplate` with `id: 'arcane-hero'`, `kitId: 'arcane'`
   - `src/cards/index.ts`: barrel re-exporting everything above plus base/types/registry, and `registerBuiltinTemplates(): void` (idempotent)
+  - `src/cards/layering.test.ts`: mechanical enforcement of the kits-import-nothing-upward rule
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1575,6 +1663,36 @@ describe('ArcaneCard', () => {
     await tick()
     expect(container.querySelector('[data-holo="true"]')).not.toBeNull()
     unmount()
+  })
+})
+```
+
+`src/cards/layering.test.ts` — makes the "kits are pure data-to-pixels" rule mechanical (Global Constraints):
+
+```ts
+import { describe, expect, it } from 'vitest'
+
+const FORBIDDEN_LAYERS = ['app', 'builder', 'storage', 'images', 'editor', 'export', 'gallery', 'server']
+
+const sources = import.meta.glob('./**/*.{ts,tsx}', {
+  query: '?raw',
+  import: 'default',
+  eager: true,
+}) as Record<string, string>
+
+describe('cards/ layering', () => {
+  it('scans real files (guard against a silent empty glob)', () => {
+    expect(Object.keys(sources).length).toBeGreaterThan(5)
+  })
+
+  it('never imports upward into app layers', () => {
+    for (const [path, content] of Object.entries(sources)) {
+      if (path.includes('.test.')) continue
+      for (const layer of FORBIDDEN_LAYERS) {
+        expect(content, `${path} must not import ../${layer}`).not.toContain(`from '../${layer}`)
+        expect(content, `${path} must not import ../../${layer}`).not.toContain(`from '../../${layer}`)
+      }
+    }
   })
 })
 ```
@@ -1816,9 +1934,11 @@ import {
 } from './parts'
 
 /**
- * The Arcane kit's card. Capital-letter methods are expressive subcomponents —
- * subclasses (including Code Lab users) can override any of them:
+ * The Arcane kit's card. The PascalCase methods here PASS the skills' extension test
+ * (react/component.md): each is a renderer a subclass would genuinely replace — that is
+ * the whole "build your own card style" story, in the Builder and the Code Lab alike:
  *   class MyCard extends ArcaneCard { TitleBar = () => <div>custom</div> }
+ * (Views elsewhere must NOT copy this pattern for mere implementation scoping.)
  */
 export class ArcaneCard extends Component {
   data: CardData = {}
@@ -1829,59 +1949,65 @@ export class ArcaneCard extends Component {
   }
 
   TitleBar() {
+    const { data, palette } = this
     return (
       <ArcaneTitleBar
-        name={String(this.data.name ?? 'Unnamed')}
-        cost={Number(this.data.cost ?? 0)}
-        palette={this.palette}
+        name={String(data.name ?? 'Unnamed')}
+        cost={Number(data.cost ?? 0)}
+        palette={palette}
       />
     )
   }
 
   ArtWindow() {
-    const art = this.data.art
+    const { data, palette } = this
+    const art = data.art
     return (
       <ArcaneArtWindow
         art={typeof art === 'string' && art.length > 0 ? art : undefined}
-        alt={String(this.data.name ?? 'card art')}
-        palette={this.palette}
+        alt={String(data.name ?? 'card art')}
+        palette={palette}
       />
     )
   }
 
   TypeLine() {
+    const { data, palette } = this
     return (
       <ArcaneTypeLine
-        text={String(this.data.typeLine ?? '')}
-        rarity={(this.data.rarity ?? 'common') as RarityId}
-        palette={this.palette}
+        text={String(data.typeLine ?? '')}
+        rarity={(data.rarity ?? 'common') as RarityId}
+        palette={palette}
       />
     )
   }
 
   RulesBox() {
+    const { data, palette } = this
     return (
       <ArcaneRulesBox
-        ability={String(this.data.ability ?? '')}
-        flavor={String(this.data.flavor ?? '')}
-        palette={this.palette}
+        ability={String(data.ability ?? '')}
+        flavor={String(data.flavor ?? '')}
+        palette={palette}
       />
     )
   }
 
   StatBadge() {
+    const { data, palette } = this
     return (
       <ArcaneStatBadge
-        might={Number(this.data.might ?? 0)}
-        ward={Number(this.data.ward ?? 0)}
-        palette={this.palette}
+        might={Number(data.might ?? 0)}
+        ward={Number(data.ward ?? 0)}
+        palette={palette}
       />
     )
   }
 
   render() {
+    const { holo, palette } = this
     return (
-      <CardSurface holo={this.holo} frameClass={this.palette.frame}>
+      <CardSurface holo={holo} frameClass={palette.frame}>
         <div className="flex h-full flex-col gap-1.5 p-3.5">
           <this.TitleBar />
           <this.ArtWindow />
@@ -1989,7 +2115,7 @@ registerBuiltinTemplates()
 
 - [ ] **Step 8: Run tests to verify they pass**
 
-Run: `bun run test`. Expected: PASS — 7 new arcane tests, everything else green.
+Run: `bun run test`. Expected: PASS — 7 arcane tests + 2 layering tests, everything else green.
 
 - [ ] **Step 9: Verify in the browser, then commit**
 
@@ -2011,10 +2137,11 @@ git commit -m "feat: add arcane card kit with palette, parts, card, and register
 - Test: `src/builder/builder.test.tsx`
 
 **Interfaces:**
-- Consumes: ui kit (Task 2), `AppShell` + `archive` (Task 4), template registry + `arcaneTemplate` (Task 5), `mountApp`/`setInput` helpers.
+- Consumes: ui kit (Task 2), `AppShell` + adopted `archive`/`library` (Task 4), template registry + `arcaneTemplate` (Task 5), `mountApp`/`setInput` helpers.
 - Produces:
   - `FormRenderer(props: { fields: readonly FieldSpec[]; data: CardData; onField: (key: string, value: FieldValue) => void; imageSlot?: (spec: Extract<FieldSpec, { kind: 'image' }>) => ReactNode })` — image fields render `imageSlot(spec)` if given, else a dim note (Task 8 supplies the real slot)
-  - `class BuilderView extends Component` with fields `templateId: string`, `data: CardData`, `holo: boolean`, `savedId?: string`, `savedNote: string`, `libraryImages: StoredImage[]`, `libraryUrls: Record<string, string>`, `portraitKey?: string`, `shell?: AppShell`, `previewEl: HTMLElement | null`; getters `template: CardTemplate`, `resolved: CardData`; methods `setField(key: string, value: FieldValue): void`, `pickTemplate(id: string): void`, `saveCard(): Promise<void>`, `loadCard(card: StoredCard): void`. (`libraryImages`/`libraryUrls`/`portraitKey` sit unused until Task 8; `shell` mirror wiring lands in Task 8's `mount()`; Task 10 adds the `pendingCard` watcher.)
+  - `class BuilderView extends Component` with fields `shell = get(AppShell, false)`, `templateId: string`, `data: CardData`, `holo: boolean`, `savedId?: string`, `savedNote: string`, `portraitKey?: string`, `previewEl = ref<HTMLDivElement>()`; getters `template: CardTemplate`, `resolved: CardData`; methods `setField(key: string, value: FieldValue): void`, `pickTemplate(id: string): void`, `saveCard(): Promise<void>`, `loadCard(card: StoredCard): void`. (`portraitKey` sits unused until Task 8; Task 10 adds a `mount()` for the gallery hand-off.)
+  - File-local function components `BuilderForm()` and `BuilderPreview()` — implementation scoping per the skills (freestanding + `BuilderView.get()`), not subcomponent methods.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -2070,6 +2197,8 @@ describe('BuilderView', () => {
     })
     expect(shell.archive.cards[0]?.name).toBe('Nyra, Ember Sage')
     expect(shell.archive.cards[0]?.templateId).toBe('arcane-hero')
+    await tick()
+    expect(container.textContent).toContain('Saved')
     unmount()
   })
 })
@@ -2163,10 +2292,10 @@ function FieldControl(props: {
 
 - [ ] **Step 4: Implement BuilderView**
 
-`src/builder/BuilderView.tsx`:
+`src/builder/BuilderView.tsx` (complete file):
 
 ```tsx
-import { Component } from '@expressive/react'
+import { Component, get, ref } from '@expressive/react'
 // Value import of AppShell is a deliberate module cycle (AppShell renders BuilderView).
 // Safe: neither module touches the other's binding during module evaluation — only
 // inside method bodies at runtime, which ESM live bindings resolve correctly.
@@ -2174,22 +2303,19 @@ import { AppShell } from '../app/AppShell'
 import { getTemplate, listTemplates } from '../cards/registry'
 import type { CardData, CardTemplate, FieldValue } from '../cards/types'
 import type { StoredCard } from '../storage/CardArchive'
-import type { StoredImage } from '../storage/ImageLibrary'
 import { Button, Panel, SelectInput } from '../ui'
 import { FormRenderer } from './FormRenderer'
 
 export class BuilderView extends Component {
+  shell = get(AppShell, false)
   templateId = ''
   data: CardData = {}
   holo = false
   savedId?: string = undefined
   savedNote = ''
-  /** Mirrored from AppShell.library in Task 8; consumed by `resolved` and the portrait slot. */
-  libraryImages: StoredImage[] = []
-  libraryUrls: Record<string, string> = {}
+  /** Which image field's portrait tools are open (Task 8). */
   portraitKey?: string = undefined
-  shell?: AppShell = undefined
-  previewEl: HTMLElement | null = null
+  previewEl = ref<HTMLDivElement>()
 
   protected new() {
     const first = listTemplates()[0]
@@ -2200,15 +2326,15 @@ export class BuilderView extends Component {
     return getTemplate(this.templateId)
   }
 
-  /** Card data with image references resolved to displayable URLs. */
+  /** Card data with image-library references resolved to displayable URLs (tracks library.urls transitively). */
   get resolved(): CardData {
+    const urls = this.shell?.library.urls ?? {}
     const out: CardData = { ...this.data }
     for (const field of this.template.fields) {
       if (field.kind !== 'image') continue
       const raw = out[field.key]
       const id = typeof raw === 'string' ? raw : ''
-      out[field.key] =
-        this.libraryUrls[id] ?? (id.startsWith('blob:') || id.startsWith('data:') ? id : undefined)
+      out[field.key] = urls[id] ?? (id.startsWith('blob:') || id.startsWith('data:') ? id : undefined)
     }
     return out
   }
@@ -2233,7 +2359,11 @@ export class BuilderView extends Component {
   }
 
   async saveCard() {
-    const shell = this.shell ?? this.get(AppShell)
+    const { shell } = this
+    if (!shell) {
+      this.savedNote = 'Storage unavailable.'
+      return
+    }
     const saved = await shell.archive.saveCard({
       id: this.savedId,
       name: String(this.data.name ?? 'Untitled'),
@@ -2245,67 +2375,79 @@ export class BuilderView extends Component {
     this.savedNote = `Saved “${saved.name}” to the gallery.`
   }
 
-  Form() {
-    return (
-      <aside className="flex w-96 shrink-0 flex-col gap-4 overflow-y-auto border-r border-edge p-4">
-        <Panel title="Template">
-          <SelectInput
-            value={this.templateId}
-            onValue={(id) => this.pickTemplate(id)}
-            options={listTemplates().map((t) => ({ value: t.id, label: t.name }))}
-          />
-          <p className="mt-2 text-xs text-ink-dim">{this.template.description}</p>
-        </Panel>
-        <Panel title="Details">
-          <FormRenderer fields={this.template.fields} data={this.data} onField={this.setField} />
-        </Panel>
-        <div className="flex items-center gap-3">
-          <Button onClick={() => void this.saveCard()}>Save to gallery</Button>
-          {this.savedNote ? <span className="text-xs text-ink-dim">{this.savedNote}</span> : null}
-        </div>
-      </aside>
-    )
-  }
-
-  Preview() {
-    const Render = this.template.Render
-    return (
-      <section className="flex min-w-0 flex-1 items-center justify-center overflow-auto p-6">
-        <div className="flex flex-col items-center gap-4">
-          <div
-            ref={(el) => {
-              this.previewEl = el
-            }}
-          >
-            <Render data={this.resolved} holo={this.holo} />
-          </div>
-          <div className="flex items-center gap-3">
-            <Button
-              tone="ghost"
-              onClick={() => {
-                this.holo = !this.holo
-              }}
-            >
-              {this.holo ? 'Holo: on' : 'Holo: off'}
-            </Button>
-          </div>
-        </div>
-      </section>
-    )
-  }
-
   render() {
     return (
       <div className="flex h-full">
-        <this.Form />
-        <this.Preview />
+        <BuilderForm />
+        <BuilderPreview />
       </div>
     )
   }
 }
+
+/** Implementation scoping per the skills: freestanding function components + .get(),
+ *  NOT subcomponent methods (those are reserved for extension points like ArcaneCard's). */
+function BuilderForm() {
+  const {
+    is: builder,
+    template,
+    templateId,
+    data,
+    savedNote,
+  } = BuilderView.get()
+  return (
+    <aside className="flex w-96 shrink-0 flex-col gap-4 overflow-y-auto border-r border-edge p-4">
+      <Panel title="Template">
+        <SelectInput
+          value={templateId}
+          onValue={(id) => builder.pickTemplate(id)}
+          options={listTemplates().map((t) => ({ value: t.id, label: t.name }))}
+        />
+        <p className="mt-2 text-xs text-ink-dim">{template.description}</p>
+      </Panel>
+      <Panel title="Details">
+        <FormRenderer fields={template.fields} data={data} onField={builder.setField} />
+      </Panel>
+      <div className="flex items-center gap-3">
+        <Button onClick={() => void builder.saveCard()}>Save to gallery</Button>
+        {savedNote && <span className="text-xs text-ink-dim">{savedNote}</span>}
+      </div>
+    </aside>
+  )
+}
+
+function BuilderPreview() {
+  const {
+    is: builder,
+    template,
+    resolved,
+    holo,
+    previewEl,
+  } = BuilderView.get()
+  const Render = template.Render
+  return (
+    <section className="flex min-w-0 flex-1 items-center justify-center overflow-auto p-6">
+      <div className="flex flex-col items-center gap-4">
+        <div ref={previewEl}>
+          <Render data={resolved} holo={holo} />
+        </div>
+        <div className="flex items-center gap-3">
+          <Button
+            tone="ghost"
+            onClick={() => {
+              builder.holo = !builder.holo
+            }}
+          >
+            {holo ? 'Holo: on' : 'Holo: off'}
+          </Button>
+        </div>
+      </div>
+    </section>
+  )
+}
 ```
 
-Notes on the class above: `setField` is passed directly as a prop (`onField={this.setField}`) — expressive auto-binds methods, so no arrow wrapper is needed. Task 8 adds an `imageSlot` prop to that `FormRenderer` usage and wires `this.shell` in `mount()`; until then `saveCard` falls back to the `this.get(AppShell)` context lookup.
+Notes: `onField={builder.setField}` passes the method directly — expressive auto-binds. `builder` is retained via `is:` alongside the destructured snapshot (the documented pattern for writes like `builder.holo = !builder.holo`). `resolved` reads `this.shell?.library.urls` through the `get()` field — the Task 1 probe guarantees this getter re-computes when the library changes. Task 8 adds the `imageSlot` prop and the portrait section to `BuilderForm`; Task 9 adds `ExportBar` to `BuilderPreview`; Task 10 adds `mount()` for the gallery hand-off.
 
 - [ ] **Step 5: Mount it in the shell**
 
@@ -2318,7 +2460,7 @@ import { BuilderView } from '../builder/BuilderView'
 and replace the builder pane:
 
 ```tsx
-          <Pane active={this.view === 'builder'}>
+          <Pane active={view === 'builder'}>
             <BuilderView />
           </Pane>
 ```
@@ -2358,8 +2500,8 @@ The AI image subsystem, spec'd as its own composable components: an `ImageProvid
   - `provider.ts`: `interface GenerationInput { sourceBytes: ArrayBuffer; sourceType: string; prompt: string; styleId: string }`; `interface GenerationOutput { bytes: ArrayBuffer; type: string }`; `interface ImageProvider { readonly id: 'stub' | 'replicate'; generate(input: GenerationInput): Promise<GenerationOutput> }`; `selectImageProvider(fetchImpl?: typeof fetch): Promise<ImageProvider>`
   - `stub.ts`: `interface StubStyle { hue: number; label: string }`; `stubStyleFor(styleId: string): StubStyle` (deterministic); `type PaintFn = (input: GenerationInput, style: StubStyle) => Promise<GenerationOutput>`; `paintStylizedFrame: PaintFn` (canvas; browser-only); `createStubProvider(paint?: PaintFn): ImageProvider`; `stubProvider: ImageProvider`
   - `replicate.ts`: `replicateProvider: ImageProvider` (+ `createReplicateProvider(fetchImpl?: typeof fetch): ImageProvider` for tests)
-  - `CameraCapture.tsx`: `class CameraCapture extends Component` with fields `onFrame?: (bytes: ArrayBuffer, type: string) => void`, `error: string`
-  - `ImageLabView.tsx`: `class ImageLabView extends Component` with fields `prompt`, `styleId`, `sourceBytes?`, `sourceType`, `sourcePreview`, `useCamera`, `busy`, `note`, `images: StoredImage[]`, `imageUrls: Record<string, string>`, `shell?: AppShell`; getter `fullPrompt: string`; methods `acceptSource(bytes: ArrayBuffer, type: string): void`, `generate(provider?: ImageProvider): Promise<void>`
+  - `CameraCapture.tsx`: `class CameraCapture extends Component` with fields `onFrame?: (bytes: ArrayBuffer, type: string) => void`, `error: string`, `video = ref<HTMLVideoElement>(...)`
+  - `ImageLabView.tsx`: `class ImageLabView extends Component` with fields `shell = get(AppShell, false)`, `prompt`, `styleId`, `sourceBytes?`, `sourceType`, `sourcePreview`, `useCamera`, `busy`, `note`; getter `fullPrompt: string`; methods `acceptSource(bytes: ArrayBuffer, type: string): void`, `generate(provider?: ImageProvider, intoLibrary?: ImageLibrary): Promise<void>` (trailing params are the DI seam for headless tests); file-local function components `LabSource()`, `LabControls()`, `LabResults()`
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -2368,7 +2510,6 @@ The AI image subsystem, spec'd as its own composable components: an `ImageProvid
 ```tsx
 import { describe, expect, it, vi } from 'vitest'
 import { mount, tick } from '../../test/util'
-import type { AppShell } from '../app/AppShell'
 import { ImageLibrary } from '../storage/ImageLibrary'
 import { CameraCapture } from './CameraCapture'
 import { bytesToDataUrl, dataUrlToBytes } from './codec'
@@ -2459,20 +2600,19 @@ describe('ImageLabView (headless)', () => {
     lab.set(null)
   })
 
-  it('generates via the given provider and stores the result in the library', async () => {
+  it('generates via the injected provider and stores into the injected library', async () => {
     const lab = ImageLabView.new()
     const library = ImageLibrary.new()
     await vi.waitFor(() => {
       expect(library.ready).toBe(true)
     })
-    lab.shell = { library } as unknown as AppShell
     lab.acceptSource(bytesOf('face'), 'image/jpeg')
     lab.prompt = 'as a noble knight'
     const provider: ImageProvider = {
       id: 'stub',
       generate: vi.fn(async () => ({ bytes: bytesOf('styled'), type: 'image/png' })),
     }
-    await lab.generate(provider)
+    await lab.generate(provider, library)
     expect(provider.generate).toHaveBeenCalledOnce()
     expect(library.images).toHaveLength(1)
     expect(library.images[0]?.kind).toBe('generated')
@@ -2680,13 +2820,16 @@ export const replicateProvider: ImageProvider = createReplicateProvider()
 `src/images/CameraCapture.tsx`:
 
 ```tsx
-import { Component } from '@expressive/react'
+import { Component, ref } from '@expressive/react'
 
 /** "Lock on to a webcam, take a pic" — stream starts on mount, stops on unmount. */
 export class CameraCapture extends Component {
   onFrame?: (bytes: ArrayBuffer, type: string) => void = undefined
   error = ''
-  #video: HTMLVideoElement | null = null
+  /** ref() callback wires the stream whenever the element attaches. */
+  video = ref<HTMLVideoElement>((el) => {
+    if (this.#stream) el.srcObject = this.#stream
+  })
   #stream: MediaStream | undefined
 
   mount() {
@@ -2699,7 +2842,8 @@ export class CameraCapture extends Component {
       .getUserMedia({ video: { facingMode: 'user' }, audio: false })
       .then((stream) => {
         this.#stream = stream
-        if (this.#video) this.#video.srcObject = stream
+        const el = this.video.current
+        if (el) el.srcObject = stream
       })
       .catch((cause: unknown) => {
         this.error = `Camera unavailable: ${cause instanceof Error ? cause.message : String(cause)}`
@@ -2710,7 +2854,7 @@ export class CameraCapture extends Component {
   }
 
   async capture() {
-    const video = this.#video
+    const video = this.video.current
     if (!video || video.videoWidth === 0) return
     const canvas = document.createElement('canvas')
     canvas.width = video.videoWidth
@@ -2723,8 +2867,9 @@ export class CameraCapture extends Component {
   }
 
   render() {
-    if (this.error) {
-      return <p className="rounded border border-edge p-3 text-xs text-ink-dim">{this.error}</p>
+    const { error } = this
+    if (error) {
+      return <p className="rounded border border-edge p-3 text-xs text-ink-dim">{error}</p>
     }
     return (
       <div className="flex flex-col gap-2">
@@ -2733,10 +2878,7 @@ export class CameraCapture extends Component {
           muted
           playsInline
           className="aspect-video w-full rounded border border-edge bg-black object-cover"
-          ref={(el) => {
-            this.#video = el
-            if (el && this.#stream) el.srcObject = this.#stream
-          }}
+          ref={this.video}
         />
         <button
           type="button"
@@ -2756,10 +2898,10 @@ export class CameraCapture extends Component {
 `src/images/ImageLabView.tsx`:
 
 ```tsx
-import { Component } from '@expressive/react'
+import { Component, get } from '@expressive/react'
 import { AppShell } from '../app/AppShell'
 import { getTemplate, listTemplates } from '../cards/registry'
-import type { StoredImage } from '../storage/ImageLibrary'
+import type { ImageLibrary } from '../storage/ImageLibrary'
 import { Button, EmptyState, FieldRow, Panel, SelectInput, TextAreaInput } from '../ui'
 import { CameraCapture } from './CameraCapture'
 import { bytesToDataUrl } from './codec'
@@ -2767,6 +2909,7 @@ import { selectImageProvider } from './provider'
 import type { ImageProvider } from './provider'
 
 export class ImageLabView extends Component {
+  shell = get(AppShell, false)
   prompt = ''
   styleId = 'freestyle'
   sourceBytes?: ArrayBuffer = undefined
@@ -2775,18 +2918,6 @@ export class ImageLabView extends Component {
   useCamera = false
   busy = false
   note = ''
-  images: StoredImage[] = []
-  imageUrls: Record<string, string> = {}
-  shell?: AppShell = undefined
-
-  mount() {
-    const shell = this.get(AppShell)
-    this.shell = shell
-    return shell.library.get((current) => {
-      this.images = current.images
-      this.imageUrls = current.urls
-    })
-  }
 
   get fullPrompt(): string {
     const base =
@@ -2806,11 +2937,17 @@ export class ImageLabView extends Component {
     this.note = ''
   }
 
-  async generate(provider?: ImageProvider) {
+  /** Trailing params are the DI seam for headless tests; context supplies the defaults. */
+  async generate(provider?: ImageProvider, intoLibrary?: ImageLibrary) {
     if (this.busy) return
     const source = this.sourceBytes
     if (!source) {
       this.note = 'Capture or upload a photo first.'
+      return
+    }
+    const library = intoLibrary ?? this.shell?.library
+    if (!library) {
+      this.note = 'Image library unavailable.'
       return
     }
     this.busy = true
@@ -2824,9 +2961,7 @@ export class ImageLabView extends Component {
         prompt,
         styleId: this.styleId,
       })
-      const shell = this.shell
-      if (!shell) throw new Error('image library unavailable')
-      await shell.library.add({ kind: 'generated', prompt, styleId: this.styleId, bytes: out.bytes, type: out.type })
+      await library.add({ kind: 'generated', prompt, styleId: this.styleId, bytes: out.bytes, type: out.type })
       this.note = `Done — generated via ${chosen.id}.`
     } catch (cause) {
       this.note = cause instanceof Error ? cause.message : String(cause)
@@ -2835,106 +2970,120 @@ export class ImageLabView extends Component {
     }
   }
 
-  Source() {
-    return (
-      <Panel title="Source photo">
-        <div className="flex flex-col gap-3">
-          <div className="flex gap-2">
-            <Button tone={this.useCamera ? 'ghost' : 'accent'} onClick={() => { this.useCamera = false }}>
-              Upload
-            </Button>
-            <Button tone={this.useCamera ? 'accent' : 'ghost'} onClick={() => { this.useCamera = true }}>
-              Webcam
-            </Button>
-          </div>
-          {this.useCamera ? (
-            <CameraCapture onFrame={(bytes, type) => this.acceptSource(bytes, type)} />
-          ) : (
-            <input
-              type="file"
-              accept="image/*"
-              className="text-xs text-ink-dim file:mr-3 file:rounded file:border-0 file:bg-accent file:px-3 file:py-1.5 file:text-surface"
-              onChange={(e) => {
-                const file = e.target.files?.[0]
-                if (!file) return
-                void file.arrayBuffer().then((bytes) => this.acceptSource(bytes, file.type || 'image/png'))
-              }}
-            />
-          )}
-          {this.sourcePreview ? (
-            <img src={this.sourcePreview} alt="source" className="h-28 w-28 rounded object-cover" />
-          ) : null}
-        </div>
-      </Panel>
-    )
-  }
-
-  Controls() {
-    const styleOptions = [
-      { value: 'freestyle', label: 'Freestyle prompt' },
-      ...listTemplates().map((t) => ({ value: t.id, label: `${t.name} style` })),
-    ]
-    return (
-      <Panel title="Generation">
-        <div className="flex flex-col gap-3">
-          <FieldRow label="Style">
-            <SelectInput value={this.styleId} onValue={(v) => { this.styleId = v }} options={styleOptions} />
-          </FieldRow>
-          <FieldRow label="Prompt">
-            <TextAreaInput
-              value={this.prompt}
-              onValue={(v) => { this.prompt = v }}
-              rows={3}
-              placeholder="as a storm mage atop a cliff…"
-            />
-          </FieldRow>
-          <div className="flex items-center gap-3">
-            <Button disabled={this.busy} onClick={() => void this.generate()}>
-              {this.busy ? 'Generating…' : 'Generate'}
-            </Button>
-            {this.note ? <span className="text-xs text-ink-dim">{this.note}</span> : null}
-          </div>
-        </div>
-      </Panel>
-    )
-  }
-
-  Results() {
-    const generated = this.images.filter((i) => i.kind === 'generated')
-    if (generated.length === 0) {
-      return <EmptyState message="No generations yet." hint="Results land here and in the Gallery." />
-    }
-    return (
-      <div className="grid grid-cols-3 gap-3 overflow-y-auto p-1 xl:grid-cols-4">
-        {generated.map((image) => (
-          <figure key={image.id} className="flex flex-col gap-1">
-            <img
-              src={this.imageUrls[image.id]}
-              alt={image.prompt ?? 'generated'}
-              className="aspect-square w-full rounded border border-edge object-cover"
-            />
-            <figcaption className="truncate text-[11px] text-ink-dim">{image.prompt}</figcaption>
-          </figure>
-        ))}
-      </div>
-    )
-  }
-
   render() {
     return (
       <div className="flex h-full">
         <aside className="flex w-96 shrink-0 flex-col gap-4 overflow-y-auto border-r border-edge p-4">
-          <this.Source />
-          <this.Controls />
+          <LabSource />
+          <LabControls />
         </aside>
         <section className="min-w-0 flex-1 overflow-y-auto p-4">
-          <this.Results />
+          <LabResults />
         </section>
       </div>
     )
   }
 }
+
+function LabSource() {
+  const {
+    is: lab,
+    useCamera,
+    sourcePreview,
+  } = ImageLabView.get()
+  return (
+    <Panel title="Source photo">
+      <div className="flex flex-col gap-3">
+        <div className="flex gap-2">
+          <Button tone={useCamera ? 'ghost' : 'accent'} onClick={() => { lab.useCamera = false }}>
+            Upload
+          </Button>
+          <Button tone={useCamera ? 'accent' : 'ghost'} onClick={() => { lab.useCamera = true }}>
+            Webcam
+          </Button>
+        </div>
+        {useCamera ? (
+          <CameraCapture onFrame={(bytes, type) => lab.acceptSource(bytes, type)} />
+        ) : (
+          <input
+            type="file"
+            accept="image/*"
+            className="text-xs text-ink-dim file:mr-3 file:rounded file:border-0 file:bg-accent file:px-3 file:py-1.5 file:text-surface"
+            onChange={(e) => {
+              const file = e.target.files?.[0]
+              if (!file) return
+              void file.arrayBuffer().then((bytes) => lab.acceptSource(bytes, file.type || 'image/png'))
+            }}
+          />
+        )}
+        {sourcePreview && <img src={sourcePreview} alt="source" className="h-28 w-28 rounded object-cover" />}
+      </div>
+    </Panel>
+  )
+}
+
+function LabControls() {
+  const {
+    is: lab,
+    styleId,
+    prompt,
+    busy,
+    note,
+  } = ImageLabView.get()
+  const styleOptions = [
+    { value: 'freestyle', label: 'Freestyle prompt' },
+    ...listTemplates().map((t) => ({ value: t.id, label: `${t.name} style` })),
+  ]
+  return (
+    <Panel title="Generation">
+      <div className="flex flex-col gap-3">
+        <FieldRow label="Style">
+          <SelectInput value={styleId} onValue={(v) => { lab.styleId = v }} options={styleOptions} />
+        </FieldRow>
+        <FieldRow label="Prompt">
+          <TextAreaInput
+            value={prompt}
+            onValue={(v) => { lab.prompt = v }}
+            rows={3}
+            placeholder="as a storm mage atop a cliff…"
+          />
+        </FieldRow>
+        <div className="flex items-center gap-3">
+          <Button disabled={busy} onClick={() => void lab.generate()}>
+            {busy ? 'Generating…' : 'Generate'}
+          </Button>
+          {note && <span className="text-xs text-ink-dim">{note}</span>}
+        </div>
+      </div>
+    </Panel>
+  )
+}
+
+function LabResults() {
+  const { shell } = ImageLabView.get()
+  const generated = (shell?.library.images ?? []).filter((i) => i.kind === 'generated')
+  const urls = shell?.library.urls ?? {}
+  if (generated.length === 0) {
+    return <EmptyState message="No generations yet." hint="Results land here and in the Gallery." />
+  }
+  return (
+    <div className="grid grid-cols-3 gap-3 overflow-y-auto p-1 xl:grid-cols-4">
+      {generated.map((image) => (
+        <figure key={image.id} className="flex flex-col gap-1">
+          <img
+            src={urls[image.id]}
+            alt={image.prompt ?? 'generated'}
+            className="aspect-square w-full rounded border border-edge object-cover"
+          />
+          <figcaption className="truncate text-[11px] text-ink-dim">{image.prompt}</figcaption>
+        </figure>
+      ))}
+    </div>
+  )
+}
 ```
+
+(`LabResults` reads `shell?.library.images` straight through the `get()` field — the Task 1 probe guarantees this re-renders when the library changes. No mirroring anywhere.)
 
 In `src/app/AppShell.tsx`, import `ImageLabView` and swap the images pane:
 
@@ -2943,7 +3092,7 @@ import { ImageLabView } from '../images/ImageLabView'
 ```
 
 ```tsx
-          <Pane active={this.view === 'images'}>
+          <Pane active={view === 'images'}>
             <ImageLabView />
           </Pane>
 ```
@@ -2972,12 +3121,12 @@ The "sub view for the AI generated image portion" of static mode: an image field
 
 **Files:**
 - Create: `src/builder/PortraitSection.tsx`
-- Modify: `src/builder/BuilderView.tsx` (add `mount()`, `PortraitSlot` subcomponent, pass `imageSlot` to FormRenderer)
+- Modify: `src/builder/BuilderView.tsx` (add `PortraitSlot` function component, pass `imageSlot`, render the open section)
 - Test: `src/builder/portrait.test.tsx`
 
 **Interfaces:**
-- Consumes: `BuilderView` fields (Task 6: `libraryImages`, `libraryUrls`, `portraitKey`, `setField`, `template`, `data`), `CameraCapture`/`selectImageProvider`/`buildPortraitPrompt`/`bytesToDataUrl` (Task 7), `AppShell.library` (Task 4).
-- Produces: `class PortraitSection extends Component` with fields `fieldKey: string`, `source: 'upload' | 'camera' | 'library'`, `persona: Persona`, `pendingBytes?: ArrayBuffer`, `pendingType: string`, `pendingPreview: string`, `busy: boolean`, `note: string`, `builder?: BuilderView`, `shell?: AppShell`; methods `acceptSource(bytes: ArrayBuffer, type: string): void`, `setPersona(key: keyof Persona, value: string): void`, `generate(provider?: ImageProvider): Promise<void>`, `useLibraryImage(id: string): void`. `BuilderView` gains `mount()` (shell + library mirror) and `PortraitSlot(props: { fieldKey: string })`.
+- Consumes: `BuilderView` (Task 6: `setField`, `template`, `templateId`, `data`, `portraitKey`, `shell`), `CameraCapture`/`selectImageProvider`/`buildPortraitPrompt`/`bytesToDataUrl` (Task 7), `AppShell.library` (Task 4).
+- Produces: `class PortraitSection extends Component` with fields `builder = get(BuilderView, false)`, `shell = get(AppShell, false)`, `fieldKey: string`, `source: 'upload' | 'camera' | 'library'`, `persona: Persona`, `pendingBytes?: ArrayBuffer`, `pendingType: string`, `pendingPreview: string`, `busy: boolean`, `note: string`; methods `acceptSource(bytes: ArrayBuffer, type: string): void`, `setPersona(key: keyof Persona, value: string): void`, `generate(provider?: ImageProvider, deps?: { builder?: BuilderView; library?: ImageLibrary }): Promise<void>` (DI seam), `useLibraryImage(id: string): void`; file-local function components `PortraitSourcePicker()`, `PortraitPersonaForm()`. `BuilderView.tsx` gains the `PortraitSlot(props: { fieldKey: string })` function component.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -2986,7 +3135,6 @@ The "sub view for the AI generated image portion" of static mode: an image field
 ```tsx
 import { describe, expect, it, vi } from 'vitest'
 import { click, mountApp, tick } from '../../test/util'
-import type { AppShell } from '../app/AppShell'
 import { ImageLibrary } from '../storage/ImageLibrary'
 import type { ImageProvider } from '../images/provider'
 import { BuilderView } from './BuilderView'
@@ -3002,8 +3150,6 @@ describe('PortraitSection (headless)', () => {
     })
     const builder = BuilderView.new()
     const section = PortraitSection.new({ fieldKey: 'art' })
-    section.builder = builder
-    section.shell = { library } as unknown as AppShell
 
     section.acceptSource(bytesOf('face'), 'image/png')
     section.setPersona('age', '29')
@@ -3019,12 +3165,12 @@ describe('PortraitSection (headless)', () => {
         return { bytes: bytesOf('styled'), type: 'image/png' }
       }),
     }
-    await section.generate(provider)
+    await section.generate(provider, { builder, library })
 
     expect(library.images).toHaveLength(1)
     const stored = library.images[0]
     expect(builder.data.art).toBe(stored?.id)
-    expect(builder.resolved.art).toBeUndefined() // builder.libraryUrls not mirrored headless — fine
+    expect(builder.resolved.art).toBeUndefined() // headless builder has no shell → no url mapping — fine
 
     section.set(null)
     builder.set(null)
@@ -3064,10 +3210,10 @@ Run: `bun run test`. Expected: FAIL — `PortraitSection` does not exist; no "Po
 
 - [ ] **Step 3: Implement PortraitSection**
 
-`src/builder/PortraitSection.tsx`:
+`src/builder/PortraitSection.tsx` (complete file):
 
 ```tsx
-import { Component } from '@expressive/react'
+import { Component, get } from '@expressive/react'
 import { AppShell } from '../app/AppShell'
 import { CameraCapture } from '../images/CameraCapture'
 import { bytesToDataUrl } from '../images/codec'
@@ -3075,7 +3221,9 @@ import { buildPortraitPrompt } from '../images/prompt'
 import type { Persona } from '../images/prompt'
 import { selectImageProvider } from '../images/provider'
 import type { ImageProvider } from '../images/provider'
+import type { ImageLibrary } from '../storage/ImageLibrary'
 import { Button, FieldRow, Panel, TextInput } from '../ui'
+// Deliberate module cycle with BuilderView (it renders PortraitSection) — benign, see BuilderView.tsx.
 import { BuilderView } from './BuilderView'
 
 const SOURCES = [
@@ -3085,6 +3233,8 @@ const SOURCES = [
 ] as const
 
 export class PortraitSection extends Component {
+  builder = get(BuilderView, false)
+  shell = get(AppShell, false)
   fieldKey = ''
   source: 'upload' | 'camera' | 'library' = 'upload'
   persona: Persona = {}
@@ -3093,13 +3243,6 @@ export class PortraitSection extends Component {
   pendingPreview = ''
   busy = false
   note = ''
-  builder?: BuilderView = undefined
-  shell?: AppShell = undefined
-
-  mount() {
-    this.builder = this.get(BuilderView)
-    this.shell = this.get(AppShell)
-  }
 
   acceptSource(bytes: ArrayBuffer, type: string) {
     this.pendingBytes = bytes
@@ -3117,17 +3260,22 @@ export class PortraitSection extends Component {
     this.note = 'Applied from library.'
   }
 
-  async generate(provider?: ImageProvider) {
+  /** `deps` is the DI seam for headless tests; context supplies the defaults. */
+  async generate(provider?: ImageProvider, deps: { builder?: BuilderView; library?: ImageLibrary } = {}) {
     if (this.busy) return
-    const builder = this.builder
-    const shell = this.shell
     const bytes = this.pendingBytes
+    if (!bytes) {
+      this.note = 'Capture or upload a photo first.'
+      return
+    }
+    const builder = deps.builder ?? this.builder
     if (!builder) {
       this.note = 'Builder unavailable.'
       return
     }
-    if (!bytes) {
-      this.note = 'Capture or upload a photo first.'
+    const library = deps.library ?? this.shell?.library
+    if (!library) {
+      this.note = 'Image library unavailable.'
       return
     }
     this.busy = true
@@ -3141,8 +3289,7 @@ export class PortraitSection extends Component {
         prompt,
         styleId: builder.templateId,
       })
-      if (!shell) throw new Error('image library unavailable')
-      const stored = await shell.library.add({
+      const stored = await library.add({
         kind: 'generated',
         prompt,
         styleId: builder.templateId,
@@ -3158,102 +3305,112 @@ export class PortraitSection extends Component {
     }
   }
 
-  SourcePicker() {
-    return (
-      <div className="flex flex-col gap-2">
-        <div className="flex gap-1.5">
-          {SOURCES.map((s) => (
-            <Button
-              key={s.id}
-              tone={this.source === s.id ? 'accent' : 'ghost'}
-              onClick={() => {
-                this.source = s.id
-              }}
-            >
-              {s.label}
-            </Button>
-          ))}
-        </div>
-        {this.source === 'upload' ? (
-          <input
-            type="file"
-            accept="image/*"
-            className="text-xs text-ink-dim file:mr-3 file:rounded file:border-0 file:bg-accent file:px-3 file:py-1.5 file:text-surface"
-            onChange={(e) => {
-              const file = e.target.files?.[0]
-              if (!file) return
-              void file.arrayBuffer().then((b) => this.acceptSource(b, file.type || 'image/png'))
-            }}
-          />
-        ) : null}
-        {this.source === 'camera' ? (
-          <CameraCapture onFrame={(bytes, type) => this.acceptSource(bytes, type)} />
-        ) : null}
-        {this.source === 'library' ? (
-          <div className="grid max-h-40 grid-cols-4 gap-1.5 overflow-y-auto">
-            {(this.builder?.libraryImages ?? [])
-              .filter((i) => i.kind === 'generated')
-              .map((image) => (
-                <button
-                  key={image.id}
-                  type="button"
-                  onClick={() => this.useLibraryImage(image.id)}
-                  className="overflow-hidden rounded border border-edge hover:border-accent"
-                >
-                  <img
-                    src={this.builder?.libraryUrls[image.id]}
-                    alt={image.prompt ?? 'library'}
-                    className="aspect-square w-full object-cover"
-                  />
-                </button>
-              ))}
-          </div>
-        ) : null}
-        {this.pendingPreview && this.source !== 'library' ? (
-          <img src={this.pendingPreview} alt="pending source" className="h-20 w-20 rounded object-cover" />
-        ) : null}
-      </div>
-    )
-  }
-
-  PersonaForm() {
-    const fields: readonly { key: keyof Persona; label: string; placeholder: string }[] = [
-      { key: 'age', label: 'Age', placeholder: '34' },
-      { key: 'gender', label: 'Gender', placeholder: 'optional' },
-      { key: 'detail', label: 'Small detail', placeholder: 'always wears red glasses' },
-      { key: 'hobby', label: 'Hobby', placeholder: 'sourdough baking' },
-    ]
-    return (
-      <div className="grid grid-cols-2 gap-2">
-        {fields.map((f) => (
-          <FieldRow key={f.key} label={f.label}>
-            <TextInput
-              value={this.persona[f.key] ?? ''}
-              onValue={(v) => this.setPersona(f.key, v)}
-              placeholder={f.placeholder}
-            />
-          </FieldRow>
-        ))}
-      </div>
-    )
-  }
-
   render() {
+    const { busy, note } = this
     return (
       <Panel title="Portrait" className="border-accent-soft">
         <div className="flex flex-col gap-3">
-          <this.SourcePicker />
-          <this.PersonaForm />
+          <PortraitSourcePicker />
+          <PortraitPersonaForm />
           <div className="flex items-center gap-3">
-            <Button disabled={this.busy} onClick={() => void this.generate()}>
-              {this.busy ? 'Generating…' : 'Generate portrait'}
+            <Button disabled={busy} onClick={() => void this.generate()}>
+              {busy ? 'Generating…' : 'Generate portrait'}
             </Button>
           </div>
-          {this.note ? <p className="text-xs text-ink-dim">{this.note}</p> : null}
+          {note && <p className="text-xs text-ink-dim">{note}</p>}
         </div>
       </Panel>
     )
   }
+}
+
+function PortraitSourcePicker() {
+  const {
+    is: section,
+    source,
+    pendingPreview,
+    shell,
+  } = PortraitSection.get()
+  const library = shell?.library
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex gap-1.5">
+        {SOURCES.map((s) => (
+          <Button
+            key={s.id}
+            tone={source === s.id ? 'accent' : 'ghost'}
+            onClick={() => {
+              section.source = s.id
+            }}
+          >
+            {s.label}
+          </Button>
+        ))}
+      </div>
+      {source === 'upload' && (
+        <input
+          type="file"
+          accept="image/*"
+          className="text-xs text-ink-dim file:mr-3 file:rounded file:border-0 file:bg-accent file:px-3 file:py-1.5 file:text-surface"
+          onChange={(e) => {
+            const file = e.target.files?.[0]
+            if (!file) return
+            void file.arrayBuffer().then((b) => section.acceptSource(b, file.type || 'image/png'))
+          }}
+        />
+      )}
+      {source === 'camera' && <CameraCapture onFrame={(bytes, type) => section.acceptSource(bytes, type)} />}
+      {source === 'library' && (
+        <div className="grid max-h-40 grid-cols-4 gap-1.5 overflow-y-auto">
+          {(library?.images ?? [])
+            .filter((i) => i.kind === 'generated')
+            .map((image) => (
+              <button
+                key={image.id}
+                type="button"
+                onClick={() => section.useLibraryImage(image.id)}
+                className="overflow-hidden rounded border border-edge hover:border-accent"
+              >
+                <img
+                  src={library?.urls[image.id]}
+                  alt={image.prompt ?? 'library'}
+                  className="aspect-square w-full object-cover"
+                />
+              </button>
+            ))}
+        </div>
+      )}
+      {pendingPreview && source !== 'library' && (
+        <img src={pendingPreview} alt="pending source" className="h-20 w-20 rounded object-cover" />
+      )}
+    </div>
+  )
+}
+
+function PortraitPersonaForm() {
+  const {
+    is: section,
+    persona,
+  } = PortraitSection.get()
+  const fields: readonly { key: keyof Persona; label: string; placeholder: string }[] = [
+    { key: 'age', label: 'Age', placeholder: '34' },
+    { key: 'gender', label: 'Gender', placeholder: 'optional' },
+    { key: 'detail', label: 'Small detail', placeholder: 'always wears red glasses' },
+    { key: 'hobby', label: 'Hobby', placeholder: 'sourdough baking' },
+  ]
+  return (
+    <div className="grid grid-cols-2 gap-2">
+      {fields.map((f) => (
+        <FieldRow key={f.key} label={f.label}>
+          <TextInput
+            value={persona[f.key] ?? ''}
+            onValue={(v) => section.setPersona(f.key, v)}
+            placeholder={f.placeholder}
+          />
+        </FieldRow>
+      ))}
+    </div>
+  )
 }
 ```
 
@@ -3261,64 +3418,57 @@ export class PortraitSection extends Component {
 
 In `src/builder/BuilderView.tsx`:
 
-Add import:
+Add the import:
 
 ```tsx
 import { PortraitSection } from './PortraitSection'
 ```
 
-Add `mount()` right after `protected new()` (mirrors the shared library so `resolved` and the portrait slot stay live):
+Add the `PortraitSlot` function component at the bottom of the file, alongside `BuilderForm`/`BuilderPreview`:
 
 ```tsx
-  mount() {
-    const shell = this.get(AppShell)
-    this.shell = shell
-    return shell.library.get((current) => {
-      this.libraryImages = current.images
-      this.libraryUrls = current.urls
-    })
-  }
+function PortraitSlot(props: { fieldKey: string }) {
+  const {
+    is: builder,
+    data,
+    portraitKey,
+    shell,
+  } = BuilderView.get()
+  const current = data[props.fieldKey]
+  const url = (shell?.library.urls ?? {})[typeof current === 'string' ? current : '']
+  const open = portraitKey === props.fieldKey
+  return (
+    <div className="flex items-center gap-3">
+      {url ? (
+        <img src={url} alt="portrait" className="h-14 w-14 rounded object-cover" />
+      ) : (
+        <div className="flex h-14 w-14 items-center justify-center rounded bg-surface text-ink-dim">✶</div>
+      )}
+      <Button
+        tone="ghost"
+        onClick={() => {
+          builder.portraitKey = open ? undefined : props.fieldKey
+        }}
+      >
+        {open ? 'Close portrait tools' : 'Portrait tools'}
+      </Button>
+    </div>
+  )
+}
 ```
 
-Add the `PortraitSlot` subcomponent method (between `saveCard` and `Form`):
+Update `BuilderForm` — add `portraitKey` to its destructure, pass the slot, and render the open section beneath the details panel:
 
 ```tsx
-  PortraitSlot(props: { fieldKey: string }) {
-    const current = this.data[props.fieldKey]
-    const url = this.libraryUrls[typeof current === 'string' ? current : '']
-    const open = this.portraitKey === props.fieldKey
-    return (
-      <div className="flex items-center gap-3">
-        {url ? (
-          <img src={url} alt="portrait" className="h-14 w-14 rounded object-cover" />
-        ) : (
-          <div className="flex h-14 w-14 items-center justify-center rounded bg-surface text-ink-dim">✶</div>
-        )}
-        <Button
-          tone="ghost"
-          onClick={() => {
-            this.portraitKey = open ? undefined : props.fieldKey
-          }}
-        >
-          {open ? 'Close portrait tools' : 'Portrait tools'}
-        </Button>
-      </div>
-    )
-  }
-```
-
-Update the `Form()` details panel to pass the slot and render the open section beneath the form:
-
-```tsx
-        <Panel title="Details">
-          <FormRenderer
-            fields={this.template.fields}
-            data={this.data}
-            onField={this.setField}
-            imageSlot={(spec) => <this.PortraitSlot fieldKey={spec.key} />}
-          />
-        </Panel>
-        {this.portraitKey ? <PortraitSection fieldKey={this.portraitKey} /> : null}
+      <Panel title="Details">
+        <FormRenderer
+          fields={template.fields}
+          data={data}
+          onField={builder.setField}
+          imageSlot={(spec) => <PortraitSlot fieldKey={spec.key} />}
+        />
+      </Panel>
+      {portraitKey && <PortraitSection fieldKey={portraitKey} />}
 ```
 
 - [ ] **Step 5: Run tests to verify they pass**
@@ -3327,7 +3477,7 @@ Run: `bun run test`. Expected: PASS — 3 new portrait tests; Task 6 builder tes
 
 - [ ] **Step 6: Verify in the browser**
 
-`bun run dev` → Builder: click "Portrait tools" on the Portrait field → Webcam → Take photo → fill Age/Hobby → "Generate portrait" → the stubbed stylized photo appears **in the card's art window** live, and also in Image Lab results + (later) Gallery.
+`bun run dev` → Builder: click "Portrait tools" on the Portrait field → Webcam → Take photo → fill Age/Hobby → "Generate portrait" → the stubbed stylized photo appears **in the card's art window** live (via `resolved` tracking the library), and also in Image Lab results + (later) Gallery.
 
 - [ ] **Step 7: Commit**
 
@@ -3350,7 +3500,7 @@ git commit -m "feat: add builder portrait section with persona prompt and librar
 - Consumes: `ExportFormat`/`CardArchive.saveExport` (Task 4), `CARD_WIDTH` (Task 3), `AppShell` (Task 4), `BuilderView.previewEl` (Task 6), html-to-image.
 - Produces:
   - `exportCard.ts`: `CARD_EXPORT_WIDTH = 750`; `FORMAT_MIME: Record<ExportFormat, string>`; `exportPixelRatio(nodeWidth: number): number`; `exportFileName(name: string, format: ExportFormat): string`; `renderCardBlob(node: HTMLElement, format: ExportFormat, quality?: number): Promise<Blob>`; `downloadBlob(blob: Blob, fileName: string): void`
-  - `ExportBar.tsx`: `class ExportBar extends Component` with fields `cardName: string`, `target?: () => HTMLElement | null`, `note: string`, `shell?: AppShell`; method `exportAs(format: ExportFormat): Promise<void>` — downloads the file **and** records it in `CardArchive`
+  - `ExportBar.tsx`: `class ExportBar extends Component` with fields `shell = get(AppShell, false)`, `cardName: string`, `target?: () => HTMLElement | null`, `note: string`; method `exportAs(format: ExportFormat, intoArchive?: CardArchive): Promise<void>` (DI seam) — downloads the file **and** records it in the archive
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -3358,7 +3508,6 @@ git commit -m "feat: add builder portrait section with persona prompt and librar
 
 ```tsx
 import { describe, expect, it, vi } from 'vitest'
-import type { AppShell } from '../app/AppShell'
 import { CardArchive } from '../storage/CardArchive'
 import { ExportBar } from './ExportBar'
 import { CARD_EXPORT_WIDTH, exportFileName, exportPixelRatio, FORMAT_MIME, renderCardBlob } from './exportCard'
@@ -3399,15 +3548,14 @@ describe('renderCardBlob', () => {
 })
 
 describe('ExportBar', () => {
-  it('exports the target node and records it in the archive', async () => {
+  it('exports the target node and records it in the injected archive', async () => {
     const archive = CardArchive.new()
     await vi.waitFor(() => {
       expect(archive.ready).toBe(true)
     })
     const node = document.createElement('div')
     const bar = ExportBar.new({ cardName: 'Nyra', target: () => node })
-    bar.shell = { archive } as unknown as AppShell
-    await bar.exportAs('png')
+    await bar.exportAs('png', archive)
     expect(archive.exports).toHaveLength(1)
     expect(archive.exports[0]?.name).toBe('nyra.png')
     expect(archive.exports[0]?.format).toBe('png')
@@ -3484,9 +3632,9 @@ export function downloadBlob(blob: Blob, fileName: string): void {
 `src/export/ExportBar.tsx`:
 
 ```tsx
-import { Component } from '@expressive/react'
+import { Component, get } from '@expressive/react'
 import { AppShell } from '../app/AppShell'
-import type { ExportFormat } from '../storage/CardArchive'
+import type { CardArchive, ExportFormat } from '../storage/CardArchive'
 import { Button } from '../ui'
 import { downloadBlob, exportFileName, renderCardBlob } from './exportCard'
 
@@ -3494,16 +3642,13 @@ const FORMATS: readonly ExportFormat[] = ['png', 'webp', 'jpeg']
 
 /** Export buttons for any card preview: downloads the file and archives the render. */
 export class ExportBar extends Component {
+  shell = get(AppShell, false)
   cardName = ''
   target?: () => HTMLElement | null = undefined
   note = ''
-  shell?: AppShell = undefined
 
-  mount() {
-    this.shell = this.get(AppShell)
-  }
-
-  async exportAs(format: ExportFormat) {
+  /** `intoArchive` is the DI seam for headless tests; context supplies the default. */
+  async exportAs(format: ExportFormat, intoArchive?: CardArchive) {
     const node = this.target?.()
     if (!node) {
       this.note = 'Nothing to export yet.'
@@ -3514,9 +3659,9 @@ export class ExportBar extends Component {
       const blob = await renderCardBlob(node, format)
       const fileName = exportFileName(this.cardName, format)
       downloadBlob(blob, fileName)
-      const shell = this.shell
-      if (shell) {
-        await shell.archive.saveExport({
+      const archive = intoArchive ?? this.shell?.archive
+      if (archive) {
+        await archive.saveExport({
           name: fileName,
           format,
           bytes: await blob.arrayBuffer(),
@@ -3530,6 +3675,7 @@ export class ExportBar extends Component {
   }
 
   render() {
+    const { note } = this
     return (
       <div className="flex flex-col items-center gap-2">
         <div className="flex items-center gap-2">
@@ -3540,7 +3686,7 @@ export class ExportBar extends Component {
             </Button>
           ))}
         </div>
-        {this.note ? <p className="text-xs text-ink-dim">{this.note}</p> : null}
+        {note && <p className="text-xs text-ink-dim">{note}</p>}
       </div>
     )
   }
@@ -3553,14 +3699,16 @@ In `src/builder/BuilderView.tsx`, import it:
 import { ExportBar } from '../export/ExportBar'
 ```
 
-and in `Preview()`, after the Holo toggle's `</div>`, add:
+and in `BuilderPreview()`, add `data` to the destructure, then after the Holo toggle's closing `</div>`, add:
 
 ```tsx
           <ExportBar
-            cardName={String(this.data.name ?? 'card')}
-            target={() => this.previewEl}
+            cardName={String(data.name ?? 'card')}
+            target={() => previewEl.current ?? null}
           />
 ```
+
+(`previewEl` is the `ref()` object already in the destructure; reading `.current` at click time is imperative, non-subscribing — exactly right for an export target.)
 
 - [ ] **Step 5: Run tests to verify they pass**
 
@@ -3584,12 +3732,12 @@ git commit -m "feat: add print-resolution card export with archive recording"
 
 **Files:**
 - Create: `src/gallery/GalleryView.tsx`
-- Modify: `src/app/AppShell.tsx` (swap gallery pane), `src/builder/BuilderView.tsx` (consume `pendingCard` in `mount()`)
+- Modify: `src/app/AppShell.tsx` (swap gallery pane), `src/builder/BuilderView.tsx` (add `mount()` to consume `pendingCard`)
 - Test: `src/gallery/gallery.test.tsx`
 
 **Interfaces:**
 - Consumes: `AppShell.archive`/`AppShell.library`/`AppShell.pendingCard` (Task 4), `BuilderView.loadCard` (Task 6), `downloadBlob` (Task 9), ui kit.
-- Produces: `class GalleryView extends Component` with fields `section: 'exports' | 'images' | 'cards'`, mirrors `cards: StoredCard[]`, `exports: StoredExport[]`, `exportUrls: Record<string, string>`, `images: StoredImage[]`, `imageUrls: Record<string, string>`, `shell?: AppShell`; method `openCard(card: StoredCard): void` (hands the card to the Builder via `shell.pendingCard` and switches view).
+- Produces: `class GalleryView extends Component` with fields `shell = get(AppShell, false)`, `section: 'exports' | 'images' | 'cards'` and method `openCard(card: StoredCard): void` (hands the card to the Builder via `shell.pendingCard` and switches view); file-local function components `GalleryExports()`, `GalleryImages()`, `GalleryCards()` reading the stores directly through the `get()` field. `BuilderView` gains `mount()` (pendingCard watcher — its only lifecycle hook).
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -3655,14 +3803,13 @@ Run: `bun run test`. Expected: FAIL — gallery pane still shows the Task 2 plac
 
 - [ ] **Step 3: Implement GalleryView**
 
-`src/gallery/GalleryView.tsx`:
+`src/gallery/GalleryView.tsx` (complete file):
 
 ```tsx
-import { Component } from '@expressive/react'
+import { Component, get } from '@expressive/react'
 import { AppShell } from '../app/AppShell'
 import { downloadBlob } from '../export/exportCard'
-import type { StoredCard, StoredExport } from '../storage/CardArchive'
-import type { StoredImage } from '../storage/ImageLibrary'
+import type { StoredCard } from '../storage/CardArchive'
 import { Button, EmptyState, TabBar } from '../ui'
 
 const SECTIONS = [
@@ -3674,123 +3821,117 @@ const SECTIONS = [
 type SectionId = (typeof SECTIONS)[number]['id']
 
 export class GalleryView extends Component {
+  shell = get(AppShell, false)
   section: SectionId = 'exports'
-  cards: StoredCard[] = []
-  exports: StoredExport[] = []
-  exportUrls: Record<string, string> = {}
-  images: StoredImage[] = []
-  imageUrls: Record<string, string> = {}
-  shell?: AppShell = undefined
-
-  mount() {
-    const shell = this.get(AppShell)
-    this.shell = shell
-    const stopArchive = shell.archive.get((current) => {
-      this.cards = current.cards
-      this.exports = current.exports
-      this.exportUrls = current.exportUrls
-    })
-    const stopLibrary = shell.library.get((current) => {
-      this.images = current.images
-      this.imageUrls = current.urls
-    })
-    return () => {
-      stopArchive()
-      stopLibrary()
-    }
-  }
 
   openCard(card: StoredCard) {
-    const shell = this.shell
+    const { shell } = this
     if (!shell) return
     shell.pendingCard = card
     shell.view = 'builder'
   }
 
-  Exports() {
-    if (this.exports.length === 0) return <EmptyState message="No exported renders yet." hint="Export from the Builder or Code Lab." />
-    return (
-      <div className="grid grid-cols-3 gap-4 xl:grid-cols-5">
-        {this.exports.map((item) => (
-          <figure key={item.id} className="flex flex-col gap-1.5">
-            <img src={this.exportUrls[item.id]} alt={item.name} className="w-full rounded-lg border border-edge" />
-            <figcaption className="truncate text-[11px] text-ink-dim">{item.name}</figcaption>
-            <div className="flex gap-1.5">
-              <Button tone="ghost" onClick={() => downloadBlob(new Blob([item.bytes], { type: item.type }), item.name)}>
-                Download
-              </Button>
-              <Button tone="danger" onClick={() => void this.shell?.archive.deleteExport(item.id)}>
-                Delete
-              </Button>
-            </div>
-          </figure>
-        ))}
-      </div>
-    )
-  }
-
-  Images() {
-    const generated = this.images.filter((i) => i.kind === 'generated')
-    if (generated.length === 0) return <EmptyState message="No image generations yet." hint="Create some in the Image Lab." />
-    return (
-      <div className="grid grid-cols-3 gap-4 xl:grid-cols-5">
-        {generated.map((image) => (
-          <figure key={image.id} className="flex flex-col gap-1.5">
-            <img src={this.imageUrls[image.id]} alt={image.prompt ?? 'generated'} className="aspect-square w-full rounded-lg border border-edge object-cover" />
-            <figcaption className="truncate text-[11px] text-ink-dim">{image.prompt}</figcaption>
-            <div className="flex gap-1.5">
-              <Button tone="danger" onClick={() => void this.shell?.library.remove(image.id)}>
-                Delete
-              </Button>
-            </div>
-          </figure>
-        ))}
-      </div>
-    )
-  }
-
-  Cards() {
-    if (this.cards.length === 0) return <EmptyState message="No saved cards yet." hint="Save from the Builder's form panel." />
-    return (
-      <ul className="flex flex-col gap-2">
-        {this.cards.map((card) => (
-          <li key={card.id} className="flex items-center justify-between rounded-lg border border-edge bg-panel px-4 py-2.5">
-            <div className="min-w-0">
-              <p className="truncate font-display text-sm">{card.name}</p>
-              <p className="text-[11px] text-ink-dim">
-                {card.templateId} · {new Date(card.updatedAt).toLocaleString()}
-              </p>
-            </div>
-            <div className="flex shrink-0 gap-1.5">
-              <Button tone="ghost" onClick={() => this.openCard(card)}>
-                Open in builder
-              </Button>
-              <Button tone="danger" onClick={() => void this.shell?.archive.deleteCard(card.id)}>
-                Delete
-              </Button>
-            </div>
-          </li>
-        ))}
-      </ul>
-    )
-  }
-
   render() {
+    const { section } = this
     return (
       <div className="flex h-full flex-col gap-4 overflow-y-auto p-4">
         <TabBar
           tabs={SECTIONS}
-          active={this.section}
+          active={section}
           onSelect={(id) => {
             this.section = id as SectionId
           }}
         />
-        {this.section === 'exports' ? <this.Exports /> : null}
-        {this.section === 'images' ? <this.Images /> : null}
-        {this.section === 'cards' ? <this.Cards /> : null}
+        {section === 'exports' && <GalleryExports />}
+        {section === 'images' && <GalleryImages />}
+        {section === 'cards' && <GalleryCards />}
       </div>
     )
   }
+}
+
+function GalleryExports() {
+  const { shell } = GalleryView.get()
+  const exports = shell?.archive.exports ?? []
+  const urls = shell?.archive.exportUrls ?? {}
+  if (exports.length === 0) {
+    return <EmptyState message="No exported renders yet." hint="Export from the Builder or Code Lab." />
+  }
+  return (
+    <div className="grid grid-cols-3 gap-4 xl:grid-cols-5">
+      {exports.map((item) => (
+        <figure key={item.id} className="flex flex-col gap-1.5">
+          <img src={urls[item.id]} alt={item.name} className="w-full rounded-lg border border-edge" />
+          <figcaption className="truncate text-[11px] text-ink-dim">{item.name}</figcaption>
+          <div className="flex gap-1.5">
+            <Button tone="ghost" onClick={() => downloadBlob(new Blob([item.bytes], { type: item.type }), item.name)}>
+              Download
+            </Button>
+            <Button tone="danger" onClick={() => void shell?.archive.deleteExport(item.id)}>
+              Delete
+            </Button>
+          </div>
+        </figure>
+      ))}
+    </div>
+  )
+}
+
+function GalleryImages() {
+  const { shell } = GalleryView.get()
+  const generated = (shell?.library.images ?? []).filter((i) => i.kind === 'generated')
+  const urls = shell?.library.urls ?? {}
+  if (generated.length === 0) {
+    return <EmptyState message="No image generations yet." hint="Create some in the Image Lab." />
+  }
+  return (
+    <div className="grid grid-cols-3 gap-4 xl:grid-cols-5">
+      {generated.map((image) => (
+        <figure key={image.id} className="flex flex-col gap-1.5">
+          <img src={urls[image.id]} alt={image.prompt ?? 'generated'} className="aspect-square w-full rounded-lg border border-edge object-cover" />
+          <figcaption className="truncate text-[11px] text-ink-dim">{image.prompt}</figcaption>
+          <div className="flex gap-1.5">
+            <Button tone="danger" onClick={() => void shell?.library.remove(image.id)}>
+              Delete
+            </Button>
+          </div>
+        </figure>
+      ))}
+    </div>
+  )
+}
+
+function GalleryCards() {
+  const {
+    is: gallery,
+    shell,
+  } = GalleryView.get()
+  const cards = shell?.archive.cards ?? []
+  if (cards.length === 0) {
+    return <EmptyState message="No saved cards yet." hint="Save from the Builder's form panel." />
+  }
+  return (
+    <ul className="flex flex-col gap-2">
+      {cards.map((card) => (
+        <li key={card.id} className="flex items-center justify-between rounded-lg border border-edge bg-panel px-4 py-2.5">
+          <div className="min-w-0">
+            <p className="truncate font-display text-sm">{card.name}</p>
+            <p className="text-[11px] text-ink-dim">
+              {card.templateId} · {new Date(card.updatedAt).toLocaleString()}
+            </p>
+          </div>
+          <div className="flex shrink-0 gap-1.5">
+            <Button tone="ghost" onClick={() => gallery.openCard(card)}>
+              Open in builder
+            </Button>
+            <Button tone="danger" onClick={() => void shell?.archive.deleteCard(card.id)}>
+              Delete
+            </Button>
+          </div>
+        </li>
+      ))}
+    </ul>
+  )
 }
 ```
 
@@ -3801,23 +3942,19 @@ import { GalleryView } from '../gallery/GalleryView'
 ```
 
 ```tsx
-          <Pane active={this.view === 'gallery'}>
+          <Pane active={view === 'gallery'}>
             <GalleryView />
           </Pane>
 ```
 
 - [ ] **Step 4: Consume `pendingCard` in BuilderView**
 
-Replace `BuilderView.mount()` (from Task 8) with this version — same library mirror plus the hand-off watcher:
+Add a `mount()` to `BuilderView` (after `protected new()`). This is the builder's only lifecycle hook — a subscription to the hand-off key, exactly what `mount()` is for:
 
 ```tsx
   mount() {
-    const shell = this.get(AppShell)
-    this.shell = shell
-    const stopLibrary = shell.library.get((current) => {
-      this.libraryImages = current.images
-      this.libraryUrls = current.urls
-    })
+    const { shell } = this
+    if (!shell) return
     const consumePending = () => {
       const card = shell.pendingCard
       if (card) {
@@ -3826,11 +3963,7 @@ Replace `BuilderView.mount()` (from Task 8) with this version — same library m
       }
     }
     consumePending() // a card may already be waiting when the builder mounts
-    const stopPending = shell.set('pendingCard', consumePending)
-    return () => {
-      stopLibrary()
-      stopPending()
-    }
+    return shell.set('pendingCard', consumePending)
   }
 ```
 
@@ -4075,7 +4208,7 @@ git commit -m "feat: add in-browser tsx compile pipeline with scoped module map"
 - Produces:
   - `CodePane.tsx`: `class CodePane extends Component` with fields `source: string`, `onSource?: (source: string) => void` — CodeMirror 6 instance created in `mount()`; external `source` prop changes are pushed into the CM doc (guarded against echo loops)
   - `Sandbox.tsx`: `class Sandbox extends Component` with field `card?: CompiledCard` — renders the compiled card inside expressive's `catch()` error boundary; stays in fallback until a new `card` arrives
-  - `EditorView.tsx`: `class EditorView extends Component` with fields `source: string`, `card?: CompiledCard`, `compileError: string`, `debounceMs: number`, `previewEl: HTMLElement | null` and methods `queueCompile(): void`, `compileNow(): void`. (Task 13 adds the agent fields/panel.)
+  - `EditorView.tsx`: `class EditorView extends Component` with fields `source: string`, `card?: CompiledCard`, `compileError: string`, `debounceMs: number`, `previewEl = ref<HTMLDivElement>()` and methods `queueCompile(): void`, `compileNow(): void`. (Task 13 adds the agent fields/panel.)
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -4174,7 +4307,7 @@ export class Sandbox extends Component {
   }
 
   render() {
-    const UserCard = this.card
+    const { card: UserCard } = this
     if (!UserCard) {
       return <EmptyState message="Nothing compiled yet." hint="Fix the code on the left to see a card." />
     }
@@ -4189,18 +4322,18 @@ export class Sandbox extends Component {
 
 ```tsx
 import { javascript } from '@codemirror/lang-javascript'
-import { Component } from '@expressive/react'
+import { Component, ref } from '@expressive/react'
 import { EditorView as CmView, basicSetup } from 'codemirror'
 
 /** Thin CodeMirror 6 wrapper. Not unit-tested (CM needs real layout); exercised via dev server. */
 export class CodePane extends Component {
   source = ''
   onSource?: (source: string) => void = undefined
-  #host: HTMLElement | null = null
+  host = ref<HTMLDivElement>()
   #cm: CmView | undefined
 
   mount() {
-    const host = this.#host
+    const host = this.host.current
     if (!host) return
     const cm = new CmView({
       parent: host,
@@ -4239,21 +4372,21 @@ export class CodePane extends Component {
     return (
       <div
         className="h-full min-h-0 overflow-hidden [&_.cm-editor]:h-full [&_.cm-scroller]:overflow-auto"
-        ref={(el) => {
-          this.#host = el
-        }}
+        ref={this.host}
       />
     )
   }
 }
 ```
 
+(`mount()` fires after the JSX element commits, so `this.host.current` is already attached — the documented ordering.)
+
 - [ ] **Step 5: Implement EditorView and mount it**
 
 `src/editor/EditorView.tsx`:
 
 ```tsx
-import { Component } from '@expressive/react'
+import { Component, ref } from '@expressive/react'
 import { ExportBar } from '../export/ExportBar'
 import { compileCardSource } from './compile'
 import type { CompiledCard } from './compile'
@@ -4266,7 +4399,7 @@ export class EditorView extends Component {
   card?: CompiledCard = undefined
   compileError = ''
   debounceMs = 250
-  previewEl: HTMLElement | null = null
+  previewEl = ref<HTMLDivElement>()
   #timer: ReturnType<typeof setTimeout> | undefined
 
   protected new() {
@@ -4296,30 +4429,27 @@ export class EditorView extends Component {
   }
 
   render() {
+    const { source, card, compileError, previewEl } = this
     return (
       <div className="flex h-full">
         <section className="flex min-w-0 flex-1 flex-col border-r border-edge">
           <CodePane
-            source={this.source}
+            source={source}
             onSource={(next) => {
               this.source = next
             }}
           />
-          {this.compileError ? (
+          {compileError && (
             <p className="border-t border-red-900 bg-red-950/60 px-3 py-2 font-mono text-xs text-red-200">
-              {this.compileError}
+              {compileError}
             </p>
-          ) : null}
+          )}
         </section>
         <section className="flex w-[440px] shrink-0 flex-col items-center gap-4 overflow-y-auto p-5">
-          <div
-            ref={(el) => {
-              this.previewEl = el
-            }}
-          >
-            <Sandbox card={this.card} />
+          <div ref={previewEl}>
+            <Sandbox card={card} />
           </div>
-          <ExportBar cardName="code-lab-card" target={() => this.previewEl} />
+          <ExportBar cardName="code-lab-card" target={() => previewEl.current ?? null} />
         </section>
       </div>
     )
@@ -4376,7 +4506,7 @@ All logic lives in exported pure-ish functions with injected clients so it unit-
 - Consumes: `bytesToDataUrl` (Task 7 codec), `AVAILABLE_MODULES` semantics (guide text mirrors Task 11's map), `EditorView` (Task 12).
 - Produces:
   - `agentBridge.ts`: `CARD_API_GUIDE: string`; `buildAgentPrompt(userPrompt: string, currentCode: string): string`; `extractCode(result: unknown): string | undefined`; `interface AgentClient { session: { create(input: { body: { title: string } }): Promise<unknown>; prompt(input: unknown): Promise<unknown> } }`; `runCardAgent(client: AgentClient, userPrompt: string, currentCode: string): Promise<string>`; `generateWithReplicate(token: string, prompt: string, imageDataUrl: string, fetchImpl?: typeof fetch): Promise<string>`; `readJson(req: { on(event: string, cb: (chunk?: unknown) => void): unknown }): Promise<unknown>`; `cartisBridge(): Plugin`
-  - `EditorView` gains fields `prompt: string`, `agentBusy: boolean`, `agentNote: string`, method `runAgent(fetchImpl?: typeof fetch): Promise<void>`, subcomponent `AgentPanel()`
+  - `EditorView` gains fields `prompt: string`, `agentBusy: boolean`, `agentNote: string`, method `runAgent(fetchImpl?: typeof fetch): Promise<void>`; `EditorView.tsx` gains the file-local function component `EditorAgentPanel()` (implementation scoping — not a subcomponent method)
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -4802,29 +4932,40 @@ Add methods after `compileNow()`:
     }
   }
 
-  AgentPanel() {
-    return (
-      <div className="flex flex-col gap-2 border-t border-edge p-3">
-        <TextAreaInput
-          value={this.prompt}
-          onValue={(v) => {
-            this.prompt = v
-          }}
-          rows={2}
-          placeholder="Describe the card: “a mythic umbral librarian who trades memories…”"
-        />
-        <div className="flex items-center gap-3">
-          <Button disabled={this.agentBusy} onClick={() => void this.runAgent()}>
-            {this.agentBusy ? 'Generating…' : 'Generate with AI'}
-          </Button>
-          {this.agentNote ? <span className="text-xs text-ink-dim">{this.agentNote}</span> : null}
-        </div>
-      </div>
-    )
-  }
 ```
 
-Add the import `import { Button, TextAreaInput } from '../ui'` and render `<this.AgentPanel />` in the left section, between `<CodePane …/>` and the compile-error bar.
+Add the file-local function component at the bottom of `EditorView.tsx`, alongside the class (implementation scoping per the skills — freestanding + `.get()`):
+
+```tsx
+function EditorAgentPanel() {
+  const {
+    is: editor,
+    prompt,
+    agentBusy,
+    agentNote,
+  } = EditorView.get()
+  return (
+    <div className="flex flex-col gap-2 border-t border-edge p-3">
+      <TextAreaInput
+        value={prompt}
+        onValue={(v) => {
+          editor.prompt = v
+        }}
+        rows={2}
+        placeholder="Describe the card: “a mythic umbral librarian who trades memories…”"
+      />
+      <div className="flex items-center gap-3">
+        <Button disabled={agentBusy} onClick={() => void editor.runAgent()}>
+          {agentBusy ? 'Generating…' : 'Generate with AI'}
+        </Button>
+        {agentNote && <span className="text-xs text-ink-dim">{agentNote}</span>}
+      </div>
+    </div>
+  )
+}
+```
+
+Add the import `import { Button, TextAreaInput } from '../ui'` and render `<EditorAgentPanel />` in the left section, between `<CodePane …/>` and the compile-error bar.
 
 - [ ] **Step 6: Run tests to verify they pass**
 
@@ -4872,6 +5013,9 @@ files. Everything runs on your machine; nothing is pushed anywhere.
 bun install
 bun run dev        # http://localhost:5173
 ```
+
+The dev server **is** the app: the AI bridge endpoints (`/api/*`) exist only under
+`bun run dev`. `bun run build` is kept as a compile smoke test, not a deployment story.
 
 Quality gates (run automatically before every commit in this repo):
 
@@ -4927,7 +5071,7 @@ Run each and confirm output:
 ```bash
 bun run check      # expect: no fixes left to apply
 bun run verify     # expect: biome ci clean, tsc clean, ~60 tests passing
-bun run build      # expect: vite production build succeeds
+bun run build      # compile smoke only — the dev server is the app (see README)
 ```
 
 - [ ] **Step 3: Manual checklist against the spec (dev server)**
@@ -4958,7 +5102,7 @@ Do **not** push; the repo stays local by design.
 
 ## Post-Plan Notes for the Executor
 
-- **Expressive is the framework.** When something feels like it needs `useState`, the answer is a field on the nearest `Component`/`State` class. When a view needs another model's data inside `render()`, mirror it via `model.get(effect)` in `mount()` (see GalleryView) — do not read foreign instances directly in `render()`.
+- **Expressive is the framework, and the skills repo is its law.** When something feels like it needs `useState`, the answer is a field on the nearest `Component`/`State` class. Cross-model data is read directly through `get(Type)` fields (`this.shell.library.images`) — transitive subscription is guaranteed by the Task 1 probe, so never mirror foreign state through effects. On any idiom question, https://github.com/gabeklein/expressive-mvc/tree/main/skills outranks this plan.
 - **Version drift**: exact versions in Task 1 were current on 2026-07-31; `bun add` caret ranges may pull newer patches. If an API mismatch appears (most likely: `@opencode-ai/sdk` response shapes, biome schema keys), trust the installed package's types over this plan and adjust minimally.
 - **happy-dom limits are designed around**: no canvas (stub provider falls back to source bytes — tested), no camera (CameraCapture error path — tested), CodeMirror untested in unit tests (thin wrapper, exercised via dev server).
 - Commit messages use conventional prefixes (`feat:`/`docs:`); every commit is preceded by a green `bun run verify`.
