@@ -1,6 +1,7 @@
 import { Component } from '@expressive/react';
 import type { ReactNode } from 'react';
 import { BuilderView } from '../builder/BuilderView';
+import { ImageLabView } from '../images/ImageLabView';
 import { CardArchive, type StoredCard } from '../storage/CardArchive';
 import { ImageLibrary } from '../storage/ImageLibrary';
 import { EmptyState, TabBar } from '../ui';
@@ -44,7 +45,7 @@ export class AppShell extends Component {
             <EmptyState message="Code Lab arrives in Task 12." />
           </Pane>
           <Pane active={view === 'images'}>
-            <EmptyState message="Image Lab arrives in Task 7." />
+            <ImageLabView />
           </Pane>
           <Pane active={view === 'gallery'}>
             <EmptyState message="Gallery arrives in Task 10." />
