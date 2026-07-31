@@ -24,7 +24,7 @@ export class AppShell extends Component {
             tabs={VIEW_TABS}
             active={view}
             onSelect={(id) => {
-              this.view = id as ViewId;
+              this.view = id;
             }}
           />
         </header>

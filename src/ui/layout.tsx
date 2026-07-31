@@ -25,10 +25,10 @@ export function Panel(props: { title?: string; children?: ReactNode; className?:
   );
 }
 
-export function TabBar(props: {
-  tabs: readonly { id: string; label: string }[];
-  active: string;
-  onSelect: (id: string) => void;
+export function TabBar<Id extends string>(props: {
+  tabs: readonly { id: Id; label: string }[];
+  active: Id;
+  onSelect: (id: Id) => void;
 }) {
   return (
     <nav className="flex gap-1">
