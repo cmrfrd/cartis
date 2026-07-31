@@ -52,9 +52,15 @@ Both are off by default; the app is fully offline without them.
 
 ## Printing
 
-Exports are 750×1050 px = 2.5"×3.5" at 300 DPI (standard trading-card size).
-Print at 100% scale on cardstock; for the holographic look, enable the Holo
-toggle and print on holo/foil sticker paper.
+The preview is print-faithful: fonts are embedded, textures are pre-rasterized
+bitmaps, and interactive effects (pointer foil/tilt) are stripped at export, so
+the PNG is exactly what you saw at rest.
+
+- Exports are 750×1050 px = 2.5"×3.5" at 300 DPI (600 DPI selectable).
+- **Bleed + marks** adds a standard 1/8" bleed and corner crop marks for print
+  shops; **Sheet 3×3** tiles nine copies on A4 with cut lines for home printing.
+- **Show back** previews/exports the shared Cartis card back for double-sided
+  decks. For the holographic look, print on holo/foil sticker paper.
 
 ## State architecture
 
