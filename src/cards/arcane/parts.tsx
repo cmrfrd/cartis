@@ -105,7 +105,7 @@ export function ArcaneStatBadge(props: { might: number; ward: number; palette: E
   return (
     <div
       data-testid="stat-badge"
-      className={`absolute bottom-2.5 right-3.5 rounded-full px-3 py-0.5 font-display text-[15px] font-bold shadow-lg ${props.palette.plate}`}
+      className={`absolute bottom-2.5 right-3.5 whitespace-nowrap rounded-full px-3 py-0.5 font-display text-[15px] font-bold shadow-lg ${props.palette.plate}`}
     >
       <span className={props.palette.plateText}>
         {props.might} / {props.ward}
