@@ -1,3 +1,4 @@
+import { plateSurface } from '../base/textures';
 import type { EssencePalette } from './palette';
 import { ENGRAVED_SHADOW, titleSizeFor } from './typography';
 
@@ -40,6 +41,7 @@ export function ArcaneTitleBar(props: { name: string; cost: number; palette: Ess
   return (
     <div
       className={`flex items-center justify-between gap-2 rounded-md px-2.5 py-1 ${props.palette.plate}`}
+      style={plateSurface}
     >
       <span
         className={`truncate font-display font-bold tracking-wide ${props.palette.plateText}`}
@@ -70,6 +72,7 @@ export function ArcaneTypeLine(props: { text: string; rarity: RarityId; palette:
   return (
     <div
       className={`flex items-center justify-between rounded-md px-2.5 py-0.5 ${props.palette.plate}`}
+      style={plateSurface}
     >
       <span
         className={`truncate font-card text-[12px] font-semibold ${props.palette.plateText}`}
@@ -93,6 +96,7 @@ export function ArcaneRulesBox(props: {
   return (
     <div
       className={`flex-1 space-y-1.5 overflow-hidden rounded-md px-2.5 py-2 ${props.palette.plate}`}
+      style={plateSurface}
     >
       <p
         className={`whitespace-pre-wrap font-card text-[13.5px] leading-snug ${props.palette.plateText}`}
@@ -115,6 +119,7 @@ export function ArcaneStatBadge(props: { might: number; ward: number; palette: E
     <div
       data-testid="stat-badge"
       className={`absolute bottom-2.5 right-3.5 whitespace-nowrap rounded-full px-3 py-0.5 font-display text-[15px] font-bold shadow-lg ${props.palette.plate}`}
+      style={plateSurface}
     >
       <span className={props.palette.plateText}>
         {props.might} / {props.ward}

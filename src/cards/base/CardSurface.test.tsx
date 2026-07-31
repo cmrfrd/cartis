@@ -15,6 +15,8 @@ describe('CardSurface', () => {
     expect(root.textContent).toContain('inner');
     expect(root.style.width).toBe(`${CARD_WIDTH}px`);
     expect(root.style.height).toBe(`${CARD_HEIGHT}px`);
+    // the printed black border hosts an inset frame layer
+    expect(root.querySelector('[data-card-frame="true"]')).not.toBeNull();
     expect(root.querySelector('[data-holo="true"]')).toBeNull();
     unmount();
   });
