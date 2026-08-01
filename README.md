@@ -39,6 +39,16 @@ Every AI action streams into the **AI activity bar** at the bottom of the app
 (latest step in the strip, full timestamped log behind the Log button) and
 mirrors to the dev-server terminal as `[cartis:agent]` / `[cartis:image]` lines.
 
+## Your data
+
+Everything lives as real files under `./cartis-data` (gitignored):
+`images/` and `exports/` hold the actual PNGs with a `.json` metadata sidecar,
+`cards/` holds one editable JSON per saved card. Filenames come from the
+record's name (`ember-duelist-4d356a.png`). Copy the folder to back up; edit
+sidecars by hand and reload if you like. Generated images take an editable
+name (auto-suggested from the prompt) and a **Dimensions** aspect ratio —
+templates pick their art slot's ratio automatically (classic 3:2, full-art 3:4).
+
 ## Vocabulary
 
 - **Kit** — a style library of composable card part components (`src/cards/arcane`).
