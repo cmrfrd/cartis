@@ -1,13 +1,22 @@
-import { PassThrough } from 'node:stream';
-import { describe, expect, it, vi } from 'vitest';
-import type { AgentClient } from './agentBridge';
+import { Effect, Fiber, Layer, Ref, TestClock } from 'effect';
+import { describe, expect } from 'vitest';
+import { it } from '../../test/effect.ts';
+import type { PredictionT } from '../contracts/replicate.ts';
+import { httpClientFromHandler } from '../lib/http.ts';
+import { ActivityBus, activityBusTestLayer } from './activity.ts';
 import {
+  AgentClient,
   buildAgentPrompt,
   extractCode,
-  generateWithReplicate,
-  readJson,
+  ReplicateClient,
+  ReplicateSdk,
+  replicateClientLive,
   runCardAgent,
-} from './agentBridge';
+} from './agentBridge.ts';
+
+// ---------------------------------------------------------------------------
+// Pure helpers — plain `it`
+// ---------------------------------------------------------------------------
 
 describe('buildAgentPrompt', () => {
   it('embeds the guide, the user request, and the current code', () => {
@@ -52,146 +61,240 @@ describe('extractCode', () => {
   });
 });
 
-describe('runCardAgent', () => {
-  it('creates a session, prompts it, and returns the extracted code', async () => {
-    const promptSpy = vi.fn(async (_input: unknown) => ({
-      data: {
-        parts: [
-          {
-            type: 'text',
-            text: '```tsx\nexport default function X() { return null }\n```',
+// ---------------------------------------------------------------------------
+// runCardAgent — Effect + stub AgentClient + test ActivityBus
+// ---------------------------------------------------------------------------
+
+/** A stub AgentClient layer serving canned session + prompt responses. */
+const agentStub = (
+  overrides: Partial<{
+    createSession: (title: string) => Effect.Effect<string, never>;
+    prompt: (sessionId: string, text: string) => Effect.Effect<unknown, never>;
+  }>,
+): Layer.Layer<AgentClient> =>
+  Layer.succeed(AgentClient, {
+    createSession: overrides.createSession ?? (() => Effect.succeed('session-1')),
+    prompt:
+      overrides.prompt ??
+      (() =>
+        Effect.succeed({
+          data: {
+            parts: [
+              { type: 'text', text: '```tsx\nexport default function X() { return null }\n```' },
+            ],
           },
-        ],
-      },
-    }));
-    const client: AgentClient = {
-      session: {
-        create: vi.fn(async () => ({ data: { id: 'session-1' } })),
-        prompt: promptSpy,
-      },
-    };
-    const log: string[] = [];
-    const code = await runCardAgent(client, 'do a thing', 'old code', (m) => log.push(m));
-    expect(code).toContain('function X');
-    const call = promptSpy.mock.calls[0]?.[0] as
-      | { path: { id: string }; body: { parts: { text: string }[] } }
-      | undefined;
-    expect(call?.path.id).toBe('session-1');
-    expect(call?.body.parts[0]?.text).toContain('do a thing');
-    expect(log.some((m) => m.includes('session session-1 created'))).toBe(true);
-    expect(log.some((m) => m.startsWith('done in'))).toBe(true);
+        })),
   });
 
-  it('throws a clear error when the session has no id', async () => {
-    const client: AgentClient = {
-      session: { create: vi.fn(async () => ({})), prompt: vi.fn(async () => ({})) },
-    };
-    await expect(runCardAgent(client, 'p', 'c', () => {})).rejects.toThrow(/session/i);
-  });
+describe('runCardAgent', () => {
+  it.effect('creates a session, prompts it, and returns the extracted code', () =>
+    Effect.gen(function* () {
+      const bus = yield* ActivityBus;
+      const code = yield* runCardAgent('do a thing', 'old code');
+      expect(code).toContain('function X');
+
+      const messages = (yield* bus.history).map((e) => e.message);
+      expect(messages.some((m) => m.includes('session session-1 created'))).toBe(true);
+      expect(messages.some((m) => m.startsWith('done in'))).toBe(true);
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          agentStub({
+            createSession: (title) => {
+              // session-create path is exercised with the expected title
+              expect(title).toBe('cartis card edit');
+              return Effect.succeed('session-1');
+            },
+            prompt: (sessionId, text) => {
+              // the prompt receives the session id and embeds the user request
+              expect(sessionId).toBe('session-1');
+              expect(text).toContain('do a thing');
+              return Effect.succeed({
+                data: {
+                  parts: [
+                    {
+                      type: 'text',
+                      text: '```tsx\nexport default function X() { return null }\n```',
+                    },
+                  ],
+                },
+              });
+            },
+          }),
+          activityBusTestLayer,
+        ),
+      ),
+    ),
+  );
+
+  it.effect('fails with AgentError when the agent returns no code', () =>
+    runCardAgent('p', 'c').pipe(
+      Effect.flip,
+      Effect.tap((error) => {
+        expect(error._tag).toBe('AgentError');
+        expect(error.message).toBe('agent returned no code');
+        return Effect.void;
+      }),
+      Effect.provide(
+        Layer.mergeAll(
+          agentStub({ prompt: () => Effect.succeed({ data: { parts: [] } }) }),
+          activityBusTestLayer,
+        ),
+      ),
+    ),
+  );
+
+  it.effect('emits a heartbeat while the prompt is in flight', () =>
+    Effect.gen(function* () {
+      const bus = yield* ActivityBus;
+      // A prompt that never settles until we let the fiber continue: use a
+      // deferred by blocking on TestClock — the prompt sleeps 6s, so a 5s
+      // heartbeat fires once before it resolves.
+      const fiber = yield* Effect.fork(runCardAgent('slow', 'code'));
+      yield* TestClock.adjust('5 seconds');
+      // Let the heartbeat land, then release the prompt.
+      const before = (yield* bus.history).map((e) => e.message);
+      expect(before.some((m) => m.startsWith('still generating…'))).toBe(true);
+      yield* TestClock.adjust('2 seconds');
+      const code = yield* Fiber.join(fiber);
+      expect(code).toContain('function X');
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          agentStub({
+            prompt: () =>
+              Effect.succeed({
+                data: {
+                  parts: [
+                    {
+                      type: 'text',
+                      text: '```tsx\nexport default function X() { return null }\n```',
+                    },
+                  ],
+                },
+              }).pipe(Effect.delay('6 seconds')),
+          }),
+          activityBusTestLayer,
+        ),
+      ),
+    ),
+  );
 });
 
-describe('generateWithReplicate', () => {
-  const instantSleep = async () => {};
+// ---------------------------------------------------------------------------
+// ReplicateClient — stub ReplicateSdk + httpClientFromHandler + TestClock
+// ---------------------------------------------------------------------------
 
-  it('creates a prediction, polls to success, and logs progress', async () => {
-    const imageBytes = new TextEncoder().encode('img').buffer as ArrayBuffer;
-    let polls = 0;
-    const fetchImpl = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
-      const u = String(url);
-      if (init?.method === 'POST') {
-        const headers = init?.headers as Record<string, string>;
-        expect(headers.Authorization).toBe('Bearer tok');
-        const body = JSON.parse(String(init?.body)) as {
-          input: { prompt: string; input_image: string };
-        };
-        expect(body.input.prompt).toBe('stylize me');
-        expect(body.input.input_image.startsWith('data:')).toBe(true);
-        expect(
-          (JSON.parse(String(init?.body)) as { input: { aspect_ratio: string } }).input
-            .aspect_ratio,
-        ).toBe('3:2');
-        return new Response(
-          JSON.stringify({
+/**
+ * A stub ReplicateSdk serving a canned prediction sequence. `create` returns
+ * the first entry; each `get` advances to the next (clamped at the last).
+ */
+const sdkStub = (sequence: ReadonlyArray<PredictionT>): Layer.Layer<ReplicateSdk> =>
+  Layer.effect(
+    ReplicateSdk,
+    Effect.gen(function* () {
+      const idx = yield* Ref.make(0);
+      return ReplicateSdk.of({
+        createPrediction: () => Effect.succeed(sequence[0] as PredictionT),
+        getPrediction: () =>
+          Effect.gen(function* () {
+            const i = yield* Ref.updateAndGet(idx, (n) => Math.min(n + 1, sequence.length - 1));
+            return sequence[i] as PredictionT;
+          }),
+      });
+    }),
+  );
+
+const pngHandler = () =>
+  new Response(new TextEncoder().encode('img'), { headers: { 'content-type': 'image/png' } });
+
+const replicateEnv = (sequence: ReadonlyArray<PredictionT>) =>
+  replicateClientLive.pipe(
+    Layer.provide(
+      Layer.mergeAll(sdkStub(sequence), activityBusTestLayer, httpClientFromHandler(pngHandler)),
+    ),
+    Layer.merge(activityBusTestLayer),
+  );
+
+describe('ReplicateClient.generate', () => {
+  it.effect('creates a prediction, polls to success, downloads output, logs progress', () =>
+    Effect.gen(function* () {
+      const bus = yield* ActivityBus;
+      const fiber = yield* Effect.fork(
+        Effect.flatMap(ReplicateClient, (c) =>
+          c.generate('tok', {
+            prompt: 'stylize me',
+            imageDataUrl: 'data:image/png;base64,QQ==',
+            aspectRatio: '3:2',
+          }),
+        ),
+      );
+      // Two polls: processing, then succeeded.
+      yield* TestClock.adjust('1500 millis');
+      yield* TestClock.adjust('1500 millis');
+      const dataUrl = yield* Fiber.join(fiber);
+      expect(dataUrl.startsWith('data:image/png;base64,')).toBe(true);
+
+      const messages = (yield* bus.history).map((e) => e.message);
+      expect(messages.some((m) => m.includes('prediction pred-1 created'))).toBe(true);
+      expect(messages.some((m) => m.includes('status: processing'))).toBe(true);
+      expect(messages.some((m) => m.includes('status: succeeded'))).toBe(true);
+      expect(messages.some((m) => m.includes('output downloaded'))).toBe(true);
+    }).pipe(
+      Effect.provide(
+        replicateEnv([
+          {
             id: 'pred-1',
             status: 'starting',
             urls: { get: 'https://api.replicate.com/v1/predictions/pred-1' },
-          }),
-        );
-      }
-      if (u.includes('/predictions/pred-1')) {
-        polls++;
-        return new Response(
-          JSON.stringify(
-            polls < 2
-              ? { id: 'pred-1', status: 'processing' }
-              : { id: 'pred-1', status: 'succeeded', output: 'https://img.example/out.png' },
-          ),
-        );
-      }
-      return new Response(imageBytes, { headers: { 'content-type': 'image/png' } });
-    }) as unknown as typeof fetch;
-    const log: string[] = [];
-    const dataUrl = await generateWithReplicate(
-      'tok',
-      'stylize me',
-      'data:image/png;base64,QQ==',
-      '3:2',
-      fetchImpl,
-      (m) => log.push(m),
-      instantSleep,
-    );
-    expect(dataUrl.startsWith('data:image/png;base64,')).toBe(true);
-    expect(log.some((m) => m.includes('prediction pred-1 created'))).toBe(true);
-    expect(log.some((m) => m.includes('status: processing'))).toBe(true);
-    expect(log.some((m) => m.includes('status: succeeded'))).toBe(true);
-    expect(log.some((m) => m.includes('output downloaded'))).toBe(true);
-  });
-
-  it('surfaces failed predictions with their error detail', async () => {
-    const fetchImpl = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
-      if (init?.method === 'POST') {
-        return new Response(
-          JSON.stringify({ id: 'pred-2', status: 'starting', urls: { get: 'https://x/p/2' } }),
-        );
-      }
-      return new Response(JSON.stringify({ id: 'pred-2', status: 'failed', error: 'nsfw block' }));
-    }) as unknown as typeof fetch;
-    await expect(
-      generateWithReplicate(
-        'tok',
-        'p',
-        'data:image/png;base64,QQ==',
-        undefined,
-        fetchImpl,
-        () => {},
-        instantSleep,
+          },
+          { id: 'pred-1', status: 'processing' },
+          { id: 'pred-1', status: 'succeeded', output: 'https://img.example/out.png' },
+        ]),
       ),
-    ).rejects.toThrow(/nsfw block/);
-  });
+    ),
+  );
 
-  it('surfaces replicate errors with status detail', async () => {
-    const fetchImpl = vi.fn(
-      async () => new Response('nope', { status: 401 }),
-    ) as unknown as typeof fetch;
-    await expect(
-      generateWithReplicate(
-        'bad',
-        'p',
-        'data:image/png;base64,QQ==',
-        undefined,
-        fetchImpl,
-        () => {},
-        instantSleep,
+  it.effect('surfaces a failed prediction as ReplicateError failed', () =>
+    Effect.gen(function* () {
+      const fiber = yield* Effect.fork(
+        Effect.flatMap(ReplicateClient, (c) =>
+          c.generate('tok', { prompt: 'p', imageDataUrl: 'data:image/png;base64,QQ==' }),
+        ).pipe(Effect.flip),
+      );
+      yield* TestClock.adjust('1500 millis');
+      const error = yield* Fiber.join(fiber);
+      expect(error._tag).toBe('ReplicateError');
+      expect(error.message).toBe('replicate failed: nsfw block');
+    }).pipe(
+      Effect.provide(
+        replicateEnv([
+          { id: 'pred-2', status: 'starting', urls: { get: 'https://x/p/2' } },
+          { id: 'pred-2', status: 'failed', error: 'nsfw block' },
+        ]),
       ),
-    ).rejects.toThrow(/401/);
-  });
-});
+    ),
+  );
 
-describe('readJson', () => {
-  it('parses a streamed JSON body', async () => {
-    const stream = new PassThrough();
-    const parsed = readJson(stream);
-    stream.end(JSON.stringify({ hello: 'cartis' }));
-    await expect(parsed).resolves.toEqual({ hello: 'cartis' });
-  });
+  it.effect('times out after 120s with ReplicateError timeout', () =>
+    Effect.gen(function* () {
+      const fiber = yield* Effect.fork(
+        Effect.flatMap(ReplicateClient, (c) =>
+          c.generate('tok', { prompt: 'p', imageDataUrl: 'data:image/png;base64,QQ==' }),
+        ).pipe(Effect.flip),
+      );
+      // Never reaches succeeded; advance past the 120s cap.
+      yield* TestClock.adjust('121 seconds');
+      const error = yield* Fiber.join(fiber);
+      expect(error._tag).toBe('ReplicateError');
+      expect(error.message).toBe('replicate timed out after 120s');
+    }).pipe(
+      Effect.provide(
+        replicateEnv([
+          { id: 'pred-3', status: 'starting', urls: { get: 'https://x/p/3' } },
+          { id: 'pred-3', status: 'processing' },
+        ]),
+      ),
+    ),
+  );
 });
