@@ -1,26 +1,24 @@
 import State from '@expressive/react';
+import { Effect, Exit } from 'effect';
+import { runAppExit } from '../app/runtime';
 import type { CardData } from '../cards/types';
-import { storeClient } from './storeClient';
+import { noteFromCause } from '../contracts/errors';
+import {
+  CardRecord,
+  type CardRecordT,
+  type ExportFormatT,
+  ExportRecord,
+  type ExportRecordT,
+} from '../contracts/records';
+import { StoreClient } from './StoreClient';
 
-export type ExportFormat = 'png' | 'jpeg' | 'webp';
-
-export interface StoredCard {
-  id: string;
-  name: string;
-  templateId: string;
-  data: CardData;
-  holo: boolean;
-  updatedAt: number;
-}
-
-export interface StoredExport {
-  id: string;
-  name: string;
-  format: ExportFormat;
-  type: string;
-  createdAt: number;
-  fileName?: string;
-}
+/**
+ * Type continuity: views (BuilderView, GalleryView, ExportBar, AppShell) import
+ * these names. They now alias the contract types so no view file changes.
+ */
+export type ExportFormat = ExportFormatT;
+export type StoredCard = CardRecordT;
+export type StoredExport = ExportRecordT;
 
 export interface SaveCardInput {
   id?: string;
@@ -41,25 +39,30 @@ export class CardArchive extends State {
   }
 
   private async load(): Promise<void> {
-    try {
-      const [cards, exports] = await Promise.all([
-        storeClient().list<StoredCard>('cards'),
-        storeClient().list<StoredExport>('exports'),
-      ]);
-      if (this.get(null)) return; // destroyed while loading — drop the result
-      cards.sort((a, b) => b.updatedAt - a.updatedAt);
-      exports.sort((a, b) => b.createdAt - a.createdAt);
-      const exportUrls: Record<string, string> = {};
-      for (const row of exports) {
-        const url = storeClient().fileUrl('exports', row);
-        if (url) exportUrls[row.id] = url;
-      }
-      this.cards = cards;
-      this.exports = exports;
-      this.exportUrls = exportUrls;
-    } finally {
-      if (!this.get(null)) this.ready = true;
+    const exit = await runAppExit(
+      Effect.gen(function* () {
+        const store = yield* StoreClient;
+        const [cards, exports] = yield* Effect.all(
+          [store.list('cards', CardRecord), store.list('exports', ExportRecord)],
+          { concurrency: 'unbounded' },
+        );
+        const exportUrls: Record<string, string> = {};
+        for (const row of exports) {
+          const url = store.fileUrl('exports', row);
+          if (url !== undefined) exportUrls[row.id] = url;
+        }
+        return { cards, exports, exportUrls };
+      }),
+    );
+    if (this.get(null)) return; // destroyed while loading — drop the result
+    if (Exit.isSuccess(exit)) {
+      // load() had no note today (failures were swallowed by try/finally);
+      // preserve that — no new UI messaging on failure.
+      this.cards = [...exit.value.cards].sort((a, b) => b.updatedAt - a.updatedAt);
+      this.exports = [...exit.value.exports].sort((a, b) => b.createdAt - a.createdAt);
+      this.exportUrls = exit.value.exportUrls;
     }
+    this.ready = true;
   }
 
   async saveCard(input: SaveCardInput): Promise<StoredCard> {
@@ -71,13 +74,25 @@ export class CardArchive extends State {
       holo: input.holo,
       updatedAt: Date.now(),
     };
-    await storeClient().put('cards', card);
+    const exit = await runAppExit(
+      Effect.gen(function* () {
+        const store = yield* StoreClient;
+        yield* store.put('cards', CardRecord, card);
+      }),
+    );
+    if (Exit.isFailure(exit)) throw new Error(noteFromCause(exit.cause));
     this.cards = [card, ...this.cards.filter((c) => c.id !== card.id)];
     return card;
   }
 
   async deleteCard(id: string): Promise<void> {
-    await storeClient().remove('cards', id);
+    const exit = await runAppExit(
+      Effect.gen(function* () {
+        const store = yield* StoreClient;
+        yield* store.remove('cards', id);
+      }),
+    );
+    if (Exit.isFailure(exit)) throw new Error(noteFromCause(exit.cause));
     this.cards = this.cards.filter((c) => c.id !== id);
   }
 
@@ -89,15 +104,29 @@ export class CardArchive extends State {
   }): Promise<StoredExport> {
     const { bytes, ...meta } = input;
     const record: StoredExport = { ...meta, id: crypto.randomUUID(), createdAt: Date.now() };
-    const stored = await storeClient().put('exports', record, bytes);
+    const exit = await runAppExit(
+      Effect.gen(function* () {
+        const store = yield* StoreClient;
+        const stored = yield* store.put('exports', ExportRecord, record, bytes);
+        const url = store.fileUrl('exports', stored);
+        return { stored, url };
+      }),
+    );
+    if (Exit.isFailure(exit)) throw new Error(noteFromCause(exit.cause));
+    const { stored, url } = exit.value;
     this.exports = [stored, ...this.exports];
-    const url = storeClient().fileUrl('exports', stored);
-    if (url) this.exportUrls = { ...this.exportUrls, [stored.id]: url };
+    if (url !== undefined) this.exportUrls = { ...this.exportUrls, [stored.id]: url };
     return stored;
   }
 
   async deleteExport(id: string): Promise<void> {
-    await storeClient().remove('exports', id);
+    const exit = await runAppExit(
+      Effect.gen(function* () {
+        const store = yield* StoreClient;
+        yield* store.remove('exports', id);
+      }),
+    );
+    if (Exit.isFailure(exit)) throw new Error(noteFromCause(exit.cause));
     this.exports = this.exports.filter((e) => e.id !== id);
     const { [id]: _dropped, ...rest } = this.exportUrls;
     this.exportUrls = rest;

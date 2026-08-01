@@ -1,16 +1,12 @@
 import State from '@expressive/react';
-import { storeClient } from './storeClient';
+import { Effect, Exit } from 'effect';
+import { runAppExit } from '../app/runtime';
+import { noteFromCause } from '../contracts/errors';
+import { ImageRecord, type ImageRecordT } from '../contracts/records';
+import { StoreClient } from './StoreClient';
 
-export interface StoredImage {
-  id: string;
-  name: string;
-  kind: 'source' | 'generated';
-  prompt?: string;
-  styleId?: string;
-  type: string;
-  createdAt: number;
-  fileName?: string;
-}
+/** Type continuity: views import `StoredImage`; alias the contract type. */
+export type StoredImage = ImageRecordT;
 
 export interface NewImage {
   name: string;
@@ -31,34 +27,53 @@ export class ImageLibrary extends State {
   }
 
   private async load(): Promise<void> {
-    try {
-      const rows = await storeClient().list<StoredImage>('images');
-      if (this.get(null)) return; // destroyed while loading — drop the result
-      rows.sort((a, b) => b.createdAt - a.createdAt);
-      const urls: Record<string, string> = {};
-      for (const row of rows) {
-        const url = storeClient().fileUrl('images', row);
-        if (url) urls[row.id] = url;
-      }
-      this.images = rows;
-      this.urls = urls;
-    } finally {
-      if (!this.get(null)) this.ready = true;
+    const exit = await runAppExit(
+      Effect.gen(function* () {
+        const store = yield* StoreClient;
+        const rows = yield* store.list('images', ImageRecord);
+        const urls: Record<string, string> = {};
+        for (const row of rows) {
+          const url = store.fileUrl('images', row);
+          if (url !== undefined) urls[row.id] = url;
+        }
+        return { rows, urls };
+      }),
+    );
+    if (this.get(null)) return; // destroyed while loading — drop the result
+    if (Exit.isSuccess(exit)) {
+      // Parity with today: load() surfaced no note on failure.
+      this.images = [...exit.value.rows].sort((a, b) => b.createdAt - a.createdAt);
+      this.urls = exit.value.urls;
     }
+    this.ready = true;
   }
 
   async add(input: NewImage): Promise<StoredImage> {
     const { bytes, ...meta } = input;
     const record: StoredImage = { ...meta, id: crypto.randomUUID(), createdAt: Date.now() };
-    const stored = await storeClient().put('images', record, bytes);
+    const exit = await runAppExit(
+      Effect.gen(function* () {
+        const store = yield* StoreClient;
+        const stored = yield* store.put('images', ImageRecord, record, bytes);
+        const url = store.fileUrl('images', stored);
+        return { stored, url };
+      }),
+    );
+    if (Exit.isFailure(exit)) throw new Error(noteFromCause(exit.cause));
+    const { stored, url } = exit.value;
     this.images = [stored, ...this.images];
-    const url = storeClient().fileUrl('images', stored);
-    if (url) this.urls = { ...this.urls, [stored.id]: url };
+    if (url !== undefined) this.urls = { ...this.urls, [stored.id]: url };
     return stored;
   }
 
   async remove(id: string): Promise<void> {
-    await storeClient().remove('images', id);
+    const exit = await runAppExit(
+      Effect.gen(function* () {
+        const store = yield* StoreClient;
+        yield* store.remove('images', id);
+      }),
+    );
+    if (Exit.isFailure(exit)) throw new Error(noteFromCause(exit.cause));
     this.images = this.images.filter((image) => image.id !== id);
     const { [id]: _dropped, ...rest } = this.urls;
     this.urls = rest;

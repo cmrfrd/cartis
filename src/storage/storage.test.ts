@@ -1,6 +1,11 @@
+import type { HttpClientRequest } from '@effect/platform';
+import { Layer } from 'effect';
 import { describe, expect, it, vi } from 'vitest';
+import { setAppLayer } from '../app/runtime';
+import { httpClientFromHandler } from '../lib/http';
 import { CardArchive } from './CardArchive';
 import { ImageLibrary } from './ImageLibrary';
+import { storeClientLive } from './StoreClient';
 
 const bytesOf = (text: string): ArrayBuffer => new TextEncoder().encode(text).buffer as ArrayBuffer;
 
@@ -83,6 +88,40 @@ describe('CardArchive', () => {
     expect(typeof archive.exportUrl(exp.id)).toBe('string');
     await archive.deleteExport(exp.id);
     expect(archive.exports).toHaveLength(0);
+    archive.set(null);
+  });
+
+  it('drops schema-invalid rows from a list, keeps valid ones', async () => {
+    // A live StoreClient over a canned handler: the cards list returns one
+    // valid card and one invalid card (missing `updatedAt`). The invalid row
+    // must be dropped; the valid row survives.
+    const good = {
+      id: 'good',
+      name: 'Good',
+      templateId: 't',
+      holo: false,
+      updatedAt: 100,
+      data: {},
+    };
+    const bad = { id: 'bad', name: 'Bad', templateId: 't', holo: false, data: {} }; // no updatedAt
+    const handler = (req: HttpClientRequest.HttpClientRequest): Response => {
+      if (req.method === 'GET' && req.url.endsWith('/api/store/cards')) {
+        return new Response(JSON.stringify([good, bad]), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      // exports (and anything else) → empty list
+      return new Response(JSON.stringify([]), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    };
+    setAppLayer(storeClientLive.pipe(Layer.provide(httpClientFromHandler(handler))));
+
+    const archive = CardArchive.new();
+    await ready(archive);
+    expect(archive.cards.map((c) => c.id)).toEqual(['good']);
     archive.set(null);
   });
 });

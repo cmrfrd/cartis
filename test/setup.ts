@@ -1,11 +1,11 @@
 import { beforeEach } from 'vitest';
+import { setAppLayer, testAppLayer } from '../src/app/runtime';
 import { registerBuiltinTemplates } from '../src/cards';
 import { __clearTemplatesForTests } from '../src/cards/registry';
-import { __setStoreClientForTests, createMemoryStoreClient } from '../src/storage/storeClient';
 
 beforeEach(() => {
-  // Fresh in-memory file store + template registry per test.
-  __setStoreClientForTests(createMemoryStoreClient());
+  // Fresh in-memory app runtime (memory StoreClient) + template registry per test.
+  setAppLayer(testAppLayer);
   __clearTemplatesForTests();
   registerBuiltinTemplates();
 });
