@@ -92,6 +92,28 @@ describe('CameraCapture', () => {
   });
 });
 
+describe('ImageLabView name input stays bound (snapshot-rule regression)', () => {
+  it('reflects state changes into the controlled input', async () => {
+    let lab: ImageLabView | undefined;
+    const { container, unmount } = mount(
+      <ImageLabView
+        is={(instance: ImageLabView) => {
+          lab = instance;
+        }}
+      />,
+    );
+    await tick();
+    if (lab) lab.imageName = 'Ember Duelist';
+    await vi.waitFor(() => {
+      const input = container.querySelector(
+        'input[placeholder="auto from prompt"]',
+      ) as HTMLInputElement | null;
+      expect(input?.value).toBe('Ember Duelist');
+    });
+    unmount();
+  });
+});
+
 describe('ImageLabView (headless)', () => {
   it('requires a source photo before generating', async () => {
     const lab = ImageLabView.new();

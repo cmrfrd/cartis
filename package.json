@@ -37,7 +37,6 @@
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
     "@vitejs/plugin-react": "^6.0.5",
-    "fake-indexeddb": "^6.2.5",
     "happy-dom": "^20.11.1",
     "tailwindcss": "^4.3.3",
     "typescript": "^7.0.2",

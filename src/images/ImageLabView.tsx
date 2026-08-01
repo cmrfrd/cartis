@@ -151,7 +151,7 @@ function LabSource() {
 }
 
 function LabControls() {
-  const { is: lab, styleId, prompt, busy, note } = ImageLabView.get();
+  const { is: lab, styleId, prompt, imageName, aspectRatio, busy, note } = ImageLabView.get();
   const styleOptions = [
     { value: 'freestyle', label: 'Freestyle prompt' },
     ...listTemplates().map((t) => ({ value: t.id, label: `${t.name} style` })),
@@ -174,7 +174,7 @@ function LabControls() {
         </FieldRow>
         <FieldRow label="Dimensions">
           <SelectInput
-            value={lab.aspectRatio}
+            value={aspectRatio}
             onValue={(v) => {
               lab.aspectRatio = v;
             }}
@@ -183,7 +183,7 @@ function LabControls() {
         </FieldRow>
         <FieldRow label="Image name">
           <TextInput
-            value={lab.imageName}
+            value={imageName}
             onValue={(v) => {
               lab.imageName = v;
             }}
@@ -229,7 +229,9 @@ function LabResults() {
             alt={image.prompt ?? 'generated'}
             className="aspect-square w-full rounded border border-edge object-cover"
           />
-          <figcaption className="truncate text-[11px] text-ink-dim">{image.prompt}</figcaption>
+          <figcaption className="truncate text-[11px] text-foreground/70" title={image.prompt}>
+            {image.name}
+          </figcaption>
         </figure>
       ))}
     </div>

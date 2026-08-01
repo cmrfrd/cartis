@@ -37,7 +37,7 @@ describe('GalleryView', () => {
 
     const tabs = Array.from(container.querySelectorAll('button'));
     await click(tabs.find((b) => b.textContent === 'Library') ?? null);
-    expect(container.textContent).toContain('a knight');
+    expect(container.textContent).toContain('A Knight');
 
     await click(
       Array.from(container.querySelectorAll('button')).find(
