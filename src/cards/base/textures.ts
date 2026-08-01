@@ -40,6 +40,8 @@ export const TEXTURES = {
   grain: noiseTextureUrl({ frequency: '0.9', octaves: 2, seed: 11, alpha: 0.05 }),
   /** Directional weave for the frame — printed linen stock. */
   linen: noiseTextureUrl({ frequency: '0.09 0.55', octaves: 3, seed: 23, alpha: 0.16 }),
+  /** Marbled stone mottling for the frame channel — the MTG-frame feel. */
+  stone: noiseTextureUrl({ frequency: '0.018 0.026', octaves: 6, seed: 41, alpha: 0.34 }),
 };
 
 async function rasterizeToPng(cssUrl: string): Promise<string> {
@@ -76,17 +78,27 @@ export async function prepareTextures(): Promise<void> {
   );
 }
 
-/** Plate material: parchment mottle + grain, ink-darkened rim, raised bevel. */
-export function plateStyle(): CSSProperties {
+/** Plate material: parchment + grain, ink rim, bevel, drop shadow, and an
+ *  optional essence-colored hairline tracing the plate edge. */
+export function plateStyle(accent?: string, opts: { sheen?: boolean } = {}): CSSProperties {
+  const sheen = opts.sheen
+    ? 'linear-gradient(180deg, rgba(255, 255, 255, 0.28) 0%, rgba(255, 255, 255, 0) 45%, rgba(60, 40, 15, 0.14) 100%), '
+    : '';
   return {
-    backgroundImage: `${TEXTURES.parchment}, ${TEXTURES.grain}`,
+    backgroundImage: `${sheen}${TEXTURES.parchment}, ${TEXTURES.grain}`,
     boxShadow: [
+      ...(accent ? [`0 0 0 1px ${accent}`] : []), // colored accent ring
       'inset 0 0 8px rgba(62, 38, 16, 0.28)', // ink pooling at the rim
       'inset 0 1px 1px rgba(255, 255, 255, 0.55)', // bevel light (top)
       'inset 0 -1px 2px rgba(62, 38, 16, 0.3)', // bevel shade (bottom)
-      '0 1px 2px rgba(0, 0, 0, 0.4)', // lift off the frame
+      '0 2px 3px rgba(0, 0, 0, 0.45)', // drop shadow onto the frame
     ].join(', '),
   };
+}
+
+/** Frame-channel stone texture layer. */
+export function frameStoneStyle(): CSSProperties {
+  return { backgroundImage: TEXTURES.stone, opacity: 0.5 };
 }
 
 /** Frame stock: linen weave at plain alpha (no blend modes — they break in export). */

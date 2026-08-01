@@ -104,19 +104,20 @@ export class ArcaneCard extends Component {
         holo={holo}
         foilVariant={data.foilStyle === 'etched' ? 'etched' : 'full'}
         frameClass={palette.frame}
+        accent={palette.accent}
         aura={mythic ? MYTHIC_AURA : undefined}
+        footer={<this.CollectorStrip />}
       >
-        <div className="flex h-full flex-col gap-1.5 p-3 pb-1.5">
+        <div className="flex h-full flex-col gap-[3px] p-[7px] pb-2">
           <this.TitleBar />
           <this.ArtWindow />
           <this.TypeLine />
           <this.RulesBox />
-          <this.CollectorStrip />
         </div>
         <this.StatBadge />
-        <CornerFiligree className="pointer-events-none absolute top-1 left-1 text-[#d4af37]/45" />
+        <CornerFiligree className="pointer-events-none absolute top-0.5 left-0.5 text-[#d4af37]/40" />
         <CornerFiligree
-          className="pointer-events-none absolute top-1 right-1 text-[#d4af37]/45"
+          className="pointer-events-none absolute top-0.5 right-0.5 text-[#d4af37]/40"
           style={{ transform: 'scaleX(-1)' }}
         />
       </CardSurface>

@@ -1,13 +1,15 @@
 import type { Component } from '@expressive/react';
 // PointerEvent stays a host (DOM) type — expressive has no equivalent.
 import type { PointerEvent } from 'react';
-import { frameLinenStyle, halftoneSurface } from './textures';
+import { frameLinenStyle, frameStoneStyle, halftoneSurface } from './textures';
 
 /** Trading-card preview geometry: 2.5"×3.5" at 150 px/inch; exports double it to 300 DPI. */
 export const CARD_WIDTH = 375;
 export const CARD_HEIGHT = 525;
 /** Printed black border around the frame, like a real card. */
 export const CARD_BORDER = 12;
+/** Taller bottom band of the black border — hosts the collector line, like a real card. */
+export const CARD_FOOTER = 26;
 
 /** Interactive-only CSS vars; exports strip these so prints always use rest defaults. */
 export const POINTER_VARS = ['--holo-x', '--holo-y', '--tilt-x', '--tilt-y'];
@@ -34,8 +36,12 @@ export function CardSurface(props: {
   holo?: boolean;
   foilVariant?: FoilVariant;
   frameClass?: string;
+  /** Essence pinstripe traced just inside the gold pinline. */
+  accent?: string;
   /** Extra outer glow (e.g. mythic aura); replaces the default drop shadow. */
   aura?: string;
+  /** Rendered on the bottom black-border band (collector line). */
+  footer?: Component.Node;
   children?: Component.Node;
 }) {
   return (
@@ -56,17 +62,36 @@ export function CardSurface(props: {
         data-card-frame="true"
         className={`absolute rounded-[9px] ${props.frameClass ?? 'bg-panel'}`}
         style={{
-          inset: CARD_BORDER,
-          boxShadow: '0 0 0 1px rgba(212, 175, 55, 0.85), 0 0 0 2.5px rgba(0, 0, 0, 0.7)',
+          inset: `${CARD_BORDER}px ${CARD_BORDER}px ${CARD_FOOTER}px`,
+          boxShadow: [
+            '0 0 0 1px rgba(212, 175, 55, 0.85)',
+            '0 0 0 2.5px rgba(0, 0, 0, 0.7)',
+            ...(props.accent ? [`inset 0 0 0 1px ${props.accent}66`] : []),
+            'inset 0 1px 1px rgba(255, 255, 255, 0.22)',
+            'inset 0 -2px 3px rgba(0, 0, 0, 0.35)',
+          ].join(', '),
         }}
       >
-        {/* linen stock texture over the frame gradient */}
+        {/* stone channel + linen stock over the frame gradient */}
+        <div
+          className="pointer-events-none absolute inset-0 rounded-[9px]"
+          style={frameStoneStyle()}
+        />
         <div
           className="pointer-events-none absolute inset-0 rounded-[9px]"
           style={frameLinenStyle()}
         />
         <div className="relative h-full">{props.children}</div>
       </div>
+      {props.footer && (
+        <div
+          data-card-footer="true"
+          className="absolute inset-x-3 bottom-0 flex items-center"
+          style={{ height: CARD_FOOTER }}
+        >
+          {props.footer}
+        </div>
+      )}
       {/* press-dot pattern over the whole card, incl. the black border */}
       <div
         className="pointer-events-none absolute inset-0"

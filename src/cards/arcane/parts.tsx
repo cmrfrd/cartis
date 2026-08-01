@@ -41,7 +41,13 @@ export function ArcaneCostPips(props: { cost: number; palette: EssencePalette })
       {Array.from({ length: pips }, (_, i) => (
         <span
           key={`pip-${String(i)}`}
-          className={`inline-block h-3.5 w-3.5 rounded-full shadow-inner ${props.palette.pip}`}
+          className={`inline-block h-3.5 w-3.5 rounded-full ${props.palette.pip}`}
+          style={{
+            backgroundImage:
+              'radial-gradient(circle at 32% 30%, rgba(255, 255, 255, 0.85) 0%, transparent 36%)',
+            boxShadow:
+              '0 0 0 1px rgba(0, 0, 0, 0.55), inset 0 -1.5px 2px rgba(0, 0, 0, 0.4), 0 1px 1.5px rgba(0, 0, 0, 0.4)',
+          }}
         />
       ))}
     </span>
@@ -51,8 +57,8 @@ export function ArcaneCostPips(props: { cost: number; palette: EssencePalette })
 export function ArcaneTitleBar(props: { name: string; cost: number; palette: EssencePalette }) {
   return (
     <div
-      className={`flex items-center justify-between gap-2 rounded-md px-2.5 py-1 ${props.palette.plate}`}
-      style={plateStyle()}
+      className={`flex items-center justify-between gap-2 rounded-[5px] px-2.5 py-1 ${props.palette.plate}`}
+      style={plateStyle(props.palette.accent, { sheen: true })}
     >
       <span
         className={`truncate font-display font-bold tracking-wide ${props.palette.plateText}`}
@@ -68,7 +74,7 @@ export function ArcaneTitleBar(props: { name: string; cost: number; palette: Ess
 export function ArcaneArtWindow(props: { art?: string; alt: string; palette: EssencePalette }) {
   return (
     <div
-      className={`h-[210px] overflow-hidden rounded-sm bg-black/40 ${props.palette.artEdge}`}
+      className={`h-[228px] overflow-hidden rounded-[3px] bg-black/40 ${props.palette.artEdge}`}
       style={{
         boxShadow: 'inset 0 2px 8px rgba(0, 0, 0, 0.55), inset 0 -1px 4px rgba(0, 0, 0, 0.4)',
       }}
@@ -93,8 +99,8 @@ export function ArcaneTypeLine(props: {
   if (props.text.trim().length === 0) return null;
   return (
     <div
-      className={`flex items-center justify-between rounded-md px-2.5 py-0.5 ${props.palette.plate}`}
-      style={plateStyle()}
+      className={`flex items-center justify-between rounded-[5px] px-2.5 py-0.5 ${props.palette.plate}`}
+      style={plateStyle(props.palette.accent, { sheen: true })}
     >
       <span
         className={`truncate font-card text-[12px] font-semibold ${props.palette.plateText}`}
@@ -127,8 +133,8 @@ export function ArcaneRulesBox(props: {
 }) {
   return (
     <div
-      className={`relative flex-1 overflow-hidden rounded-md px-2.5 py-2 ${props.palette.plate}`}
-      style={plateStyle()}
+      className={`relative flex-1 overflow-hidden rounded-[5px] px-2.5 py-2 ${props.palette.plate}`}
+      style={plateStyle(props.palette.accent)}
     >
       {props.essenceId && (
         <div
@@ -163,7 +169,7 @@ export function ArcaneStatBadge(props: { might: number; ward: number; palette: E
   return (
     <div
       data-testid="stat-badge"
-      className="absolute right-3 bottom-[22px] rounded-full p-[2px] shadow-lg"
+      className="absolute right-[9px] bottom-[9px] rounded-full p-[2px]"
       style={{
         backgroundImage:
           'conic-gradient(from 210deg, #f0e0a0, #8a6a2f 25%, #f6df8a 50%, #6a4f1f 75%, #f0e0a0)',
@@ -171,7 +177,7 @@ export function ArcaneStatBadge(props: { might: number; ward: number; palette: E
     >
       <div
         className={`whitespace-nowrap rounded-full px-3 py-0.5 font-display text-[15px] font-bold ${props.palette.plate}`}
-        style={plateStyle()}
+        style={plateStyle(undefined, { sheen: true })}
       >
         <span className={props.palette.plateText} style={{ textShadow: ENGRAVED_SHADOW }}>
           {props.might} / {props.ward}
@@ -187,7 +193,7 @@ export function ArcaneCollectorStrip(props: { text: string }) {
   return (
     <div
       data-testid="collector-strip"
-      className="flex items-center justify-between px-1 pt-1 font-card text-[8px] tracking-[0.14em] text-white/70 uppercase"
+      className="flex w-full items-center justify-between font-card text-[8.5px] tracking-[0.14em] text-white/75 uppercase"
     >
       <span className="truncate">{props.text}</span>
       <span className="shrink-0 pl-2">Cartis</span>

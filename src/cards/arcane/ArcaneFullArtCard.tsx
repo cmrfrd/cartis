@@ -40,7 +40,9 @@ export class ArcaneFullArtCard extends Component {
         holo={holo}
         foilVariant={data.foilStyle === 'etched' ? 'etched' : 'full'}
         frameClass={palette.frame}
+        accent={palette.accent}
         aura={rarityFrom(data.rarity) === 'mythic' ? MYTHIC_AURA : undefined}
+        footer={<ArcaneCollectorStrip text={String(data.collector ?? '001/001')} />}
       >
         <div data-testid="fullart-art" className="absolute inset-0 overflow-hidden rounded-[9px]">
           {art ? (
@@ -87,7 +89,6 @@ export class ArcaneFullArtCard extends Component {
                 {String(data.ability)}
               </p>
             )}
-            <ArcaneCollectorStrip text={String(data.collector ?? '001/001')} />
           </div>
         </div>
         <this.Stats />

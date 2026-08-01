@@ -12,6 +12,8 @@ export interface EssencePalette {
   artEdge: string;
   /** Cost pip chip. */
   pip: string;
+  /** Bright edge color for pinstripes and hairline accents. */
+  accent: string;
   /** Feeds artStylePrompt for AI portrait generation. */
   artFlavor: string;
 }
@@ -25,6 +27,7 @@ export const ESSENCES: readonly EssencePalette[] = [
     plateText: 'text-[#3a1a0d]',
     artEdge: 'border-[3px] border-[#c96a3a]',
     pip: 'bg-[#e0512d] text-[#ffe9d6]',
+    accent: '#ff8a4a',
     artFlavor: 'warm ember tones, volcanic glow, sparks in the air',
   },
   {
@@ -35,6 +38,7 @@ export const ESSENCES: readonly EssencePalette[] = [
     plateText: 'text-[#0d2036]',
     artEdge: 'border-[3px] border-[#4a8ac0]',
     pip: 'bg-[#2d7ac0] text-[#dff0ff]',
+    accent: '#6ab8ff',
     artFlavor: 'cool aquamarine light, mist and deep water reflections',
   },
   {
@@ -45,6 +49,7 @@ export const ESSENCES: readonly EssencePalette[] = [
     plateText: 'text-[#14300d]',
     artEdge: 'border-[3px] border-[#6aa04a]',
     pip: 'bg-[#4a8a2d] text-[#e8ffd6]',
+    accent: '#8ad06a',
     artFlavor: 'lush forest greens, dappled sunlight through leaves',
   },
   {
@@ -55,6 +60,7 @@ export const ESSENCES: readonly EssencePalette[] = [
     plateText: 'text-[#3a300d]',
     artEdge: 'border-[3px] border-[#e0d090]',
     pip: 'bg-[#d8c060] text-[#3a300d]',
+    accent: '#ffe08a',
     artFlavor: 'golden dawn light, halos and soft radiance',
   },
   {
@@ -65,6 +71,7 @@ export const ESSENCES: readonly EssencePalette[] = [
     plateText: 'text-[#1c0d30]',
     artEdge: 'border-[3px] border-[#7a5aa0]',
     pip: 'bg-[#5a3a8a] text-[#eadfff]',
+    accent: '#b08aff',
     artFlavor: 'violet shadows, moonlit gloom, drifting wisps',
   },
   {
@@ -75,6 +82,7 @@ export const ESSENCES: readonly EssencePalette[] = [
     plateText: 'text-[#26262c]',
     artEdge: 'border-[3px] border-[#a8a8b0]',
     pip: 'bg-[#8a8a92] text-[#f4f4f0]',
+    accent: '#c8c8d0',
     artFlavor: 'weathered stone and antique metal, museum lighting',
   },
 ];
