@@ -15,17 +15,26 @@ import { onTestFinished, type TestFunction, test } from 'vitest';
  * @effect/vitest's `it.effect(name, () => Effect<...>)` shape.
  */
 
-/** An effect a test body returns. `A` is asserted-on; failures reject the run. */
-type EffectSelf<R> = () => Effect.Effect<unknown, unknown, R>;
+/**
+ * A body for `it.effect`/`it.live`: self-contained (`R = never`), matching
+ * @effect/vitest — the runner supplies only the (test) environment.
+ */
+type EffectSelf = () => Effect.Effect<unknown, unknown, never>;
+
+/** A body for `it.scoped`: may require `Scope.Scope`; the runner closes it. */
+type ScopedSelf = () => Effect.Effect<unknown, unknown, Scope.Scope>;
 
 /** vitest's runner registrar (`test`, `test.skip`, `test.only`). */
 type Runner = (name: string, fn: () => Promise<void>, timeout?: number) => void;
 
-/**
- * Run an effect that needs nothing beyond the TestContext (deterministic clock,
- * TestClock, etc.), wrapping it in a Scope so `forkScoped`/scoped resources work.
- */
-function runTest(self: EffectSelf<Scope.Scope>): () => Promise<void> {
+/** Run an effect under TestContext (deterministic TestClock-controlled time). */
+function runTest(self: EffectSelf): () => Promise<void> {
+  return () =>
+    Effect.runPromise(self().pipe(Effect.provide(TestContext.TestContext), Effect.asVoid));
+}
+
+/** Same, but the body's `R` includes `Scope.Scope`, satisfied by `Effect.scoped`. */
+function runScoped(self: ScopedSelf): () => Promise<void> {
   return () =>
     Effect.runPromise(
       Effect.scoped(self()).pipe(Effect.provide(TestContext.TestContext), Effect.asVoid),
@@ -33,15 +42,22 @@ function runTest(self: EffectSelf<Scope.Scope>): () => Promise<void> {
 }
 
 /** Run an effect with the live environment — real clock, no TestContext. */
-function runLive(self: EffectSelf<Scope.Scope>): () => Promise<void> {
-  return () => Effect.runPromise(Effect.scoped(self()).pipe(Effect.asVoid));
+function runLive(self: EffectSelf): () => Promise<void> {
+  return () => Effect.runPromise(self().pipe(Effect.asVoid));
+}
+
+/** An `it.effect`-style method with its `.skip`/`.only` variants. */
+interface TestVariant<Self> {
+  (name: string, self: Self, timeout?: number): void;
+  skip: (name: string, self: Self, timeout?: number) => void;
+  only: (name: string, self: Self, timeout?: number) => void;
 }
 
 /** Build an `it.effect`-style method plus its `.skip`/`.only` variants. */
-function makeVariant(build: (self: EffectSelf<Scope.Scope>) => () => Promise<void>) {
+function makeVariant<Self>(build: (self: Self) => () => Promise<void>): TestVariant<Self> {
   const register =
     (runner: Runner) =>
-    (name: string, self: EffectSelf<Scope.Scope>, timeout?: number): void => {
+    (name: string, self: Self, timeout?: number): void => {
       runner(name, build(self), timeout);
     };
   const method = register(test);
@@ -55,12 +71,12 @@ function makeVariant(build: (self: EffectSelf<Scope.Scope>) => () => Promise<voi
 type PlainFn = TestFunction;
 
 interface EffectIt {
-  /** Runs `self()` under TestContext (TestClock) in a Scope via `Effect.runPromise`. */
-  effect: ReturnType<typeof makeVariant>;
-  /** Same as `effect`, but the effect requires `Scope.Scope` explicitly. */
-  scoped: ReturnType<typeof makeVariant>;
-  /** Runs `self()` with the live environment (no TestContext). */
-  live: ReturnType<typeof makeVariant>;
+  /** Runs `self()` under TestContext (TestClock). The body's `R` must be `never`. */
+  effect: TestVariant<EffectSelf>;
+  /** Like `effect`, but the body may require `Scope.Scope` (closed by the runner). */
+  scoped: TestVariant<ScopedSelf>;
+  /** Runs `self()` with the live environment (no TestContext). `R` must be `never`. */
+  live: TestVariant<EffectSelf>;
   /** Passthrough to vitest's `test` for plain (non-effect) cases. */
   (name: string, fn: PlainFn, timeout?: number): void;
 }
@@ -75,7 +91,7 @@ const base: EffectIt = Object.assign(
   },
   {
     effect: makeVariant(runTest),
-    scoped: makeVariant(runTest),
+    scoped: makeVariant(runScoped),
     live: makeVariant(runLive),
   },
 );

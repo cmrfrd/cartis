@@ -1,4 +1,4 @@
-import { Cause, Context, Effect, FiberId, Layer, Ref, Schema, TestClock } from 'effect';
+import { Cause, Context, Effect, Fiber, FiberId, Layer, Ref, Schema, TestClock } from 'effect';
 import { describe, expect } from 'vitest';
 import { it } from '../../test/effect';
 import {
@@ -45,16 +45,39 @@ describe('effect toolchain canary', () => {
     ),
   );
 
-  it.effect('TestClock makes time deterministic', () =>
+  // The explicit annotation documents it.effect's contract: the body's R is never.
+  it.effect(
+    'TestClock makes time deterministic',
+    (): Effect.Effect<void, never, never> =>
+      Effect.gen(function* () {
+        const done = yield* Ref.make(false);
+        const fiber = yield* Effect.fork(
+          Effect.sleep('5 seconds').pipe(Effect.zipRight(Ref.set(done, true))),
+        );
+        // Nothing has elapsed yet on the (virtual) clock.
+        expect(yield* Ref.get(done)).toBe(false);
+        yield* TestClock.adjust('5 seconds');
+        yield* Fiber.join(fiber);
+        expect(yield* Ref.get(done)).toBe(true);
+      }),
+  );
+
+  it.scoped('it.scoped: the body may require Scope.Scope (acquireRelease)', () =>
     Effect.gen(function* () {
-      const done = yield* Ref.make(false);
-      yield* Effect.forkScoped(
-        Effect.sleep('5 seconds').pipe(Effect.zipRight(Ref.set(done, true))),
+      const events: string[] = [];
+      // acquireRelease puts Scope.Scope in the body's R — only it.scoped accepts
+      // this body; the runner's Effect.scoped closes the scope (running release)
+      // after the body completes.
+      yield* Effect.acquireRelease(
+        Effect.sync(() => {
+          events.push('acquire');
+        }),
+        () =>
+          Effect.sync(() => {
+            events.push('release');
+          }),
       );
-      // Nothing has elapsed yet on the (virtual) clock.
-      expect(yield* Ref.get(done)).toBe(false);
-      yield* TestClock.adjust('5 seconds');
-      expect(yield* Ref.get(done)).toBe(true);
+      expect(events).toEqual(['acquire']);
     }),
   );
 
@@ -83,6 +106,17 @@ describe('effect toolchain canary', () => {
       // A couple more to lock the templated strings.
       const create = new ReplicateError({ reason: 'create', status: 422, detail: 'bad input' });
       expect(create.message).toBe('replicate error 422: bad input');
+      const poll = new ReplicateError({ reason: 'poll', status: 502 });
+      expect(poll.message).toBe('replicate poll error 502');
+      const failed = new ReplicateError({ reason: 'failed' });
+      expect(failed.message).toBe('replicate failed: no detail');
+
+      // The discriminated union makes the degenerate messages unrepresentable
+      // ("replicate error undefined: …"): these must fail to compile.
+      // @ts-expect-error 'create' requires status and detail
+      void new ReplicateError({ reason: 'create' });
+      // @ts-expect-error 'poll' requires status
+      void new ReplicateError({ reason: 'poll' });
       const shape = new CompileError({
         phase: 'shape',
         detail: 'Module needs a component default export (export default function …)',

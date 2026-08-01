@@ -89,25 +89,60 @@ export class AgentRequestError extends Data.TaggedError('AgentRequestError')<{
  * `timeout`  → `replicate timed out after 120s`            (line 175)
  * `no-output`→ `replicate succeeded but returned no output`(line 186)
  *
- * `detail` for `failed`/`canceled` is the prediction error or `'no detail'`.
+ * The constructor takes a discriminated union over `reason`, so the degenerate
+ * cases ("replicate error undefined: …") are unrepresentable: `create` requires
+ * the HTTP status plus the response-body text the source interpolates, `poll`
+ * requires the status, `failed`/`canceled` carry the prediction error (falling
+ * back to `'no detail'` exactly like the source), and `timeout`/`no-output`
+ * take no fields.
+ *
+ * TS 7 rejects `extends` over a union-shaped instance type (TS2509: base
+ * constructor return type must have statically known members), so the class
+ * itself keeps flat fields and the exported constructor is narrowed to the
+ * union instead — same runtime class, degenerate construction impossible.
  */
-export class ReplicateError extends Data.TaggedError('ReplicateError')<{
-  readonly reason: 'create' | 'poll' | 'failed' | 'canceled' | 'timeout' | 'no-output';
+export type ReplicateFields =
+  | { readonly reason: 'create'; readonly status: number; readonly detail: string }
+  | { readonly reason: 'poll'; readonly status: number }
+  | { readonly reason: 'failed'; readonly detail?: string }
+  | { readonly reason: 'canceled'; readonly detail?: string }
+  | { readonly reason: 'timeout' }
+  | { readonly reason: 'no-output' };
+
+/** Free function (not a getter) so exhaustive-switch narrowing satisfies biome's useGetterReturn. */
+function replicateMessage(fields: {
+  readonly reason: ReplicateFields['reason'];
+  readonly status?: number;
+  readonly detail?: string;
+}): string {
+  switch (fields.reason) {
+    case 'create':
+      return `replicate error ${fields.status}: ${fields.detail}`;
+    case 'poll':
+      return `replicate poll error ${fields.status}`;
+    case 'failed':
+      return `replicate failed: ${fields.detail ?? 'no detail'}`;
+    case 'canceled':
+      return `replicate canceled: ${fields.detail ?? 'no detail'}`;
+    case 'timeout':
+      return 'replicate timed out after 120s';
+    case 'no-output':
+      return 'replicate succeeded but returned no output';
+  }
+}
+
+class ReplicateErrorClass extends Data.TaggedError('ReplicateError')<{
+  readonly reason: ReplicateFields['reason'];
   readonly status?: number;
   readonly detail?: string;
 }> {
   override get message(): string {
-    const byReason: Record<ReplicateError['reason'], string> = {
-      create: `replicate error ${this.status}: ${this.detail ?? ''}`,
-      poll: `replicate poll error ${this.status}`,
-      failed: `replicate failed: ${this.detail ?? 'no detail'}`,
-      canceled: `replicate canceled: ${this.detail ?? 'no detail'}`,
-      timeout: 'replicate timed out after 120s',
-      'no-output': 'replicate succeeded but returned no output',
-    };
-    return byReason[this.reason];
+    return replicateMessage(this);
   }
 }
+
+export type ReplicateError = ReplicateErrorClass;
+export const ReplicateError: new (fields: ReplicateFields) => ReplicateError = ReplicateErrorClass;
 
 /** Client-side image-bridge failures. src/images/replicate.ts */
 export class ImageBridgeError extends Data.TaggedError('ImageBridgeError')<{
