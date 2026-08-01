@@ -2,6 +2,8 @@ import type { ServerResponse } from 'node:http';
 import type { Plugin } from 'vite';
 import { bytesToDataUrl } from '../images/codec.ts';
 import { activityHistory, emitActivity, subscribeActivity } from './activity.ts';
+import type { StoredRecord, StoreName } from './fileStore.ts';
+import { deleteRecord, listRecords, putRecord, readStoredFile } from './fileStore.ts';
 
 // ---------- agent prompt ----------
 
@@ -129,17 +131,25 @@ export async function generateWithReplicate(
   token: string,
   prompt: string,
   imageDataUrl: string,
+  aspectRatio = 'match_input_image',
   fetchImpl: typeof fetch = fetch,
   log: (message: string) => void = (m) => emitActivity('image', m),
   sleep: (ms: number) => Promise<void> = (ms) => new Promise((r) => setTimeout(r, ms)),
 ): Promise<string> {
   const startedAt = Date.now();
   const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
-  log('sending photo + prompt to replicate (flux-kontext-pro)');
+  log(`sending photo + prompt to replicate (flux-kontext-pro, ${aspectRatio})`);
   const created = await fetchImpl(REPLICATE_URL, {
     method: 'POST',
     headers,
-    body: JSON.stringify({ input: { prompt, input_image: imageDataUrl, output_format: 'png' } }),
+    body: JSON.stringify({
+      input: {
+        prompt,
+        input_image: imageDataUrl,
+        output_format: 'png',
+        aspect_ratio: aspectRatio,
+      },
+    }),
   });
   if (!created.ok) {
     throw new Error(`replicate error ${String(created.status)}: ${await created.text()}`);
@@ -218,10 +228,65 @@ async function respondWith(res: ServerResponse, work: () => Promise<unknown>): P
   }
 }
 
+const DATA_ROOT = 'cartis-data';
+const STORES: readonly StoreName[] = ['images', 'cards', 'exports'];
+
+function parseStorePath(url: string): { store: StoreName; rest: string } | undefined {
+  const [path = ''] = url.split('?');
+  const segments = path.split('/').filter((s) => s.length > 0);
+  const store = STORES.find((name) => name === segments[0]);
+  if (!store) return undefined;
+  return { store, rest: decodeURIComponent(segments.slice(1).join('/')) };
+}
+
 export function cartisBridge(): Plugin {
   return {
     name: 'cartis-bridge',
     configureServer(server) {
+      // file-backed persistence: real files under ./cartis-data
+      server.middlewares.use('/api/store', (req, res) => {
+        const parsed = parseStorePath(req.url ?? '');
+        const sres = res as ServerResponse;
+        if (!parsed) {
+          sendJson(sres, 404, { error: 'unknown store' });
+          return;
+        }
+        void respondWith(sres, async () => {
+          if (req.method === 'GET') return await listRecords(DATA_ROOT, parsed.store);
+          if (req.method === 'PUT') {
+            const body = rec(await readJson(req)) ?? {};
+            const record = rec(body.record);
+            if (!record || typeof record.id !== 'string') throw new Error('record.id required');
+            return await putRecord(
+              DATA_ROOT,
+              parsed.store,
+              record as StoredRecord,
+              typeof body.bytesBase64 === 'string' ? body.bytesBase64 : undefined,
+            );
+          }
+          if (req.method === 'DELETE' && parsed.rest.length > 0) {
+            await deleteRecord(DATA_ROOT, parsed.store, parsed.rest);
+            return { ok: true };
+          }
+          throw new Error(`unsupported ${String(req.method)} on /api/store`);
+        });
+      });
+      server.middlewares.use('/files', (req, res) => {
+        const parsed = parseStorePath(req.url ?? '');
+        const sres = res as ServerResponse;
+        void (async () => {
+          const file = parsed
+            ? await readStoredFile(DATA_ROOT, parsed.store, parsed.rest)
+            : undefined;
+          if (!file) {
+            sendJson(sres, 404, { error: 'not found' });
+            return;
+          }
+          sres.statusCode = 200;
+          sres.setHeader('Content-Type', file.type);
+          sres.end(file.bytes);
+        })();
+      });
       server.middlewares.use('/api/activity', (req, res) => {
         const sse = res as ServerResponse;
         sse.statusCode = 200;
@@ -274,6 +339,7 @@ export function cartisBridge(): Plugin {
             token,
             String(body.prompt ?? ''),
             String(body.imageDataUrl ?? ''),
+            typeof body.aspectRatio === 'string' ? body.aspectRatio : undefined,
           );
           return { dataUrl };
         });

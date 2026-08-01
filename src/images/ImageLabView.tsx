@@ -2,16 +2,36 @@ import { Component, get } from '@expressive/react';
 import { AppShell } from '../app/AppShell';
 import { getTemplate, listTemplates } from '../cards/registry';
 import type { ImageLibrary } from '../storage/ImageLibrary';
-import { Button, EmptyState, FieldRow, Panel, SelectInput, TextAreaInput } from '../ui';
+import { Button, EmptyState, FieldRow, Panel, SelectInput, TextAreaInput, TextInput } from '../ui';
 import { CameraCapture } from './CameraCapture';
 import { bytesToDataUrl } from './codec';
 import { PhotoPicker } from './PhotoPicker';
+import { suggestImageName } from './prompt';
 import type { ImageProvider } from './provider';
 import { selectImageProvider } from './provider';
+
+const ASPECT_OPTIONS = [
+  { value: 'match_input_image', label: 'Match input' },
+  { value: '1:1', label: 'Square 1:1' },
+  { value: '3:2', label: 'Landscape 3:2' },
+  { value: '2:3', label: 'Portrait 2:3' },
+  { value: '4:3', label: 'Landscape 4:3' },
+  { value: '3:4', label: 'Portrait 3:4' },
+  { value: '16:9', label: 'Wide 16:9' },
+  { value: '9:16', label: 'Tall 9:16' },
+  { value: '4:5', label: 'Portrait 4:5' },
+  { value: '5:4', label: 'Landscape 5:4' },
+  { value: '2:1', label: 'Panorama 2:1' },
+  { value: '1:2', label: 'Tower 1:2' },
+  { value: '21:9', label: 'Cinema 21:9' },
+  { value: '9:21', label: 'Sliver 9:21' },
+];
 
 export class ImageLabView extends Component {
   shell = get(AppShell, false);
   prompt = '';
+  imageName = '';
+  aspectRatio = 'match_input_image';
   styleId = 'freestyle';
   sourceBytes?: ArrayBuffer = undefined;
   sourceType = '';
@@ -61,8 +81,10 @@ export class ImageLabView extends Component {
         sourceType: this.sourceType,
         prompt,
         styleId: this.styleId,
+        aspectRatio: this.aspectRatio,
       });
       await library.add({
+        name: this.imageName.trim() || suggestImageName(prompt),
         kind: 'generated',
         prompt,
         styleId: this.styleId,
@@ -142,8 +164,30 @@ function LabControls() {
             value={styleId}
             onValue={(v) => {
               lab.styleId = v;
+              if (v !== 'freestyle') {
+                const aspect = getTemplate(v).artAspect;
+                if (aspect) lab.aspectRatio = aspect;
+              }
             }}
             options={styleOptions}
+          />
+        </FieldRow>
+        <FieldRow label="Dimensions">
+          <SelectInput
+            value={lab.aspectRatio}
+            onValue={(v) => {
+              lab.aspectRatio = v;
+            }}
+            options={ASPECT_OPTIONS}
+          />
+        </FieldRow>
+        <FieldRow label="Image name">
+          <TextInput
+            value={lab.imageName}
+            onValue={(v) => {
+              lab.imageName = v;
+            }}
+            placeholder="auto from prompt"
           />
         </FieldRow>
         <FieldRow label="Prompt">

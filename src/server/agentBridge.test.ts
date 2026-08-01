@@ -106,6 +106,10 @@ describe('generateWithReplicate', () => {
         };
         expect(body.input.prompt).toBe('stylize me');
         expect(body.input.input_image.startsWith('data:')).toBe(true);
+        expect(
+          (JSON.parse(String(init?.body)) as { input: { aspect_ratio: string } }).input
+            .aspect_ratio,
+        ).toBe('3:2');
         return new Response(
           JSON.stringify({
             id: 'pred-1',
@@ -131,6 +135,7 @@ describe('generateWithReplicate', () => {
       'tok',
       'stylize me',
       'data:image/png;base64,QQ==',
+      '3:2',
       fetchImpl,
       (m) => log.push(m),
       instantSleep,
@@ -156,6 +161,7 @@ describe('generateWithReplicate', () => {
         'tok',
         'p',
         'data:image/png;base64,QQ==',
+        undefined,
         fetchImpl,
         () => {},
         instantSleep,
@@ -172,6 +178,7 @@ describe('generateWithReplicate', () => {
         'bad',
         'p',
         'data:image/png;base64,QQ==',
+        undefined,
         fetchImpl,
         () => {},
         instantSleep,

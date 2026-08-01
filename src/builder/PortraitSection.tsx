@@ -80,8 +80,10 @@ export class PortraitSection extends Component {
         sourceType: this.pendingType,
         prompt,
         styleId: builder.templateId,
+        aspectRatio: builder.template.artAspect ?? 'match_input_image',
       });
       const stored = await library.add({
+        name: `${String(builder.data.name ?? 'card')} portrait`,
         kind: 'generated',
         prompt,
         styleId: builder.templateId,

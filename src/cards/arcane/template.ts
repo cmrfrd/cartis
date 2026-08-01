@@ -73,6 +73,7 @@ export const arcaneTemplate: CardTemplate = {
       'dramatic lighting, visible canvas texture, painterly oil brushwork',
       'ornate trading card illustration',
     ].join(', '),
+  artAspect: '3:2',
   Render: ArcaneCard,
 };
 
@@ -83,5 +84,6 @@ export const arcaneFullArtTemplate: CardTemplate = {
   name: 'Arcane Hero — Full Art',
   description: 'Showcase frame: the portrait fills the card, plates float translucent above it.',
   defaults: { ...arcaneTemplate.defaults, name: 'Nyra, Unbound', flavor: '' },
+  artAspect: '3:4',
   Render: ArcaneFullArtCard,
 };

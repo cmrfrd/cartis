@@ -1,37 +1,24 @@
 import State from '@expressive/react';
-import { dbDelete, dbGetAll, dbPut } from './db';
+import { storeClient } from './storeClient';
 
 export interface StoredImage {
   id: string;
+  name: string;
+  kind: 'source' | 'generated';
+  prompt?: string;
+  styleId?: string;
+  type: string;
+  createdAt: number;
+  fileName?: string;
+}
+
+export interface NewImage {
+  name: string;
   kind: 'source' | 'generated';
   prompt?: string;
   styleId?: string;
   bytes: ArrayBuffer;
   type: string;
-  createdAt: number;
-}
-
-export type NewImage = Omit<StoredImage, 'id' | 'createdAt'>;
-
-/** Object URLs are unavailable in some test environments; render code treats missing urls as "no art". */
-export function safeObjectUrl(bytes: ArrayBuffer, type: string): string | undefined {
-  try {
-    return URL.createObjectURL(new Blob([bytes], { type }));
-  } catch {
-    return undefined;
-  }
-}
-
-function withoutKey(map: Record<string, string>, id: string): Record<string, string> {
-  const { [id]: dropped, ...rest } = map;
-  if (dropped) {
-    try {
-      URL.revokeObjectURL(dropped);
-    } catch {
-      // happy-dom may not implement revoke; leaking in tests is fine
-    }
-  }
-  return rest;
 }
 
 export class ImageLibrary extends State {
@@ -44,32 +31,37 @@ export class ImageLibrary extends State {
   }
 
   private async load(): Promise<void> {
-    const rows = await dbGetAll<StoredImage>('images');
-    if (this.get(null)) return; // destroyed while loading — drop the result
-    rows.sort((a, b) => b.createdAt - a.createdAt);
-    const urls: Record<string, string> = {};
-    for (const row of rows) {
-      const url = safeObjectUrl(row.bytes, row.type);
-      if (url) urls[row.id] = url;
+    try {
+      const rows = await storeClient().list<StoredImage>('images');
+      if (this.get(null)) return; // destroyed while loading — drop the result
+      rows.sort((a, b) => b.createdAt - a.createdAt);
+      const urls: Record<string, string> = {};
+      for (const row of rows) {
+        const url = storeClient().fileUrl('images', row);
+        if (url) urls[row.id] = url;
+      }
+      this.images = rows;
+      this.urls = urls;
+    } finally {
+      if (!this.get(null)) this.ready = true;
     }
-    this.images = rows;
-    this.urls = urls;
-    this.ready = true;
   }
 
   async add(input: NewImage): Promise<StoredImage> {
-    const image: StoredImage = { ...input, id: crypto.randomUUID(), createdAt: Date.now() };
-    await dbPut('images', image);
-    const url = safeObjectUrl(image.bytes, image.type);
-    this.images = [image, ...this.images];
-    if (url) this.urls = { ...this.urls, [image.id]: url };
-    return image;
+    const { bytes, ...meta } = input;
+    const record: StoredImage = { ...meta, id: crypto.randomUUID(), createdAt: Date.now() };
+    const stored = await storeClient().put('images', record, bytes);
+    this.images = [stored, ...this.images];
+    const url = storeClient().fileUrl('images', stored);
+    if (url) this.urls = { ...this.urls, [stored.id]: url };
+    return stored;
   }
 
   async remove(id: string): Promise<void> {
-    await dbDelete('images', id);
+    await storeClient().remove('images', id);
     this.images = this.images.filter((image) => image.id !== id);
-    this.urls = withoutKey(this.urls, id);
+    const { [id]: _dropped, ...rest } = this.urls;
+    this.urls = rest;
   }
 
   url(id: string): string | undefined {

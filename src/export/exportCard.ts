@@ -187,6 +187,13 @@ export async function renderSheetBlob(
   return encode(composeSheet(canvas, options.createCanvas), 'png', 0.95);
 }
 
+export function downloadUrl(url: string, fileName: string): void {
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = fileName;
+  anchor.click();
+}
+
 export function downloadBlob(blob: Blob, fileName: string): void {
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');

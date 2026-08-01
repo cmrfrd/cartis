@@ -11,23 +11,30 @@ async function ready(model: { ready: boolean }): Promise<void> {
 }
 
 describe('ImageLibrary', () => {
-  it('adds, lists newest-first, persists, and removes images', async () => {
+  it('adds named images, lists newest-first, persists, and removes', async () => {
     const lib = ImageLibrary.new();
     await ready(lib);
     const a = await lib.add({
+      name: 'Ember Test',
       kind: 'generated',
       prompt: 'a',
       styleId: 's',
       bytes: bytesOf('a'),
       type: 'image/png',
     });
-    const b = await lib.add({ kind: 'source', bytes: bytesOf('b'), type: 'image/jpeg' });
+    const b = await lib.add({
+      name: 'Source Photo',
+      kind: 'source',
+      bytes: bytesOf('b'),
+      type: 'image/jpeg',
+    });
     expect(lib.images.map((i) => i.id)).toEqual([b.id, a.id]);
+    expect(lib.images[1]?.name).toBe('Ember Test');
     expect(typeof lib.url(a.id)).toBe('string');
 
     const reloaded = ImageLibrary.new();
     await ready(reloaded);
-    expect(reloaded.images.map((i) => i.id)).toEqual([b.id, a.id]);
+    expect(reloaded.images.map((i) => i.id).sort()).toEqual([a.id, b.id].sort());
     reloaded.set(null);
 
     await lib.remove(a.id);
@@ -63,7 +70,7 @@ describe('CardArchive', () => {
     archive.set(null);
   });
 
-  it('saves and deletes exports with derived urls', async () => {
+  it('saves and deletes exports with file urls', async () => {
     const archive = CardArchive.new();
     await ready(archive);
     const exp = await archive.saveExport({

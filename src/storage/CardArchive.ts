@@ -1,7 +1,6 @@
 import State from '@expressive/react';
 import type { CardData } from '../cards/types';
-import { dbDelete, dbGetAll, dbPut } from './db';
-import { safeObjectUrl } from './ImageLibrary';
+import { storeClient } from './storeClient';
 
 export type ExportFormat = 'png' | 'jpeg' | 'webp';
 
@@ -18,9 +17,9 @@ export interface StoredExport {
   id: string;
   name: string;
   format: ExportFormat;
-  bytes: ArrayBuffer;
   type: string;
   createdAt: number;
+  fileName?: string;
 }
 
 export interface SaveCardInput {
@@ -42,22 +41,25 @@ export class CardArchive extends State {
   }
 
   private async load(): Promise<void> {
-    const [cards, exports] = await Promise.all([
-      dbGetAll<StoredCard>('cards'),
-      dbGetAll<StoredExport>('exports'),
-    ]);
-    if (this.get(null)) return; // destroyed while loading — drop the result
-    cards.sort((a, b) => b.updatedAt - a.updatedAt);
-    exports.sort((a, b) => b.createdAt - a.createdAt);
-    const exportUrls: Record<string, string> = {};
-    for (const row of exports) {
-      const url = safeObjectUrl(row.bytes, row.type);
-      if (url) exportUrls[row.id] = url;
+    try {
+      const [cards, exports] = await Promise.all([
+        storeClient().list<StoredCard>('cards'),
+        storeClient().list<StoredExport>('exports'),
+      ]);
+      if (this.get(null)) return; // destroyed while loading — drop the result
+      cards.sort((a, b) => b.updatedAt - a.updatedAt);
+      exports.sort((a, b) => b.createdAt - a.createdAt);
+      const exportUrls: Record<string, string> = {};
+      for (const row of exports) {
+        const url = storeClient().fileUrl('exports', row);
+        if (url) exportUrls[row.id] = url;
+      }
+      this.cards = cards;
+      this.exports = exports;
+      this.exportUrls = exportUrls;
+    } finally {
+      if (!this.get(null)) this.ready = true;
     }
-    this.cards = cards;
-    this.exports = exports;
-    this.exportUrls = exportUrls;
-    this.ready = true;
   }
 
   async saveCard(input: SaveCardInput): Promise<StoredCard> {
@@ -69,13 +71,13 @@ export class CardArchive extends State {
       holo: input.holo,
       updatedAt: Date.now(),
     };
-    await dbPut('cards', card);
+    await storeClient().put('cards', card);
     this.cards = [card, ...this.cards.filter((c) => c.id !== card.id)];
     return card;
   }
 
   async deleteCard(id: string): Promise<void> {
-    await dbDelete('cards', id);
+    await storeClient().remove('cards', id);
     this.cards = this.cards.filter((c) => c.id !== id);
   }
 
@@ -85,16 +87,17 @@ export class CardArchive extends State {
     bytes: ArrayBuffer;
     type: string;
   }): Promise<StoredExport> {
-    const record: StoredExport = { ...input, id: crypto.randomUUID(), createdAt: Date.now() };
-    await dbPut('exports', record);
-    this.exports = [record, ...this.exports];
-    const url = safeObjectUrl(record.bytes, record.type);
-    if (url) this.exportUrls = { ...this.exportUrls, [record.id]: url };
-    return record;
+    const { bytes, ...meta } = input;
+    const record: StoredExport = { ...meta, id: crypto.randomUUID(), createdAt: Date.now() };
+    const stored = await storeClient().put('exports', record, bytes);
+    this.exports = [stored, ...this.exports];
+    const url = storeClient().fileUrl('exports', stored);
+    if (url) this.exportUrls = { ...this.exportUrls, [stored.id]: url };
+    return stored;
   }
 
   async deleteExport(id: string): Promise<void> {
-    await dbDelete('exports', id);
+    await storeClient().remove('exports', id);
     this.exports = this.exports.filter((e) => e.id !== id);
     const { [id]: _dropped, ...rest } = this.exportUrls;
     this.exportUrls = rest;

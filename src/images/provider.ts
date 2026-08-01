@@ -6,6 +6,8 @@ export interface GenerationInput {
   sourceType: string;
   prompt: string;
   styleId: string;
+  /** Replicate aspect enum (e.g. '3:2', 'match_input_image'). */
+  aspectRatio?: string;
 }
 
 export interface GenerationOutput {

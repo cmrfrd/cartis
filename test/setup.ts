@@ -1,14 +1,11 @@
-import 'fake-indexeddb/auto';
-import { IDBFactory } from 'fake-indexeddb';
 import { beforeEach } from 'vitest';
 import { registerBuiltinTemplates } from '../src/cards';
 import { __clearTemplatesForTests } from '../src/cards/registry';
-import { __resetDbForTests } from '../src/storage/db';
+import { __setStoreClientForTests, createMemoryStoreClient } from '../src/storage/storeClient';
 
 beforeEach(() => {
-  // Fresh database per test: new factory + drop the cached connection.
-  globalThis.indexedDB = new IDBFactory();
-  __resetDbForTests();
+  // Fresh in-memory file store + template registry per test.
+  __setStoreClientForTests(createMemoryStoreClient());
   __clearTemplatesForTests();
   registerBuiltinTemplates();
 });

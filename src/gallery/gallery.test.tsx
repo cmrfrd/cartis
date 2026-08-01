@@ -22,6 +22,7 @@ describe('GalleryView', () => {
       type: 'image/png',
     });
     await shell.library.add({
+      name: 'A Knight',
       kind: 'generated',
       prompt: 'a knight',
       bytes: bytesOf('y'),
@@ -35,7 +36,7 @@ describe('GalleryView', () => {
     });
 
     const tabs = Array.from(container.querySelectorAll('button'));
-    await click(tabs.find((b) => b.textContent === 'Generations') ?? null);
+    await click(tabs.find((b) => b.textContent === 'Library') ?? null);
     expect(container.textContent).toContain('a knight');
 
     await click(

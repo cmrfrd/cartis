@@ -12,6 +12,7 @@ export function createReplicateProvider(fetchImpl: typeof fetch = fetch): ImageP
         body: JSON.stringify({
           prompt: input.prompt,
           imageDataUrl: bytesToDataUrl(input.sourceBytes, input.sourceType),
+          aspectRatio: input.aspectRatio,
         }),
       });
       const body = (await res.json()) as { dataUrl?: string; error?: string };

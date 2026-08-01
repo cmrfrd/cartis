@@ -45,5 +45,7 @@ export interface CardTemplate {
   fields: readonly FieldSpec[];
   defaults: CardData;
   artStylePrompt: (data: CardData) => string;
+  /** Preferred replicate aspect for this template's art slot (e.g. '3:2'). */
+  artAspect?: string;
   Render: CardRenderer;
 }

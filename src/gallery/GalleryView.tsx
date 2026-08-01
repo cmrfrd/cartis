@@ -1,12 +1,12 @@
 import { Component, get } from '@expressive/react';
 import { AppShell } from '../app/AppShell';
-import { downloadBlob } from '../export/exportCard';
+import { downloadUrl } from '../export/exportCard';
 import type { StoredCard } from '../storage/CardArchive';
 import { Button, EmptyState, TabBar } from '../ui';
 
 const SECTIONS = [
   { id: 'exports', label: 'Renders' },
-  { id: 'images', label: 'Generations' },
+  { id: 'images', label: 'Library' },
   { id: 'cards', label: 'Saved cards' },
 ] as const;
 
@@ -64,7 +64,10 @@ function GalleryExports() {
           <div className="flex gap-1.5">
             <Button
               tone="ghost"
-              onClick={() => downloadBlob(new Blob([item.bytes], { type: item.type }), item.name)}
+              onClick={() => {
+                const url = shell?.archive.exportUrl(item.id);
+                if (url) downloadUrl(url, item.name);
+              }}
             >
               Download
             </Button>
@@ -80,22 +83,46 @@ function GalleryExports() {
 
 function GalleryImages() {
   const { shell } = GalleryView.get();
-  const generated = (shell?.library.images ?? []).filter((i) => i.kind === 'generated');
+  const images = shell?.library.images ?? [];
   const urls = shell?.library.urls ?? {};
-  if (generated.length === 0) {
-    return <EmptyState message="No image generations yet." hint="Create some in the Image Lab." />;
+  if (images.length === 0) {
+    return (
+      <EmptyState message="No library images yet." hint="Generate or upload in the Image Lab." />
+    );
   }
   return (
     <div className="grid grid-cols-3 gap-4 xl:grid-cols-5">
-      {generated.map((image) => (
+      {images.map((image) => (
         <figure key={image.id} className="flex flex-col gap-1.5">
           <img
             src={urls[image.id]}
-            alt={image.prompt ?? 'generated'}
-            className="aspect-square w-full rounded-lg border border-edge object-cover"
+            alt={image.name}
+            className="aspect-square w-full rounded-base border-2 border-border object-cover shadow-shadow"
           />
-          <figcaption className="truncate text-[11px] text-ink-dim">{image.prompt}</figcaption>
+          <figcaption className="flex items-center gap-1.5 text-[11px]">
+            <span
+              className={`shrink-0 rounded-sm border border-border px-1 uppercase ${
+                image.kind === 'generated'
+                  ? 'bg-main/70 text-main-foreground'
+                  : 'bg-background text-foreground/70'
+              }`}
+            >
+              {image.kind}
+            </span>
+            <span className="truncate text-foreground/80" title={image.prompt}>
+              {image.name}
+            </span>
+          </figcaption>
           <div className="flex gap-1.5">
+            <Button
+              tone="ghost"
+              onClick={() => {
+                const url = urls[image.id];
+                if (url) downloadUrl(url, image.fileName ?? image.name);
+              }}
+            >
+              Download
+            </Button>
             <Button tone="danger" onClick={() => void shell?.library.remove(image.id)}>
               Delete
             </Button>
