@@ -371,7 +371,12 @@ export const replicateClientLive: Layer.Layer<
       input: { prompt: string; imageDataUrl: string; aspectRatio?: string },
     ): Effect.Effect<string, ReplicateError | NetworkError> =>
       Effect.gen(function* () {
-        const aspectRatio = input.aspectRatio ?? 'match_input_image';
+        // Text-first generation sends an EMPTY data URL — flux-kontext-pro
+        // rejects it (E006). Omit input_image entirely (pure text-to-image)
+        // and never ask to match a nonexistent input image's aspect.
+        const hasSource = /^data:[^;]+;base64,.+/.test(input.imageDataUrl);
+        const requested = input.aspectRatio ?? 'match_input_image';
+        const aspectRatio = !hasSource && requested === 'match_input_image' ? '1:1' : requested;
         const startedAt = yield* Clock.currentTimeMillis;
         const elapsed = Clock.currentTimeMillis.pipe(
           Effect.map((now) => Math.round((now - startedAt) / 1000)),
@@ -379,11 +384,13 @@ export const replicateClientLive: Layer.Layer<
 
         yield* bus.emit(
           'image',
-          `sending photo + prompt to replicate (flux-kontext-pro, ${aspectRatio})`,
+          hasSource
+            ? `sending photo + prompt to replicate (flux-kontext-pro, ${aspectRatio})`
+            : `sending prompt to replicate (flux-kontext-pro, ${aspectRatio})`,
         );
         const created = yield* sdk.createPrediction(token, {
           prompt: input.prompt,
-          input_image: input.imageDataUrl,
+          ...(hasSource ? { input_image: input.imageDataUrl } : {}),
           output_format: 'png',
           aspect_ratio: aspectRatio,
         });

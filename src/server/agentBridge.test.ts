@@ -247,6 +247,29 @@ const sdkStub = (sequence: ReadonlyArray<PredictionT>): Layer.Layer<ReplicateSdk
     }),
   );
 
+/** sdkStub variant that also records every createPrediction input. */
+const recordingSdkStub = (
+  sequence: ReadonlyArray<PredictionT>,
+  created: object[],
+): Layer.Layer<ReplicateSdk> =>
+  Layer.effect(
+    ReplicateSdk,
+    Effect.gen(function* () {
+      const idx = yield* Ref.make(0);
+      return ReplicateSdk.of({
+        createPrediction: (_token, input) => {
+          created.push(input);
+          return Effect.succeed(sequence[0] as PredictionT);
+        },
+        getPrediction: () =>
+          Effect.gen(function* () {
+            const i = yield* Ref.updateAndGet(idx, (n) => Math.min(n + 1, sequence.length - 1));
+            return sequence[i] as PredictionT;
+          }),
+      });
+    }),
+  );
+
 const pngHandler = () =>
   new Response(new TextEncoder().encode('img'), { headers: { 'content-type': 'image/png' } });
 
@@ -259,6 +282,72 @@ const replicateEnv = (sequence: ReadonlyArray<PredictionT>) =>
   );
 
 describe('ReplicateClient.generate', () => {
+  it.effect(
+    'omits input_image for text-first generation (empty data URL) and fixes the aspect',
+    () => {
+      const created: object[] = [];
+      const succeeded: PredictionT = {
+        id: 'p1',
+        status: 'succeeded',
+        output: 'https://replicate.delivery/out.png',
+      };
+      const env = replicateClientLive.pipe(
+        Layer.provide(
+          Layer.mergeAll(
+            recordingSdkStub([succeeded], created),
+            activityBusTestLayer,
+            httpClientFromHandler(pngHandler),
+          ),
+        ),
+        Layer.merge(activityBusTestLayer),
+      );
+      return Effect.gen(function* () {
+        yield* Effect.flatMap(ReplicateClient, (c) =>
+          c.generate('tok', {
+            prompt: 'a mossy henge',
+            imageDataUrl: 'data:application/octet-stream;base64,', // empty — no source photo
+            aspectRatio: 'match_input_image',
+          }),
+        );
+        const input = created[0] as Record<string, unknown>;
+        expect(input.input_image).toBeUndefined();
+        expect(input.aspect_ratio).toBe('1:1'); // cannot match a nonexistent input image
+        expect(input.prompt).toBe('a mossy henge');
+      }).pipe(Effect.provide(env));
+    },
+  );
+
+  it.effect('keeps input_image and the requested aspect when a source photo exists', () => {
+    const created: object[] = [];
+    const succeeded: PredictionT = {
+      id: 'p1',
+      status: 'succeeded',
+      output: 'https://replicate.delivery/out.png',
+    };
+    const env = replicateClientLive.pipe(
+      Layer.provide(
+        Layer.mergeAll(
+          recordingSdkStub([succeeded], created),
+          activityBusTestLayer,
+          httpClientFromHandler(pngHandler),
+        ),
+      ),
+      Layer.merge(activityBusTestLayer),
+    );
+    return Effect.gen(function* () {
+      yield* Effect.flatMap(ReplicateClient, (c) =>
+        c.generate('tok', {
+          prompt: 'stylize me',
+          imageDataUrl: 'data:image/png;base64,QQ==',
+          aspectRatio: '3:4',
+        }),
+      );
+      const input = created[0] as Record<string, unknown>;
+      expect(input.input_image).toBe('data:image/png;base64,QQ==');
+      expect(input.aspect_ratio).toBe('3:4');
+    }).pipe(Effect.provide(env));
+  });
+
   it.effect('creates a prediction, polls to success, downloads output, logs progress', () =>
     Effect.gen(function* () {
       const bus = yield* ActivityBus;
