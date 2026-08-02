@@ -1,6 +1,6 @@
 # Themes & Layouts — data-model + builder redesign
 
-**Date:** 2026-08-01 · **Revised:** 2026-08-02 (user feedback round 1) · **Status:** in review
+**Date:** 2026-08-01 · **Revised:** 2026-08-02 (feedback rounds 1-2) · **Status:** in review
 
 ## Context
 
@@ -40,9 +40,22 @@ the layout's arguments, and the Gallery becomes a true edit-roundtrip surface.
    share; keys the new layout doesn't declare are simply not rendered or edited.
 4. **Art is a function of the layout's arguments, composed by an LLM.** No more static
    per-template `artStylePrompt`. See "AI pipelines" below.
-5. **The Code Lab is removed.** The opencode agent infrastructure is *repurposed* (AI form
-   fill, art-prompt composition), not deleted.
-6. **Card types are deliberately deferred.** If themes later need creature-vs-spell style
+5. **The Code Lab AND the Image Lab are removed.** The app becomes two tabs: Builder and
+   Gallery. The opencode agent infrastructure is *repurposed* (AI form fill, art-prompt
+   composition), not deleted; the Gallery's existing Library tab becomes the image
+   manager.
+6. **AI fill is conversational.** Each card-editing episode gets a persistent opencode
+   session, so refinement prompts ("make him angrier") build on the exchange — while every
+   turn also carries a snapshot of the current field values, so hand edits between prompts
+   are always respected.
+7. **The AI may auto-generate art.** When a fill prompt implies art, generation fires as
+   part of the fill (accepted cost: replicate calls are billed when live). The art slot's
+   manual Generate action remains for direct control.
+8. **Art is text-first; a source photo is optional steering.** The default path composes
+   art purely from the layout's argument values + theme context. An attached photo
+   (upload/camera) steers identity/pose when provided — the original stylize-my-face flow
+   becomes the optional variant, not the center.
+9. **Card types are deliberately deferred.** If themes later need creature-vs-spell style
    variation, that becomes a grouping above layouts; not modeled now.
 
 ## Model (`src/cards/types.ts`)
@@ -108,53 +121,69 @@ Two agent-backed features replace the Code Lab's code generation. Both receive *
 context** = `{ lookAndFeel, palette summary, layout argument spec }` as prose/JSON, never
 component code.
 
-**1. AI form fill (Builder).** New bridge endpoint `POST /api/agent/fill`:
-request `{ themeContext, fields: FieldSpec-shaped summary, currentData, userPrompt }` →
-opencode session → response decoded against a Schema derived from the field spec →
-`{ data: CardData }`. The Builder merges returned values into the form; every field
-remains hand-editable afterwards; re-prompting adjusts the current values (the LLM sees
-`currentData`).
+**1. AI form fill (Builder) — conversational.** New bridge endpoint `POST /api/agent/fill`:
+request `{ sessionId?, themeContext, fields: FieldSpec-shaped summary, currentData,
+userPrompt }`. On the first prompt of a card-editing episode the bridge creates an
+opencode session and returns its id; subsequent prompts reuse it, so the LLM retains the
+conversation. Every turn ALSO includes `currentData` ("current values after user edits"),
+so hand edits between prompts win over the session's memory. The response is decoded
+against a Schema derived from the field spec → `{ sessionId, data: CardData,
+artBrief?: string }`. The Builder merges returned values into the form; every field
+remains hand-editable afterwards. The episode's session is discarded when the user
+switches card, theme, or layout, or starts a new card.
 
-**2. LLM-composed art prompts.** Card-art generation is no longer a fixed template
-string. `POST /api/image/generate` gains a composition step ahead of replicate: the bridge
-gives the LLM (a) a base instruction ("you are writing an image-generation prompt for a
-trading-card art slot"), (b) the theme's `lookAndFeel` + `artFlavor(data)`, (c) the
-layout's current argument values (so element `fire` shapes the art), and (d) the source
-image, if one was provided. The LLM returns the final generation prompt; the bridge then
-runs the existing replicate create-and-poll with it. Both steps emit activity events
-(prompt composed → generation progress). The stub provider path skips composition and
-keeps its deterministic behavior for tests/offline.
+When the user's prompt implies art ("a fire mage with a phoenix"), the LLM includes an
+`artBrief`; the Builder then **auto-runs** art generation with it (decision 7), visible in
+the activity feed like any generation.
+
+**2. LLM-composed art prompts — text-first.** Card-art generation is no longer a fixed
+template string. `POST /api/image/generate` gains a composition step ahead of replicate:
+the bridge gives the LLM (a) a base instruction ("you are writing an image-generation
+prompt for a trading-card art slot"), (b) the theme's `lookAndFeel` + `artFlavor(data)`,
+(c) the layout's current argument values (so element `fire` shapes the art), (d) the
+`artBrief` from a fill turn, when one triggered this generation, and (e) the source image,
+**if** one was attached — text-to-image from the arguments is the default path; a photo is
+optional steering for identity/pose (decision 8). The LLM returns the final generation
+prompt; the bridge then runs the existing replicate create-and-poll with it. Both steps
+emit activity events (prompt composed → generation progress). The stub provider path
+skips composition and keeps its deterministic behavior for tests/offline.
 
 ## App changes
 
-**Code Lab removal.** Delete `src/editor/` (EditorView, CodePane, compile, Sandbox,
-starter) and its tests; AppShell drops to three tabs (Builder / Image Lab / Gallery);
-`codemirror`, `@codemirror/lang-javascript`, and `sucrase` leave package.json. The
-`/api/agent/card` route and `buildAgentPrompt`/`extractCode` die with it; `AgentClient`
-(opencode session machinery) stays and now serves `/api/agent/fill` and art-prompt
-composition. `AgentApi` (browser service) is reshaped to `fill(...)` accordingly.
+**Code Lab + Image Lab removal.** Delete `src/editor/` (EditorView, CodePane, compile,
+Sandbox, starter) and `src/images/ImageLabView.tsx`, with their tests; AppShell drops to
+**two tabs (Builder / Gallery)**; `codemirror`, `@codemirror/lang-javascript`, and
+`sucrase` leave package.json. The `/api/agent/card` route and
+`buildAgentPrompt`/`extractCode` die; `AgentClient` (opencode session machinery) stays and
+now serves `/api/agent/fill` and art-prompt composition. `AgentApi` (browser service) is
+reshaped to `fill(...)`. `PhotoPicker`, `CameraCapture`, `codec`, `stub`, and
+`ImageProvider` survive inside the Builder's art flow; freestyle generation disappears
+with the tab (ImageRecord `styleId` values become theme ids; legacy `'freestyle'` values
+decode harmlessly). The Gallery's existing Library tab is the image manager (view,
+delete).
 
 **Builder.**
 - Sidebar: THEME select, LAYOUT select, then an **AI prompt field above the form** with a
-  "Fill with AI" action (busy/note states per the standard boundary pattern). Below it,
-  the ordinary form renders the layout's arguments.
+  "Fill with AI" action (busy/note states per the standard boundary pattern; conversation
+  per decision 6). Below it, the ordinary form renders the layout's arguments.
 - A new card immediately renders the layout's defaults in the preview — a real base card —
-  with an **empty art placeholder** in the art slot (no auto-generation).
-- Art generation is explicit: a "Generate art" action on the art field (PortraitSection)
-  runs the LLM-composed pipeline above, using the current argument values; the AI fill
-  flow may also trigger it as part of a prompted request. A source photo remains optional
-  input to the composition step.
+  with an **empty art placeholder** in the art slot (nothing generated until asked).
+- The art field (PortraitSection reshaped, text-first per decision 8): a "Generate art"
+  action runs the LLM-composed pipeline from the current argument values; an optional,
+  secondary attach-photo affordance (upload/camera) steers the composition when used;
+  picking an existing library image remains possible. Fill turns with an `artBrief`
+  auto-run this same pipeline (decision 7).
 - State: `templateId` → `themeId` + `layoutId`; switching layouts preserves overlapping
-  argument values (decision 3).
+  argument values (decision 3) and discards the fill session (decision 6).
 
 **Gallery roundtrip.** Clicking a saved card opens it in the Builder (existing
 `pendingCard` mechanism, made the card's primary click action): theme + layout + data
 load, `savedId` is retained, and Save **updates the same record** rather than duplicating.
 "Saved" list entries show `themeId/layoutId`.
 
-**Image Lab.** Kept as-is functionally; its style picker lists themes ("Arcane style" +
-"Freestyle") instead of templates, and theme styles route through the same LLM composition
-step with the theme context (freestyle remains a raw user prompt).
+**Gallery.** Three tabs stay (Renders / Library / Saved cards); the Library tab absorbs
+Image Lab's management role (it already lists library images — delete stays, freestyle
+generation does not move here).
 
 ## Persistence & contracts
 
@@ -163,25 +192,30 @@ step with the theme context (freestyle remains a raw user prompt).
 - `ImageRecord.styleId` keeps its name/type; values become theme ids or `'freestyle'`.
 - `src/contracts/theme.ts`: `ThemeIdentity` schema + the theme-context block shape shared
   by fill and image-generate requests.
-- `src/contracts/api.ts`: `AgentCardRequest/Response` replaced by `AgentFillRequest/Response`;
-  `ImageGenerateRequest` gains theme-context + argument-values fields for composition.
+- `src/contracts/api.ts`: `AgentCardRequest/Response` replaced by
+  `AgentFillRequest/Response` (`sessionId` in/out, `artBrief?` out);
+  `ImageGenerateRequest` gains theme-context + argument-values + `artBrief?` fields for
+  composition.
 
 ## Testing
 
 - Registry: register/get/list/getLayout, duplicate rejection, identity-schema failure.
 - Contracts: ThemeIdentity decode success/failure; CardRecord requires themeId/layoutId
   (old templateId row fails decode — asserting the clean break); AgentFill shapes.
-- Bridge: `/api/agent/fill` happy path + malformed-LLM-output failure (Schema rejects);
-  image-generate composition step (stub LLM layer) feeding replicate; activity events for
-  both steps.
-- Builder: AI fill merges values and leaves fields editable; layout switch preserves
-  overlapping values; empty art placeholder on new card; explicit generate action.
-- Gallery: click-to-open roundtrip, re-save updates in place.
-- Removals: no `src/editor` references; AppShell renders three tabs.
+- Bridge: `/api/agent/fill` happy path + session reuse across turns + malformed-LLM-output
+  failure (Schema rejects); image-generate composition step (stub LLM layer) feeding
+  replicate; `artBrief` propagation; activity events for both steps.
+- Builder: AI fill merges values and leaves fields editable; hand edits survive a
+  subsequent fill turn (currentData wins); session discarded on card/theme/layout switch;
+  layout switch preserves overlapping values; empty art placeholder on new card; generate
+  action; artBrief auto-generation path.
+- Gallery: click-to-open roundtrip, re-save updates in place; Library tab management.
+- Removals: no `src/editor` or `ImageLabView` references; AppShell renders two tabs.
 - Gate throughout: `bun run verify`.
 
 ## Out of scope
 
-Runtime/data-defined themes and theme-authoring UI; card types; multi-theme Code Lab
-replacement (code-level layout authoring is gone until a future need); any change to card
-visual output (renders untouched — pixel output identical).
+Runtime/data-defined themes and theme-authoring UI; card types; code-level layout
+authoring in-app (gone with the Code Lab until a future need); per-session cost controls
+on auto-generation; any change to card visual output (renders untouched — pixel output
+identical).
