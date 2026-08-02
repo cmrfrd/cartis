@@ -21,7 +21,6 @@ export class CodePane extends Component {
   external?: { text: string } = undefined;
   onSource?: (source: string) => void = undefined;
   host = ref<HTMLDivElement>();
-  #cm: CmView | undefined;
 
   mount() {
     const host = this.host.current;
@@ -46,7 +45,6 @@ export class CodePane extends Component {
         ),
       ],
     });
-    this.#cm = cm;
     const stopWatching = this.set('external', () => {
       const next = this.external?.text;
       const current = cm.state.doc.toString();

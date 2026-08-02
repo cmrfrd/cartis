@@ -10,7 +10,7 @@ import {
   rarityFrom,
   rarityGemStyle,
 } from './parts';
-import { ENGRAVED_SHADOW, titleSizeFor } from './typography';
+import { titleSizeFor } from './typography';
 
 const MYTHIC_AURA =
   '0 0 0 1.5px rgba(255, 150, 60, 0.85), 0 0 16px 2px rgba(194, 37, 37, 0.55), 0 0 30px 8px rgba(255, 180, 94, 0.28), 0 10px 24px rgba(0, 0, 0, 0.5)';

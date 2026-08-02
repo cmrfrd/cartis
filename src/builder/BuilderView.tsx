@@ -137,7 +137,7 @@ function BuilderForm() {
 export function PortraitSlot(props: { fieldKey: string }) {
   const { is: builder, data, portraitKey, shell } = BuilderView.get();
   const current = data[props.fieldKey];
-  const url = (shell?.library.urls ?? {})[typeof current === 'string' ? current : ''];
+  const url = shell?.library.urls?.[typeof current === 'string' ? current : ''];
   const open = portraitKey === props.fieldKey;
   return (
     <div className="flex items-center gap-3">

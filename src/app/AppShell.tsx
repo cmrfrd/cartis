@@ -5,7 +5,7 @@ import { GalleryView } from '../gallery/GalleryView';
 import { ImageLabView } from '../images/ImageLabView';
 import { CardArchive, type StoredCard } from '../storage/CardArchive';
 import { ImageLibrary } from '../storage/ImageLibrary';
-import { EmptyState, TabBar } from '../ui';
+import { TabBar } from '../ui';
 import { ActivityFeed } from './ActivityFeed';
 
 export type ViewId = 'builder' | 'editor' | 'images' | 'gallery';
