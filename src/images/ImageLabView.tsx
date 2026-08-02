@@ -1,14 +1,16 @@
 import { Component, get } from '@expressive/react';
+import { Effect, Exit } from 'effect';
 import { AppShell } from '../app/AppShell';
+import { runAppExit } from '../app/runtime';
 import { getTemplate, listTemplates } from '../cards/registry';
+import { noteFromCause } from '../contracts/errors';
 import type { ImageLibrary } from '../storage/ImageLibrary';
 import { Button, EmptyState, FieldRow, Panel, SelectInput, TextAreaInput, TextInput } from '../ui';
 import { CameraCapture } from './CameraCapture';
 import { bytesToDataUrl } from './codec';
+import { ImageProvider } from './ImageProvider';
 import { PhotoPicker } from './PhotoPicker';
 import { suggestImageName } from './prompt';
-import type { ImageProvider } from './provider';
-import { selectImageProvider } from './provider';
 
 const ASPECT_OPTIONS = [
   { value: 'match_input_image', label: 'Match input' },
@@ -58,8 +60,8 @@ export class ImageLabView extends Component {
     this.note = '';
   }
 
-  /** Trailing params are the DI seam for headless tests; context supplies the defaults. */
-  async generate(provider?: ImageProvider, intoLibrary?: ImageLibrary) {
+  /** `intoLibrary` is the DI seam for headless tests; context supplies the default. */
+  async generate(intoLibrary?: ImageLibrary) {
     if (this.busy) return;
     const source = this.sourceBytes;
     if (!source) {
@@ -71,27 +73,34 @@ export class ImageLabView extends Component {
       this.note = 'Image library unavailable.';
       return;
     }
+    // Snapshot reactive fields before building the effect (snapshot rule).
+    const sourceType = this.sourceType;
+    const styleId = this.styleId;
+    const aspectRatio = this.aspectRatio;
+    const imageName = this.imageName;
+    const prompt = this.fullPrompt;
     this.busy = true;
     this.note = 'Generating…';
     try {
-      const chosen = provider ?? (await selectImageProvider());
-      const prompt = this.fullPrompt;
-      const out = await chosen.generate({
-        sourceBytes: source,
-        sourceType: this.sourceType,
-        prompt,
-        styleId: this.styleId,
-        aspectRatio: this.aspectRatio,
-      });
+      const exit = await runAppExit(
+        Effect.flatMap(ImageProvider, (p) =>
+          p.generate({ sourceBytes: source, sourceType, prompt, styleId, aspectRatio }),
+        ),
+      );
+      if (Exit.isFailure(exit)) {
+        this.note = noteFromCause(exit.cause);
+        return;
+      }
+      const out = exit.value;
       await library.add({
-        name: this.imageName.trim() || suggestImageName(prompt),
+        name: imageName.trim() || suggestImageName(prompt),
         kind: 'generated',
         prompt,
-        styleId: this.styleId,
+        styleId,
         bytes: out.bytes,
         type: out.type,
       });
-      this.note = `Done — generated via ${chosen.id}.`;
+      this.note = `Done — generated via ${out.via}.`;
     } catch (cause) {
       this.note = cause instanceof Error ? cause.message : String(cause);
     } finally {

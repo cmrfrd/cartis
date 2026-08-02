@@ -1,4 +1,24 @@
-import type { GenerationInput, GenerationOutput, ImageProvider } from './provider';
+/**
+ * Pure stub-painting helpers. The canvas stylizer + deterministic style seed
+ * survive here (used by the ImageProvider stub path and by tests); the old
+ * `ImageProvider` interface + `createStubProvider` wrapper moved to
+ * ImageProvider.ts as the Effect service.
+ */
+
+/** Paint I/O shapes — the source photo in, the stylized frame out. */
+export interface GenerationInput {
+  sourceBytes: ArrayBuffer;
+  sourceType: string;
+  prompt: string;
+  styleId: string;
+  /** Replicate aspect enum (e.g. '3:2', 'match_input_image'). */
+  aspectRatio?: string;
+}
+
+export interface GenerationOutput {
+  bytes: ArrayBuffer;
+  type: string;
+}
 
 export interface StubStyle {
   hue: number;
@@ -60,19 +80,3 @@ export const paintStylizedFrame: PaintFn = async (input, style) => {
   });
   return { bytes: await blob.arrayBuffer(), type: 'image/png' };
 };
-
-export function createStubProvider(paint: PaintFn = paintStylizedFrame): ImageProvider {
-  return {
-    id: 'stub',
-    async generate(input) {
-      try {
-        return await paint(input, stubStyleFor(input.styleId));
-      } catch {
-        // canvas unavailable (tests) or decode failure: pass the source through
-        return { bytes: input.sourceBytes, type: input.sourceType };
-      }
-    },
-  };
-}
-
-export const stubProvider: ImageProvider = createStubProvider();

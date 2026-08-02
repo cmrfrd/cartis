@@ -1,12 +1,14 @@
 import { Component, get } from '@expressive/react';
+import { Effect, Exit } from 'effect';
 import { AppShell } from '../app/AppShell';
+import { runAppExit } from '../app/runtime';
+import { noteFromCause } from '../contracts/errors';
 import { CameraCapture } from '../images/CameraCapture';
 import { bytesToDataUrl } from '../images/codec';
+import { ImageProvider } from '../images/ImageProvider';
 import { PhotoPicker } from '../images/PhotoPicker';
 import type { Persona } from '../images/prompt';
 import { buildPortraitPrompt } from '../images/prompt';
-import type { ImageProvider } from '../images/provider';
-import { selectImageProvider } from '../images/provider';
 import type { ImageLibrary } from '../storage/ImageLibrary';
 import { Button, FieldRow, Panel, TextInput } from '../ui';
 // Deliberate module cycle with BuilderView (it renders PortraitSection) — benign, see BuilderView.tsx.
@@ -47,10 +49,7 @@ export class PortraitSection extends Component {
   }
 
   /** `deps` is the DI seam for headless tests; context supplies the defaults. */
-  async generate(
-    provider?: ImageProvider,
-    deps: { builder?: BuilderView; library?: ImageLibrary } = {},
-  ) {
+  async generate(deps: { builder?: BuilderView; library?: ImageLibrary } = {}) {
     if (this.busy) return;
     const bytes = this.pendingBytes;
     if (!bytes) {
@@ -67,31 +66,36 @@ export class PortraitSection extends Component {
       this.note = 'Image library unavailable.';
       return;
     }
+    // Snapshot reactive fields before building the effect (snapshot rule).
+    const sourceType = this.pendingType;
+    const fieldKey = this.fieldKey;
+    const prompt = buildPortraitPrompt(builder.template.artStylePrompt(builder.data), this.persona);
+    const styleId = builder.templateId;
+    const aspectRatio = builder.template.artAspect ?? 'match_input_image';
+    const name = `${String(builder.data.name ?? 'card')} portrait`;
     this.busy = true;
     this.note = 'Generating portrait…';
     try {
-      const chosen = provider ?? (await selectImageProvider());
-      const prompt = buildPortraitPrompt(
-        builder.template.artStylePrompt(builder.data),
-        this.persona,
+      const exit = await runAppExit(
+        Effect.flatMap(ImageProvider, (p) =>
+          p.generate({ sourceBytes: bytes, sourceType, prompt, styleId, aspectRatio }),
+        ),
       );
-      const out = await chosen.generate({
-        sourceBytes: bytes,
-        sourceType: this.pendingType,
-        prompt,
-        styleId: builder.templateId,
-        aspectRatio: builder.template.artAspect ?? 'match_input_image',
-      });
+      if (Exit.isFailure(exit)) {
+        this.note = noteFromCause(exit.cause);
+        return;
+      }
+      const out = exit.value;
       const stored = await library.add({
-        name: `${String(builder.data.name ?? 'card')} portrait`,
+        name,
         kind: 'generated',
         prompt,
-        styleId: builder.templateId,
+        styleId,
         bytes: out.bytes,
         type: out.type,
       });
-      builder.setField(this.fieldKey, stored.id);
-      this.note = `Portrait applied (via ${chosen.id}).`;
+      builder.setField(fieldKey, stored.id);
+      this.note = `Portrait applied (via ${out.via}).`;
     } catch (cause) {
       this.note = cause instanceof Error ? cause.message : String(cause);
     } finally {

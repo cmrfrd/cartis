@@ -1,7 +1,7 @@
 import type { HttpClientRequest } from '@effect/platform';
 import { Layer } from 'effect';
 import { describe, expect, it, vi } from 'vitest';
-import { setAppLayer } from '../app/runtime';
+import { setAppLayer, testAppLayerWith } from '../app/runtime';
 import { httpClientFromHandler } from '../lib/http';
 import { CardArchive } from './CardArchive';
 import { ImageLibrary } from './ImageLibrary';
@@ -117,7 +117,11 @@ describe('CardArchive', () => {
         headers: { 'Content-Type': 'application/json' },
       });
     };
-    setAppLayer(storeClientLive.pipe(Layer.provide(httpClientFromHandler(handler))));
+    setAppLayer(
+      testAppLayerWith({
+        store: storeClientLive.pipe(Layer.provide(httpClientFromHandler(handler))),
+      }),
+    );
 
     const archive = CardArchive.new();
     await ready(archive);

@@ -1,18 +1,26 @@
-import { describe, expect, it, vi } from 'vitest';
+import { Effect, Layer } from 'effect';
+import { describe, expect, vi, it as vit } from 'vitest';
+import { it } from '../../test/effect';
 import { mount, tick } from '../../test/util';
+import { setAppLayer, testAppLayerWith } from '../app/runtime';
+import { httpClientFromHandler } from '../lib/http';
 import { ImageLibrary } from '../storage/ImageLibrary';
 import { CameraCapture } from './CameraCapture';
 import { bytesToDataUrl, dataUrlToBytes } from './codec';
 import { ImageLabView } from './ImageLabView';
+import {
+  type GenerationInput,
+  ImageProvider,
+  imageProviderLive,
+  imageProviderStubLayer,
+} from './ImageProvider';
 import { buildPortraitPrompt } from './prompt';
-import type { GenerationInput, ImageProvider } from './provider';
-import { selectImageProvider } from './provider';
-import { createStubProvider, stubStyleFor } from './stub';
+import { stubStyleFor } from './stub';
 
 const bytesOf = (text: string): ArrayBuffer => new TextEncoder().encode(text).buffer as ArrayBuffer;
 
 describe('codec', () => {
-  it('round-trips bytes through a data url', () => {
+  vit('round-trips bytes through a data url', () => {
     const original = bytesOf('hello cartis');
     const url = bytesToDataUrl(original, 'image/png');
     expect(url.startsWith('data:image/png;base64,')).toBe(true);
@@ -23,7 +31,7 @@ describe('codec', () => {
 });
 
 describe('buildPortraitPrompt', () => {
-  it('folds persona details into the style prompt, skipping blanks', () => {
+  vit('folds persona details into the style prompt, skipping blanks', () => {
     const prompt = buildPortraitPrompt('oil painting portrait', {
       age: '34',
       gender: '',
@@ -38,50 +46,112 @@ describe('buildPortraitPrompt', () => {
   });
 });
 
-describe('stub provider', () => {
-  it('derives a deterministic style per styleId', () => {
+describe('stub painting', () => {
+  vit('derives a deterministic style per styleId', () => {
     expect(stubStyleFor('arcane-hero')).toEqual(stubStyleFor('arcane-hero'));
     expect(stubStyleFor('a').hue).not.toBe(stubStyleFor('b').hue);
   });
+});
 
-  it('paints via the injected paint fn and falls back to the source on paint failure', async () => {
-    const painted = { bytes: bytesOf('painted'), type: 'image/png' };
-    const provider = createStubProvider(async () => painted);
-    const input: GenerationInput = {
-      sourceBytes: bytesOf('src'),
-      sourceType: 'image/jpeg',
-      prompt: 'p',
-      styleId: 's',
+const genInput: GenerationInput = {
+  sourceBytes: bytesOf('src'),
+  sourceType: 'image/jpeg',
+  prompt: 'p',
+  styleId: 's',
+};
+
+describe('ImageProvider (Live)', () => {
+  it.effect('posts to /api/image/generate when /api/status reports replicate', () => {
+    const posted: string[] = [];
+    const handler = (req: { method: string; url: string }): Response => {
+      posted.push(`${req.method} ${req.url}`);
+      if (req.method === 'GET' && req.url.endsWith('/api/status')) {
+        return new Response(JSON.stringify({ image: 'replicate' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      if (req.method === 'POST' && req.url.endsWith('/api/image/generate')) {
+        return new Response(
+          JSON.stringify({ dataUrl: bytesToDataUrl(bytesOf('styled'), 'image/png') }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
+      return new Response('nope', { status: 404 });
     };
-    expect(await provider.generate(input)).toBe(painted);
+    const layer = imageProviderLive.pipe(Layer.provide(httpClientFromHandler(handler)));
+    return Effect.gen(function* () {
+      const provider = yield* ImageProvider;
+      const result = yield* provider.generate(genInput);
+      expect(result.via).toBe('replicate');
+      expect(new TextDecoder().decode(result.bytes)).toBe('styled');
+      expect(posted.some((p) => p.includes('POST') && p.includes('/api/image/generate'))).toBe(
+        true,
+      );
+    }).pipe(Effect.provide(layer));
+  });
 
-    const failing = createStubProvider(async () => {
-      throw new Error('no canvas here');
-    });
-    const fallback = await failing.generate(input);
-    expect(fallback.type).toBe('image/jpeg');
-    expect(new TextDecoder().decode(fallback.bytes)).toBe('src');
+  it.effect('falls back to stub (no generate POST) when /api/status fails', () => {
+    const posted: string[] = [];
+    const handler = (req: { method: string; url: string }): Response => {
+      posted.push(`${req.method} ${req.url}`);
+      if (req.url.endsWith('/api/status')) return new Response('down', { status: 500 });
+      return new Response('nope', { status: 404 });
+    };
+    const layer = imageProviderLive.pipe(Layer.provide(httpClientFromHandler(handler)));
+    return Effect.gen(function* () {
+      const provider = yield* ImageProvider;
+      const result = yield* provider.generate(genInput);
+      expect(result.via).toBe('stub');
+      expect(posted.some((p) => p.includes('/api/image/generate'))).toBe(false);
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect('falls back to stub when the bridge transport errors', () => {
+    let generatePosts = 0;
+    const handler = (req: { method: string; url: string }): Response => {
+      if (req.url.endsWith('/api/image/generate')) generatePosts++;
+      throw new Error('no server');
+    };
+    const layer = imageProviderLive.pipe(Layer.provide(httpClientFromHandler(handler)));
+    return Effect.gen(function* () {
+      const provider = yield* ImageProvider;
+      const result = yield* provider.generate(genInput);
+      expect(result.via).toBe('stub');
+      expect(generatePosts).toBe(0);
+    }).pipe(Effect.provide(layer));
   });
 });
 
-describe('selectImageProvider', () => {
-  it('picks replicate when the bridge reports it', async () => {
-    const fetchImpl = vi.fn(
-      async () => new Response(JSON.stringify({ image: 'replicate' })),
-    ) as unknown as typeof fetch;
-    expect((await selectImageProvider(fetchImpl)).id).toBe('replicate');
+describe('imageProviderStubLayer', () => {
+  it.effect('returns the source unchanged when paint fails (headless: no canvas)', () => {
+    const failing = () => {
+      throw new Error('no canvas here');
+    };
+    const layer = imageProviderStubLayer(failing);
+    return Effect.gen(function* () {
+      const provider = yield* ImageProvider;
+      const result = yield* provider.generate(genInput);
+      expect(result.via).toBe('stub');
+      expect(result.type).toBe('image/jpeg');
+      expect(new TextDecoder().decode(result.bytes)).toBe('src');
+    }).pipe(Effect.provide(layer));
   });
 
-  it('falls back to stub when the bridge is absent', async () => {
-    const fetchImpl = vi.fn(async () => {
-      throw new Error('no server');
-    }) as unknown as typeof fetch;
-    expect((await selectImageProvider(fetchImpl)).id).toBe('stub');
+  it.effect('paints via the injected paint fn', () => {
+    const painted = { bytes: bytesOf('painted'), type: 'image/png' };
+    const layer = imageProviderStubLayer(async () => painted);
+    return Effect.gen(function* () {
+      const provider = yield* ImageProvider;
+      const result = yield* provider.generate(genInput);
+      expect(result.via).toBe('stub');
+      expect(new TextDecoder().decode(result.bytes)).toBe('painted');
+    }).pipe(Effect.provide(layer));
   });
 });
 
 describe('CameraCapture', () => {
-  it('reports camera unavailability when getUserMedia is missing', async () => {
+  vit('reports camera unavailability when getUserMedia is missing', async () => {
     // happy-dom ships a working getUserMedia stub — inject a bare environment instead.
     const { container, unmount } = mount(<CameraCapture getMedia={() => undefined} />);
     // The error is set in mount() and rendered on the NEXT flush — poll, don't fixed-sleep.
@@ -93,7 +163,7 @@ describe('CameraCapture', () => {
 });
 
 describe('ImageLabView name input stays bound (snapshot-rule regression)', () => {
-  it('reflects state changes into the controlled input', async () => {
+  vit('reflects state changes into the controlled input', async () => {
     let lab: ImageLabView | undefined;
     const { container, unmount } = mount(
       <ImageLabView
@@ -115,14 +185,20 @@ describe('ImageLabView name input stays bound (snapshot-rule regression)', () =>
 });
 
 describe('ImageLabView (headless)', () => {
-  it('requires a source photo before generating', async () => {
+  vit('requires a source photo before generating', async () => {
     const lab = ImageLabView.new();
     await lab.generate();
     expect(lab.note).toContain('photo first');
     lab.set(null);
   });
 
-  it('generates via the injected provider and stores into the injected library', async () => {
+  vit('generates via the app ImageProvider and stores into the injected library', async () => {
+    const generate = vi.fn((_input: GenerationInput) =>
+      Effect.succeed({ bytes: bytesOf('styled'), type: 'image/png', via: 'stub' as const }),
+    );
+    setAppLayer(
+      testAppLayerWith({ image: Layer.succeed(ImageProvider, ImageProvider.of({ generate })) }),
+    );
     const lab = ImageLabView.new();
     const library = ImageLibrary.new();
     await vi.waitFor(() => {
@@ -130,12 +206,8 @@ describe('ImageLabView (headless)', () => {
     });
     lab.acceptSource(bytesOf('face'), 'image/jpeg');
     lab.prompt = 'as a noble knight';
-    const provider: ImageProvider = {
-      id: 'stub',
-      generate: vi.fn(async () => ({ bytes: bytesOf('styled'), type: 'image/png' })),
-    };
-    await lab.generate(provider, library);
-    expect(provider.generate).toHaveBeenCalledOnce();
+    await lab.generate(library);
+    expect(generate).toHaveBeenCalledOnce();
     expect(library.images).toHaveLength(1);
     expect(library.images[0]?.kind).toBe('generated');
     expect(library.images[0]?.prompt).toContain('noble knight');

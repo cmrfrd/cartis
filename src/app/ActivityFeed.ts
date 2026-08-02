@@ -1,4 +1,7 @@
 import State from '@expressive/react';
+import { Effect, Fiber, Stream } from 'effect';
+import { ActivityClient, FeedSignal } from './ActivityClient';
+import { forkApp } from './runtime';
 
 export interface ActivityEvent {
   at: number;
@@ -7,6 +10,8 @@ export interface ActivityEvent {
 }
 
 const FEED_LIMIT = 200;
+
+const matchSignal = FeedSignal.$match;
 
 /** Live AI activity from the bridge's /api/activity SSE stream. */
 export class ActivityFeed extends State {
@@ -18,23 +23,29 @@ export class ActivityFeed extends State {
   }
 
   protected new() {
-    // SSE only exists in a real browser against the dev server; tests push() directly.
-    if (typeof EventSource === 'undefined') return;
-    const source = new EventSource('/api/activity');
-    source.onopen = () => {
-      this.connected = true;
-    };
-    source.onerror = () => {
-      this.connected = false;
-    };
-    source.onmessage = (e) => {
-      try {
-        this.push(JSON.parse(e.data) as ActivityEvent);
-      } catch {
-        // malformed frame — ignore
-      }
-    };
-    return () => source.close();
+    // Consume the ActivityClient stream on the app runtime. The Effect.sync
+    // callback mirrors today's onopen/onerror/onmessage — event-handler-style
+    // writes to `this` are the sanctioned exception to the snapshot rule.
+    const fiber = forkApp(
+      Effect.flatMap(ActivityClient, (client) =>
+        Stream.runForEach(client.signals, (signal) =>
+          Effect.sync(() => {
+            matchSignal(signal, {
+              Connected: () => {
+                this.connected = true;
+              },
+              Disconnected: () => {
+                this.connected = false;
+              },
+              Event: ({ event }) => {
+                this.push(event);
+              },
+            });
+          }),
+        ),
+      ),
+    );
+    return () => void forkApp(Fiber.interrupt(fiber));
   }
 
   push(event: ActivityEvent) {

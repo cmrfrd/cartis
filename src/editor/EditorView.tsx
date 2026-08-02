@@ -1,6 +1,10 @@
 import { Component, ref } from '@expressive/react';
+import { Effect, Exit } from 'effect';
+import { runAppExit } from '../app/runtime';
+import { noteFromCause } from '../contracts/errors';
 import { ExportBar } from '../export/ExportBar';
 import { Button, PreviewStage, TextAreaInput } from '../ui';
+import { AgentApi } from './AgentApi';
 import { CodePane } from './CodePane';
 import type { CompiledCard } from './compile';
 import { compileCardSource } from './compile';
@@ -46,25 +50,24 @@ export class EditorView extends Component {
     }
   }
 
-  async runAgent(fetchImpl: typeof fetch = fetch) {
+  async runAgent() {
     if (this.agentBusy || this.prompt.trim().length === 0) return;
+    // Snapshot reactive fields before building the effect (snapshot rule).
+    const prompt = this.prompt;
+    const source = this.source;
     this.agentBusy = true;
     this.agentNote = 'Asking the agent…';
     try {
-      const res = await fetchImpl('/api/agent/card', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: this.prompt, code: this.source }),
-      });
-      const body = (await res.json()) as { code?: string; error?: string };
-      if (!res.ok || !body.code) {
-        throw new Error(body.error ?? `agent request failed (${String(res.status)})`);
+      const exit = await runAppExit(
+        Effect.flatMap(AgentApi, (api) => api.generateCard(prompt, source)),
+      );
+      if (Exit.isFailure(exit)) {
+        this.agentNote = noteFromCause(exit.cause);
+        return;
       }
-      this.source = body.code; // recompiles via the source watcher
-      this.external = { text: body.code }; // pushes the rewrite into CodeMirror
+      this.source = exit.value; // recompiles via the source watcher
+      this.external = { text: exit.value }; // pushes the rewrite into CodeMirror
       this.agentNote = 'Applied — the code is yours to edit.';
-    } catch (cause) {
-      this.agentNote = cause instanceof Error ? cause.message : String(cause);
     } finally {
       this.agentBusy = false;
     }

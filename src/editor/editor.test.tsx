@@ -1,5 +1,9 @@
+import { Effect, Layer } from 'effect';
 import { describe, expect, it, vi } from 'vitest';
 import { mount, tick } from '../../test/util';
+import { setAppLayer, testAppLayerWith } from '../app/runtime';
+import { AgentRequestError } from '../contracts/errors';
+import { AgentApi } from './AgentApi';
 import { compileCardSource } from './compile';
 import { EditorView } from './EditorView';
 import { Sandbox } from './Sandbox';
@@ -33,15 +37,16 @@ describe('EditorView (headless)', () => {
 
 describe('EditorView agent', () => {
   it('applies agent-returned code to the buffer and recompiles', async () => {
+    const generateCard = vi.fn(() =>
+      Effect.succeed('export default function Spooky() { return <p>boo</p> }'),
+    );
+    setAppLayer(
+      testAppLayerWith({ agent: Layer.succeed(AgentApi, AgentApi.of({ generateCard })) }),
+    );
     const editor = EditorView.new({ debounceMs: 0 });
     editor.prompt = 'a spooky umbral card';
-    const fetchImpl = vi.fn(
-      async () =>
-        new Response(
-          JSON.stringify({ code: 'export default function Spooky() { return <p>boo</p> }' }),
-        ),
-    ) as unknown as typeof fetch;
-    await editor.runAgent(fetchImpl);
+    await editor.runAgent();
+    expect(generateCard).toHaveBeenCalledOnce();
     expect(editor.source).toContain('Spooky');
     // One-way flow contract: agent rewrites reach CodeMirror ONLY via the
     // `external` signal — a live source prop once stomped fast typing.
@@ -55,14 +60,23 @@ describe('EditorView agent', () => {
   });
 
   it('surfaces agent errors without touching the buffer', async () => {
+    setAppLayer(
+      testAppLayerWith({
+        agent: Layer.succeed(
+          AgentApi,
+          AgentApi.of({
+            generateCard: () =>
+              Effect.fail(
+                new AgentRequestError({ status: 500, detail: 'opencode is not running' }),
+              ),
+          }),
+        ),
+      }),
+    );
     const editor = EditorView.new({ debounceMs: 0 });
     editor.prompt = 'anything';
     const before = editor.source;
-    const fetchImpl = vi.fn(
-      async () =>
-        new Response(JSON.stringify({ error: 'opencode is not running' }), { status: 500 }),
-    ) as unknown as typeof fetch;
-    await editor.runAgent(fetchImpl);
+    await editor.runAgent();
     expect(editor.source).toBe(before);
     expect(editor.agentNote).toContain('opencode is not running');
     editor.set(null);

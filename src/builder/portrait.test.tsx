@@ -1,6 +1,8 @@
+import { Effect, Layer } from 'effect';
 import { describe, expect, it, vi } from 'vitest';
 import { click, mountApp, tick } from '../../test/util';
-import type { ImageProvider } from '../images/provider';
+import { setAppLayer, testAppLayerWith } from '../app/runtime';
+import { type GenerationInput, ImageProvider } from '../images/ImageProvider';
 import { ImageLibrary } from '../storage/ImageLibrary';
 import { BuilderView } from './BuilderView';
 import { PortraitSection } from './PortraitSection';
@@ -9,6 +11,17 @@ const bytesOf = (text: string): ArrayBuffer => new TextEncoder().encode(text).bu
 
 describe('PortraitSection (headless)', () => {
   it('generates with the template style + persona prompt and assigns the image id to the card', async () => {
+    const generate = vi.fn((input: GenerationInput) => {
+      expect(input.prompt).toContain('oil painting'); // template style
+      expect(input.prompt).toContain('29'); // persona
+      expect(input.prompt).toContain('chess');
+      expect(input.styleId).toBe('arcane-hero');
+      return Effect.succeed({ bytes: bytesOf('styled'), type: 'image/png', via: 'stub' as const });
+    });
+    setAppLayer(
+      testAppLayerWith({ image: Layer.succeed(ImageProvider, ImageProvider.of({ generate })) }),
+    );
+
     const library = ImageLibrary.new();
     await vi.waitFor(() => {
       expect(library.ready).toBe(true);
@@ -20,17 +33,8 @@ describe('PortraitSection (headless)', () => {
     section.setPersona('age', '29');
     section.setPersona('hobby', 'chess');
 
-    const provider: ImageProvider = {
-      id: 'stub',
-      generate: vi.fn(async (input) => {
-        expect(input.prompt).toContain('oil painting'); // template style
-        expect(input.prompt).toContain('29'); // persona
-        expect(input.prompt).toContain('chess');
-        expect(input.styleId).toBe('arcane-hero');
-        return { bytes: bytesOf('styled'), type: 'image/png' };
-      }),
-    };
-    await section.generate(provider, { builder, library });
+    await section.generate({ builder, library });
+    expect(generate).toHaveBeenCalledOnce();
 
     expect(library.images).toHaveLength(1);
     const stored = library.images[0];
