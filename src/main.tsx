@@ -2,11 +2,12 @@
 import { Effect } from 'effect';
 import { createRoot } from 'react-dom/client';
 import { AppShell } from './app/AppShell';
-import { registerBuiltinTemplates } from './cards';
+import { registerBuiltinTemplates, registerBuiltinThemes } from './cards';
 import { prepareTextures } from './cards/base/textures';
 import './app/theme.css';
 
 registerBuiltinTemplates();
+registerBuiltinThemes();
 
 function render(): void {
   const root = document.getElementById('root');

@@ -49,3 +49,29 @@ export interface CardTemplate {
   artAspect?: string;
   Render: CardRenderer;
 }
+
+/** A card face: how theme components organize into a layout, parameterized by arguments. */
+export interface Layout {
+  id: string;
+  name: string;
+  description: string;
+  fields: readonly FieldSpec[];
+  defaults: CardData;
+  /** Preferred replicate aspect for this layout's art slot (e.g. '3:2'). */
+  artAspect?: string;
+  Render: CardRenderer;
+}
+
+/** A collection/world: identity + shared code parts + ordered layouts. */
+export interface Theme {
+  id: string;
+  name: string;
+  description: string;
+  /** Prose visual identity consumed by the AI art + fill pipelines. */
+  lookAndFeel: string;
+  CardBack: CardRenderer;
+  /** Ordered; layouts[0] is the default. */
+  layouts: readonly Layout[];
+  /** Optional per-card flavor derived from data (e.g. palette artFlavor). */
+  artFlavor?: (data: CardData) => string;
+}

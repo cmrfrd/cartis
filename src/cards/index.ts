@@ -1,5 +1,6 @@
 import { arcaneFullArtTemplate, arcaneTemplate } from './arcane/template';
-import { listTemplates, registerTemplate } from './registry';
+import { arcaneTheme } from './arcane/theme';
+import { listTemplates, listThemes, registerTemplate, registerTheme } from './registry';
 
 export { ArcaneCard } from './arcane/ArcaneCard';
 export { ArcaneCardBack } from './arcane/ArcaneCardBack';
@@ -20,9 +21,18 @@ export {
   rarityGemStyle,
 } from './arcane/parts';
 export { arcaneFullArtTemplate, arcaneTemplate } from './arcane/template';
+export { arcaneFields, arcaneTheme } from './arcane/theme';
 export { ENGRAVED_SHADOW, titleSizeFor } from './arcane/typography';
 export { CARD_HEIGHT, CARD_WIDTH, CardSurface, HoloFoil } from './base/CardSurface';
-export { getTemplate, listTemplates, registerTemplate } from './registry';
+export {
+  getLayout,
+  getTemplate,
+  getTheme,
+  listTemplates,
+  listThemes,
+  registerTemplate,
+  registerTheme,
+} from './registry';
 export type {
   CardData,
   CardRenderer,
@@ -30,6 +40,8 @@ export type {
   CardTemplate,
   FieldSpec,
   FieldValue,
+  Layout,
+  Theme,
 } from './types';
 
 /** Idempotent: safe to call from main.tsx and from every test's setup. */
@@ -37,6 +49,15 @@ export function registerBuiltinTemplates(): void {
   for (const template of [arcaneTemplate, arcaneFullArtTemplate]) {
     if (!listTemplates().some((t) => t.id === template.id)) {
       registerTemplate(template);
+    }
+  }
+}
+
+/** Idempotent: safe from main.tsx and every test setup. */
+export function registerBuiltinThemes(): void {
+  for (const theme of [arcaneTheme]) {
+    if (!listThemes().some((t) => t.id === theme.id)) {
+      registerTheme(theme);
     }
   }
 }
