@@ -1,6 +1,7 @@
-import { Effect, Fiber, Layer, Ref, TestClock } from 'effect';
+import { Effect, Fiber, Layer, Option, Ref, TestClock } from 'effect';
 import { describe, expect } from 'vitest';
 import { it } from '../../test/effect.ts';
+import type { AgentFillRequestT } from '../contracts/api.ts';
 import type { PredictionT } from '../contracts/replicate.ts';
 import { httpClientFromHandler } from '../lib/http.ts';
 import { ActivityBus, activityBusTestLayer } from './activity.ts';
@@ -10,6 +11,7 @@ import {
   ReplicateClient,
   ReplicateSdk,
   replicateClientLive,
+  runFillAgent,
 } from './agentBridge.ts';
 
 // ---------------------------------------------------------------------------
@@ -73,6 +75,151 @@ describe('composeArtPrompt', () => {
       const messages = (yield* bus.history).map((e) => e.message);
       expect(messages.some((m) => m.includes('composing art prompt'))).toBe(true);
     }).pipe(Effect.provide(activityBusTestLayer)),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// runFillAgent — session reuse, targeted patch, vision attach, Schema-reject
+// ---------------------------------------------------------------------------
+
+interface PromptCall {
+  sessionId: string;
+  text: string;
+  image?: { mime: string; dataUrl: string };
+}
+
+/** Stub AgentClient that records calls and replies with a fixed text. */
+const fillStub = (
+  reply: string,
+  calls: PromptCall[],
+  sessions: string[],
+): Layer.Layer<AgentClient> =>
+  Layer.succeed(AgentClient, {
+    createSession: (title) => {
+      sessions.push(title);
+      return Effect.succeed('fresh-session');
+    },
+    prompt: (sessionId, text, image) => {
+      calls.push({ sessionId, text, image });
+      return Effect.succeed({ data: { parts: [{ type: 'text', text: reply }] } });
+    },
+  });
+
+const noArt = () => Effect.succeed(Option.none<{ mime: string; dataUrl: string }>());
+
+const fillReq = (overrides: Partial<AgentFillRequestT> = {}): AgentFillRequestT => ({
+  sessionId: undefined,
+  themeContext: { lookAndFeel: 'painterly oil', palette: 'ember', argumentSummary: 'name, cost' },
+  fields: [
+    { kind: 'text', key: 'name', label: 'Name' },
+    { kind: 'number', key: 'cost', label: 'Cost' },
+  ],
+  currentData: { name: 'Nyra', ability: 'Hand-edited.' },
+  currentArtFileName: undefined,
+  userPrompt: 'rename him to Vorak',
+  ...overrides,
+});
+
+describe('runFillAgent', () => {
+  it.effect('creates a session on the first turn and returns a targeted patch', () => {
+    const calls: PromptCall[] = [];
+    const sessions: string[] = [];
+    return Effect.gen(function* () {
+      const out = yield* runFillAgent(fillReq(), noArt);
+      expect(sessions).toEqual(['cartis card fill']);
+      expect(out.sessionId).toBe('fresh-session');
+      expect(out.patch).toEqual({ name: 'Vorak' });
+      // per-turn snapshot: the prompt embeds currentData (hand edits win)
+      expect(calls[0]?.text).toContain('Hand-edited.');
+      expect(calls[0]?.text).toContain('rename him to Vorak');
+      expect(calls[0]?.image).toBeUndefined();
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          fillStub('{"patch": {"name": "Vorak"}}', calls, sessions),
+          activityBusTestLayer,
+        ),
+      ),
+    );
+  });
+
+  it.effect('reuses the passed sessionId without creating a session', () => {
+    const calls: PromptCall[] = [];
+    const sessions: string[] = [];
+    return Effect.gen(function* () {
+      const out = yield* runFillAgent(fillReq({ sessionId: 'episode-1' }), noArt);
+      expect(sessions).toEqual([]); // createSession NOT called
+      expect(out.sessionId).toBe('episode-1');
+      expect(calls[0]?.sessionId).toBe('episode-1');
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(fillStub('{"patch": {}}', calls, sessions), activityBusTestLayer),
+      ),
+    );
+  });
+
+  it.effect('attaches the current art for vision and decodes an artAction', () => {
+    const calls: PromptCall[] = [];
+    return Effect.gen(function* () {
+      const out = yield* runFillAgent(fillReq({ currentArtFileName: 'nyra-abc123.png' }), () =>
+        Effect.succeed(Option.some({ mime: 'image/png', dataUrl: 'data:image/png;base64,QQ==' })),
+      );
+      expect(calls[0]?.image?.mime).toBe('image/png');
+      expect(out.artAction).toEqual({ brief: 'angrier face', editCurrentArt: true });
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          fillStub(
+            '{"patch": {}, "artAction": {"brief": "angrier face", "editCurrentArt": true}}',
+            calls,
+            [],
+          ),
+          activityBusTestLayer,
+        ),
+      ),
+    );
+  });
+
+  it.effect('drops patch keys outside the field spec and rejects wrong types', () => {
+    const calls: PromptCall[] = [];
+    return Effect.gen(function* () {
+      // extra key silently dropped by the derived schema
+      const ok = yield* runFillAgent(fillReq(), noArt).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            fillStub('{"patch": {"name": "Vorak", "hacker": "x"}}', calls, []),
+            activityBusTestLayer,
+          ),
+        ),
+      );
+      expect(ok.patch).toEqual({ name: 'Vorak' });
+      // wrong-typed value → typed AgentError
+      const err = yield* runFillAgent(fillReq(), noArt).pipe(
+        Effect.flip,
+        Effect.provide(
+          Layer.mergeAll(
+            fillStub('{"patch": {"cost": "expensive"}}', [], []),
+            activityBusTestLayer,
+          ),
+        ),
+      );
+      expect(err._tag).toBe('AgentError');
+      expect(err.message).toBe('agent returned no fill patch');
+    });
+  });
+
+  it.effect('fails with a typed AgentError on a non-JSON reply', () =>
+    runFillAgent(fillReq(), noArt).pipe(
+      Effect.flip,
+      Effect.tap((error) => {
+        expect(error._tag).toBe('AgentError');
+        expect(error.message).toBe('agent returned no fill patch');
+        return Effect.void;
+      }),
+      Effect.provide(
+        Layer.mergeAll(fillStub('sorry, I cannot help with that', [], []), activityBusTestLayer),
+      ),
+    ),
   );
 });
 

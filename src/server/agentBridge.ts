@@ -15,8 +15,21 @@ import {
 } from 'effect';
 import type { Plugin } from 'vite';
 import { ActivityEventJson } from '../contracts/activity.ts';
-import { ImageGenerateRequest, StorePutRequest } from '../contracts/api.ts';
-import { AgentError, NetworkError, ReplicateError } from '../contracts/errors.ts';
+import {
+  AgentFillRequest,
+  type AgentFillRequestT,
+  type AgentFillResponseT,
+  ArtAction,
+  ImageGenerateRequest,
+  StorePutRequest,
+  schemaFromFields,
+} from '../contracts/api.ts';
+import {
+  AgentError,
+  type FileStoreError,
+  NetworkError,
+  ReplicateError,
+} from '../contracts/errors.ts';
 import { PromptResult, SessionCreated } from '../contracts/opencode.ts';
 import { Prediction, type PredictionT } from '../contracts/replicate.ts';
 import type { ThemeContextT } from '../contracts/theme.ts';
@@ -53,7 +66,12 @@ export class AgentClient extends Context.Tag('cartis/AgentClient')<
   AgentClient,
   {
     createSession(title: string): Effect.Effect<string, AgentError>;
-    prompt(sessionId: string, text: string): Effect.Effect<unknown, AgentError>;
+    /** `image` attaches a vision part (SDK FilePartInput with a data-URL). */
+    prompt(
+      sessionId: string,
+      text: string,
+      image?: { mime: string; dataUrl: string },
+    ): Effect.Effect<unknown, AgentError>;
   }
 >() {}
 
@@ -72,11 +90,18 @@ export function agentClientFromSdk(client: OpencodeClient): Context.Tag.Service<
         }
         return id;
       }),
-    prompt: (sessionId, text) =>
+    prompt: (sessionId, text, image) =>
       Effect.promise(() =>
         client.session.prompt({
           path: { id: sessionId },
-          body: { parts: [{ type: 'text', text }] },
+          body: {
+            parts: image
+              ? [
+                  { type: 'text', text },
+                  { type: 'file', mime: image.mime, url: image.dataUrl },
+                ]
+              : [{ type: 'text', text }],
+          },
         }),
       ),
   };
@@ -103,8 +128,10 @@ export const agentClientLive: Layer.Layer<AgentClient> = Layer.effect(
     return AgentClient.of({
       createSession: (title) =>
         cached.pipe(Effect.flatMap((client) => agentClientFromSdk(client).createSession(title))),
-      prompt: (sessionId, text) =>
-        cached.pipe(Effect.flatMap((client) => agentClientFromSdk(client).prompt(sessionId, text))),
+      prompt: (sessionId, text, image) =>
+        cached.pipe(
+          Effect.flatMap((client) => agentClientFromSdk(client).prompt(sessionId, text, image)),
+        ),
     });
   }),
 );
@@ -163,6 +190,71 @@ export function composeArtPrompt(
     const final = composed.length > 0 ? composed : themeContext.lookAndFeel;
     yield* bus.emit('agent', `art prompt composed (${String(final.length)} chars)`);
     return final;
+  });
+}
+
+// ---------- conversational fill ----------
+
+const FILL_GUIDE =
+  'You are editing a trading-card record. Reply with ONLY a JSON object ' +
+  '{ "patch": { ...only changed fields... }, "artAction"?: { "brief": string, "editCurrentArt": boolean } }. ' +
+  'patch must contain only the fields you intend to change. Include artAction ' +
+  'ONLY when the request calls for generating or editing the card art.';
+
+const decodeArtActionOption = Schema.decodeUnknownOption(ArtAction);
+
+/** Parse the first {...} block out of a model reply (fences tolerated). */
+function extractJson(raw: string): Option.Option<unknown> {
+  const start = raw.indexOf('{');
+  const end = raw.lastIndexOf('}');
+  if (start < 0 || end <= start) return Option.none();
+  try {
+    return Option.some(JSON.parse(raw.slice(start, end + 1)));
+  } catch {
+    return Option.none();
+  }
+}
+
+/**
+ * One conversational fill turn (spec §AI pipelines): reuse the episode's
+ * session (create on the first turn), snapshot currentData into the prompt so
+ * hand edits win over session memory, attach the current art for vision when
+ * present, and Schema-decode the targeted patch.
+ */
+export function runFillAgent(
+  req: AgentFillRequestT,
+  readArt: (
+    fileName: string,
+  ) => Effect.Effect<Option.Option<{ mime: string; dataUrl: string }>, FileStoreError>,
+): Effect.Effect<AgentFillResponseT, AgentError | FileStoreError, AgentClient | ActivityBus> {
+  return Effect.gen(function* () {
+    const agent = yield* AgentClient;
+    const bus = yield* ActivityBus;
+    const sessionId = req.sessionId ?? (yield* agent.createSession('cartis card fill'));
+    const image =
+      req.currentArtFileName !== undefined
+        ? Option.getOrUndefined(yield* readArt(req.currentArtFileName))
+        : undefined;
+    const text = [
+      FILL_GUIDE,
+      `Look and feel: ${req.themeContext.lookAndFeel}`,
+      `Fields: ${req.fields.map((f) => `${f.key} (${f.kind})`).join(', ')}`,
+      `Current values (respect these; the user may have hand-edited): ${JSON.stringify(req.currentData)}`,
+      `User request: ${req.userPrompt}`,
+    ].join('\n\n');
+    yield* bus.emit('agent', `fill: “${req.userPrompt.slice(0, 60)}”`);
+    const result = yield* agent.prompt(sessionId, text, image);
+    const json = extractJson(promptText(result));
+    if (Option.isNone(json)) {
+      return yield* Effect.fail(new AgentError({ reason: 'no-fill' }));
+    }
+    const body = json.value as { patch?: unknown; artAction?: unknown };
+    const patch = yield* Schema.decodeUnknown(schemaFromFields(req.fields))(body.patch ?? {}).pipe(
+      Effect.mapError(() => new AgentError({ reason: 'no-fill' })),
+    );
+    const artAction = Option.getOrUndefined(decodeArtActionOption(body.artAction));
+    yield* bus.emit('agent', 'fill patch ready');
+    return { sessionId, patch, artAction };
   });
 }
 
@@ -388,6 +480,7 @@ function parseStorePath(url: string): { store: StoreName; rest: string } | undef
 }
 
 const decodeStorePut = Schema.decodeUnknown(StorePutRequest);
+const decodeFill = Schema.decodeUnknown(AgentFillRequest);
 const decodeImageGenerate = Schema.decodeUnknown(ImageGenerateRequest);
 const encodeActivity = Schema.encode(ActivityEventJson);
 
@@ -502,6 +595,38 @@ export function cartisBridge(): Plugin {
         void runtime.runPromise(envOption('REPLICATE_API_TOKEN')).then((token) => {
           sendJson(sres, 200, { image: Option.isSome(token) ? 'replicate' : 'stub' });
         });
+      });
+
+      // ----- /api/agent/fill -----
+      server.middlewares.use('/api/agent/fill', (req, res) => {
+        const sres = res as ServerResponse;
+        if (req.method !== 'POST') {
+          sendJson(sres, 405, { error: 'POST only' });
+          return;
+        }
+        respond(
+          runtime,
+          sres,
+          Effect.gen(function* () {
+            const body = yield* readBody(req);
+            const parsed = yield* decodeFill(body);
+            const fs = yield* FileStore;
+            const readArt = (fileName: string) =>
+              fs.readFile('images', fileName).pipe(
+                Effect.map(
+                  Option.map((file) => {
+                    const raw = file.bytes;
+                    const copy = new ArrayBuffer(raw.byteLength);
+                    new Uint8Array(copy).set(
+                      new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength),
+                    );
+                    return { mime: file.type, dataUrl: bytesToDataUrl(copy, file.type) };
+                  }),
+                ),
+              );
+            return yield* runFillAgent(parsed, readArt);
+          }),
+        );
       });
 
       // ----- /api/image/generate -----

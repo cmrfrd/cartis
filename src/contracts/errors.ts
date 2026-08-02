@@ -58,10 +58,24 @@ export class BodyError extends Data.TaggedError('BodyError')<{
 
 /** opencode agent contract violations. src/server/agentBridge.ts */
 export class AgentError extends Data.TaggedError('AgentError')<{
-  readonly reason: 'no-session-id';
+  readonly reason: 'no-session-id' | 'no-fill';
 }> {
   override get message(): string {
-    return 'opencode session did not return an id';
+    const byReason: Record<AgentError['reason'], string> = {
+      'no-session-id': 'opencode session did not return an id',
+      'no-fill': 'agent returned no fill patch',
+    };
+    return byReason[this.reason];
+  }
+}
+
+/** Client-side fill request failures. src/builder/AgentFill.ts */
+export class AgentFillError extends Data.TaggedError('AgentFillError')<{
+  readonly status: number;
+  readonly detail?: string;
+}> {
+  override get message(): string {
+    return this.detail ?? `fill request failed (${String(this.status)})`;
   }
 }
 

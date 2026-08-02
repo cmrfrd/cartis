@@ -13,6 +13,7 @@
 
 import type { Effect } from 'effect';
 import { Layer, ManagedRuntime } from 'effect';
+import { type AgentFill, agentFillEmpty, agentFillLive } from '../builder/AgentFill';
 import {
   type ImageProvider,
   imageProviderLive,
@@ -23,12 +24,13 @@ import { type StoreClient, storeClientLive, storeClientMemory } from '../storage
 import { type ActivityClient, activityClientEmpty, activityClientLive } from './ActivityClient';
 
 /** The service surface the app's effects may require. */
-export type AppServices = StoreClient | ImageProvider | ActivityClient;
+export type AppServices = StoreClient | ImageProvider | AgentFill | ActivityClient;
 
 /** Live app layer: real services over the live (fetch) HTTP client. */
 export const appLive: Layer.Layer<AppServices> = Layer.mergeAll(
   storeClientLive,
   imageProviderLive,
+  agentFillLive,
   activityClientLive,
 ).pipe(Layer.provide(AppHttpLive));
 
@@ -36,6 +38,7 @@ export const appLive: Layer.Layer<AppServices> = Layer.mergeAll(
 export interface TestAppOverrides {
   readonly store?: Layer.Layer<StoreClient>;
   readonly image?: Layer.Layer<ImageProvider>;
+  readonly fill?: Layer.Layer<AgentFill>;
   readonly activity?: Layer.Layer<ActivityClient>;
 }
 
@@ -48,6 +51,7 @@ export function testAppLayerWith(overrides: TestAppOverrides = {}): Layer.Layer<
   return Layer.mergeAll(
     overrides.store ?? storeClientMemory,
     overrides.image ?? imageProviderStubLayer(),
+    overrides.fill ?? agentFillEmpty,
     overrides.activity ?? activityClientEmpty,
   );
 }

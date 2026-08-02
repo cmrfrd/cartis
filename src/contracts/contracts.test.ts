@@ -10,14 +10,18 @@ import { HttpClient, HttpClientError, HttpClientResponse } from '@effect/platfor
 import { Effect, Schema } from 'effect';
 import { describe, expect } from 'vitest';
 import { it } from '../../test/effect';
+import type { FieldSpec } from '../cards/types';
 import { AppHttpLive, httpClientFromHandler } from '../lib/http';
 import { ActivityEvent, ActivityEventJson } from './activity';
 import {
+  AgentFillRequest,
+  AgentFillResponse,
   ErrorBody,
   ImageGenerateRequest,
   ImageGenerateResponse,
   StatusResponse,
   StorePutRequest,
+  schemaFromFields,
 } from './api';
 import { PromptResult, SessionCreated } from './opencode';
 import {
@@ -443,6 +447,39 @@ describe('StatusResponse', () => {
   it('decodes stub status', () => {
     const decoded = Schema.decodeUnknownSync(StatusResponse)({ image: 'stub' });
     expect(decoded.image).toBe('stub');
+  });
+});
+
+describe('AgentFillRequest / Response', () => {
+  it('decodes a request and a response with an artAction', () => {
+    const req = Schema.decodeUnknownSync(AgentFillRequest)({
+      themeContext: { lookAndFeel: 'oil', palette: 'ember', argumentSummary: 'name' },
+      fields: [{ kind: 'text', key: 'name', label: 'Name' }],
+      currentData: { name: 'Nyra' },
+      userPrompt: 'make him angrier',
+    });
+    expect(req.userPrompt).toBe('make him angrier');
+    const res = Schema.decodeUnknownSync(AgentFillResponse)({
+      sessionId: 's1',
+      patch: { name: 'Vorak' },
+      artAction: { brief: 'angrier face', editCurrentArt: true },
+    });
+    expect(res.patch.name).toBe('Vorak');
+    expect(res.artAction?.editCurrentArt).toBe(true);
+  });
+});
+
+describe('schemaFromFields', () => {
+  const fields: FieldSpec[] = [
+    { kind: 'text', key: 'name', label: 'Name' },
+    { kind: 'number', key: 'cost', label: 'Cost', min: 0, max: 9 },
+  ];
+  it('accepts a matching partial patch', () => {
+    const decoded = Schema.decodeUnknownSync(schemaFromFields(fields))({ name: 'X' });
+    expect(decoded.name).toBe('X');
+  });
+  it('rejects a wrong-typed field', () => {
+    expect(() => Schema.decodeUnknownSync(schemaFromFields(fields))({ cost: 'high' })).toThrow();
   });
 });
 
