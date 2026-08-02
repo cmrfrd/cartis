@@ -85,7 +85,9 @@ export class ArcaneFullArtCard extends Component {
               </div>
             )}
             {Boolean(data.ability) && (
-              <p className={`font-card text-[13px] leading-snug text-white/95 ${SMOKE_PLATE}`}>
+              <p
+                className={`whitespace-pre-wrap font-card text-[13px] leading-snug text-white/95 ${SMOKE_PLATE}`}
+              >
                 {String(data.ability)}
               </p>
             )}

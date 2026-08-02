@@ -14,7 +14,7 @@ export interface EssencePalette {
   pip: string;
   /** Bright edge color for pinstripes and hairline accents. */
   accent: string;
-  /** Feeds artStylePrompt for AI portrait generation. */
+  /** Per-essence flavor fed to the theme's artFlavor for AI art generation. */
   artFlavor: string;
 }
 

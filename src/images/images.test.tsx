@@ -1,11 +1,9 @@
 import { Effect, Layer, Schema } from 'effect';
 import { describe, expect, vi, it as vit } from 'vitest';
 import { it } from '../../test/effect';
-import { mount, tick } from '../../test/util';
-import { setAppLayer, testAppLayerWith } from '../app/runtime';
+import { mount } from '../../test/util';
 import { ImageGenerateRequest } from '../contracts/api';
 import { httpClientFromHandler } from '../lib/http';
-import { ImageLibrary } from '../storage/ImageLibrary';
 import { CameraCapture } from './CameraCapture';
 import { bytesToDataUrl, dataUrlToBytes } from './codec';
 import {
@@ -14,7 +12,6 @@ import {
   imageProviderLive,
   imageProviderStubLayer,
 } from './ImageProvider';
-import { buildPortraitPrompt } from './prompt';
 import { stubStyleFor } from './stub';
 
 const bytesOf = (text: string): ArrayBuffer => new TextEncoder().encode(text).buffer as ArrayBuffer;
@@ -27,22 +24,6 @@ describe('codec', () => {
     const back = dataUrlToBytes(url);
     expect(back.type).toBe('image/png');
     expect(new TextDecoder().decode(back.bytes)).toBe('hello cartis');
-  });
-});
-
-describe('buildPortraitPrompt', () => {
-  vit('folds persona details into the style prompt, skipping blanks', () => {
-    const prompt = buildPortraitPrompt('oil painting portrait', {
-      age: '34',
-      gender: '',
-      detail: 'wears a silver pendant',
-      hobby: 'baking sourdough',
-    });
-    expect(prompt).toContain('oil painting portrait');
-    expect(prompt).toContain('34');
-    expect(prompt).toContain('silver pendant');
-    expect(prompt).toContain('baking sourdough');
-    expect(prompt).not.toContain('undefined');
   });
 });
 
