@@ -124,8 +124,11 @@ This is the only place where Effect exits into Expressive-mvc.
   the snapshot window closes, breaking the expressive dependency tracker).
 - **Guard for destroyed models** with `if (this.get(null)) return` at the top
   of any async method — the model may be destroyed while an Effect is in flight.
-- **Type-level escape hatches only in test fakes**: `as` casts and non-null
-  assertions are banned in production code; use Schema decode or type narrowing.
+- **`as` casts are banned on external data**; use Schema decode or type
+  narrowing. Sanctioned exceptions: type-level bridges on validated or
+  self-produced values (e.g. `StoreClient` generic bridges after Schema decode)
+  and SDK-boundary narrowing where the import returns `unknown` (e.g.
+  `client as unknown as OpencodeClient` in `agentBridge.ts`).
 
 ### Testing
 
@@ -134,4 +137,4 @@ vitest 4 + effect core. It exposes `it.effect` (TestClock-controlled),
 `it.scoped` (body may require `Scope`), and `it.live` (real clock). When
 `@effect/vitest` adds vitest 4 support, the adapter collapses to
 `export * from '@effect/vitest'`. TestClock is used in all polling/heartbeat
-tests (ReplicateClient, AgentApi heartbeat) so time advances are deterministic.
+tests (ReplicateClient, and the runCardAgent heartbeat in the agent bridge) so time advances are deterministic.

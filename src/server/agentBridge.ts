@@ -388,6 +388,7 @@ export const replicateClientLive: Layer.Layer<
           }),
         );
 
+        // Timeout covers polling only (not prediction creation) — intentional.
         yield* poll.pipe(
           Effect.timeoutFail({
             duration: POLL_TIMEOUT,

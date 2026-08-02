@@ -105,7 +105,8 @@ export function respond<A, E extends { message: string }, R>(
     }
     const defect = Cause.dieOption(exit.cause);
     if (Option.isSome(defect)) {
-      sendJson(res, 500, { error: String(defect.value) });
+      const d = defect.value;
+      sendJson(res, 500, { error: d instanceof Error ? d.message : String(d) });
       return;
     }
     // Interrupt / empty — nothing sensible to say, but keep the 500 contract.
