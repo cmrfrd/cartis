@@ -18,5 +18,12 @@ export default defineConfig(({ mode }) => {
         '@': path.resolve(import.meta.dirname, './src'),
       },
     },
+    build: {
+      // Local-only app; the dev server IS the app and `bun run build` is a
+      // compile smoke test (see README). One ~1.2 MB chunk (CodeMirror, effect,
+      // expressive, fonts) is fine here — raise the warning limit just past it
+      // so the smoke build stays quiet while a real size regression still warns.
+      chunkSizeWarningLimit: 1400,
+    },
   };
 });

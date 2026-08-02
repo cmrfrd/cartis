@@ -8,7 +8,7 @@
  */
 
 import { Schema } from 'effect';
-import { StoredRecord } from './records';
+import { StoredRecord } from './records.ts';
 
 // ---------------------------------------------------------------------------
 // Shared error body
