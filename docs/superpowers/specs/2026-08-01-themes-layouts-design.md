@@ -1,6 +1,6 @@
-# Themes & Layouts — data-model redesign
+# Themes & Layouts — data-model + builder redesign
 
-**Date:** 2026-08-01 · **Status:** approved (brainstorm 2026-08-01)
+**Date:** 2026-08-01 · **Revised:** 2026-08-02 (user feedback round 1) · **Status:** in review
 
 ## Context
 
@@ -11,31 +11,39 @@ string with no backing entity, `arcane-hero-fullart` is a spread of `arcane-hero
 overrides, and the Image Lab lists *templates* as art styles when the style is really the
 world's look.
 
-This redesign introduces two first-class concepts:
+This redesign introduces two first-class concepts, and reshapes the app around them:
 
 - **Theme** — a collection/world (à la an MTG set or Pokémon series): identity, palette,
-  SVG assets, raw building components, shared card-data vocabulary, and a prose
-  **look-and-feel prompt** that lets AI generate on-theme art and compose on-theme layouts.
-- **Layout** — an explicit arrangement of a card face within a theme (classic
-  portrait-plus-details vs. full-art showcase). Many layouts per theme.
+  SVG assets, raw building components, and a prose **look-and-feel prompt** that lets AI
+  generate on-theme art and fill on-theme cards.
+- **Layout** — how a card face organizes a set of components, **parameterized by
+  arguments** (name, element, ability text, art, …). Many layouts per theme.
 
-## Decisions (locked during brainstorm)
+Alongside the model change, the app itself changes: the Code Lab is removed, the Builder
+gains an AI fill flow, card-art generation becomes an explicit LLM-composed step driven by
+the layout's arguments, and the Gallery becomes a true edit-roundtrip surface.
 
-1. **Code-defined themes, data-shaped manifest.** A theme remains a code module
-   (components are TSX), but its manifest — id, name, description, look-and-feel prompt —
-   is a plain data object validated by an effect Schema at registration. Fully
-   data-defined/runtime-authorable themes are a separate future project.
+## Decisions
+
+1. **Code-defined themes, data-shaped identity.** A theme remains a code module
+   (components are TSX), but its identity fields — `id`, `name`, `description`,
+   `lookAndFeel` — are plain data on the theme object, validated by an effect Schema at
+   registration. (No separate "manifest" wrapper — the look-and-feel prompt is simply part
+   of the theme.) Fully data-defined/runtime-authorable themes are a future project.
 2. **Clean break on saved data.** No migration, no compat decode. Old card sidecars fail
-   the new row schema and are dropped by the existing lenient list decode. The user
-   restarts `cartis-data/cards` from scratch.
-3. **The look-and-feel prompt drives both AI surfaces now:** the art pipeline
-   (Image Lab + portrait generation) and the Code Lab agent's context.
-4. **Fields live on the theme, not the layout.** Both existing layouts edit the same data;
-   theme-level fields make layout switching lossless. Layouts may override *defaults* and
-   simply not render fields they don't use.
-5. **Card types are deliberately deferred.** A future dimension (creature vs. spell with
-   different fields and eligible layouts) can become `cardTypes` on the theme precisely
-   because fields are theme-level today. Not modeled now.
+   the new row schema and are dropped by the existing lenient list decode. `cartis-data/cards`
+   restarts from scratch.
+3. **Layouts own their arguments.** A layout declares the argument spec it renders
+   (`fields` + `defaults`, reusing the existing `FieldSpec` machinery). Layouts in the same
+   theme share field definitions through ordinary code reuse (the theme module exports its
+   common field list). Switching layouts preserves values for argument keys both layouts
+   share; keys the new layout doesn't declare are simply not rendered or edited.
+4. **Art is a function of the layout's arguments, composed by an LLM.** No more static
+   per-template `artStylePrompt`. See "AI pipelines" below.
+5. **The Code Lab is removed.** The opencode agent infrastructure is *repurposed* (AI form
+   fill, art-prompt composition), not deleted.
+6. **Card types are deliberately deferred.** If themes later need creature-vs-spell style
+   variation, that becomes a grouping above layouts; not modeled now.
 
 ## Model (`src/cards/types.ts`)
 
@@ -43,107 +51,137 @@ This redesign introduces two first-class concepts:
 `CardRenderProps`, `CardRenderer` are unchanged.
 
 ```ts
-/** Pure data; validated by ThemeManifest schema at registration. */
-interface ThemeManifest {
+interface Theme {
+  // -- data-shaped identity, Schema-validated at registration --
   id: string;           // 'arcane'
   name: string;         // 'Arcane'
   description: string;  // world blurb (shown in pickers)
   lookAndFeel: string;  // prose visual identity, consumed by AI pipelines
-}
-
-interface Theme {
-  manifest: ThemeManifest;
-  fields: readonly FieldSpec[];   // card-data vocabulary for the whole theme
-  defaults: CardData;
-  /** manifest.lookAndFeel + per-card palette flavor (e.g. essence artFlavor). */
-  artStylePrompt: (data: CardData) => string;
+  // -- code --
   CardBack: CardRenderer;         // shared back, promoted from ad-hoc export
   layouts: readonly Layout[];     // ordered; layouts[0] is the default
+  /** Optional per-card flavor derived from data (e.g. essence artFlavor from the palette),
+   *  appended to the LLM art-prompt context. */
+  artFlavor?: (data: CardData) => string;
 }
 
 interface Layout {
   id: string;                     // unique within the theme: 'classic', 'fullart'
   name: string;
   description: string;
+  fields: readonly FieldSpec[];   // the ARGUMENTS this layout takes
+  defaults: CardData;             // seed values for a new card
   artAspect?: string;             // preferred replicate aspect for the art slot
-  defaults?: Partial<CardData>;   // overrides on theme defaults
-  Render: CardRenderer;
+  Render: CardRenderer;           // organizes theme components, consumes the arguments
 }
 ```
 
-A `ThemeManifest` Schema lives in `src/contracts/theme.ts`; `registerTheme` decodes the
-manifest and rejects duplicate theme ids or duplicate layout ids within a theme.
+The theme-identity Schema (`ThemeIdentity`) lives in `src/contracts/theme.ts`;
+`registerTheme` decodes it and rejects duplicate theme ids or duplicate layout ids within
+a theme.
 
 ## Registry (`src/cards/registry.ts`)
 
-Theme-keyed replacement for the template registry:
-
-- `registerTheme(theme)` — validates manifest (Schema) + layout-id uniqueness, throws on
-  duplicate theme id.
-- `getTheme(id)`, `listThemes()`
-- `getLayout(themeId, layoutId)` — throws on unknown theme or layout.
-- `__clearThemesForTests()`
-
-`registerBuiltinTemplates()` becomes `registerBuiltinThemes()` (main.tsx, test/setup.ts).
+- `registerTheme(theme)` — validates identity (Schema) + layout-id uniqueness.
+- `getTheme(id)`, `listThemes()`, `getLayout(themeId, layoutId)`.
+- `__clearThemesForTests()`; `registerBuiltinTemplates()` → `registerBuiltinThemes()`
+  (main.tsx, test/setup.ts).
 
 ## Arcane split (`src/cards/arcane/`)
 
-`template.ts` is replaced by `theme.ts` exporting `arcaneTheme`:
+`template.ts` → `theme.ts` exporting `arcaneTheme`:
 
-- **manifest:** id `arcane`, name `Arcane`, existing kit blurb as description,
-  `lookAndFeel` distilled from today's shared prompt prose ("Fantasy oil painting …
-  painterly oil brushwork, ornate trading card illustration") minus per-essence bits.
-- **fields/defaults:** today's shared field list and defaults, unchanged.
-- **artStylePrompt:** `lookAndFeel` + `paletteFor(essence).artFlavor` — same output
-  strings as today.
-- **CardBack:** `ArcaneCardBack`.
-- **layouts:** `classic` (Render `ArcaneCard`, artAspect `3:2`) and `fullart`
-  (Render `ArcaneFullArtCard`, artAspect `3:4`, defaults override
-  `{ name: 'Nyra, Unbound', flavor: '' }`).
+- identity: id `arcane`, name `Arcane`, existing kit blurb, `lookAndFeel` distilled from
+  today's shared prompt prose ("Fantasy oil painting … painterly oil brushwork, ornate
+  trading card illustration") minus per-essence bits.
+- `artFlavor`: `paletteFor(essence).artFlavor` (per-card palette flavor, as today).
+- `CardBack`: `ArcaneCardBack`.
+- layouts `classic` (Render `ArcaneCard`, artAspect `3:2`) and `fullart` (Render
+  `ArcaneFullArtCard`, artAspect `3:4`); both declare the same field list (exported once
+  from the theme module), with fullart's defaults overriding `{ name: 'Nyra, Unbound',
+  flavor: '' }`.
+- `palette.ts`, `parts.tsx`, `glyphs.tsx`, `typography.ts`, card TSX renders: untouched.
 
-`palette.ts`, `parts.tsx`, `glyphs.tsx`, `typography.ts`, card TSX renders: untouched.
+## AI pipelines (opencode LLM + replicate, both via the bridge)
+
+Two agent-backed features replace the Code Lab's code generation. Both receive **theme
+context** = `{ lookAndFeel, palette summary, layout argument spec }` as prose/JSON, never
+component code.
+
+**1. AI form fill (Builder).** New bridge endpoint `POST /api/agent/fill`:
+request `{ themeContext, fields: FieldSpec-shaped summary, currentData, userPrompt }` →
+opencode session → response decoded against a Schema derived from the field spec →
+`{ data: CardData }`. The Builder merges returned values into the form; every field
+remains hand-editable afterwards; re-prompting adjusts the current values (the LLM sees
+`currentData`).
+
+**2. LLM-composed art prompts.** Card-art generation is no longer a fixed template
+string. `POST /api/image/generate` gains a composition step ahead of replicate: the bridge
+gives the LLM (a) a base instruction ("you are writing an image-generation prompt for a
+trading-card art slot"), (b) the theme's `lookAndFeel` + `artFlavor(data)`, (c) the
+layout's current argument values (so element `fire` shapes the art), and (d) the source
+image, if one was provided. The LLM returns the final generation prompt; the bridge then
+runs the existing replicate create-and-poll with it. Both steps emit activity events
+(prompt composed → generation progress). The stub provider path skips composition and
+keeps its deterministic behavior for tests/offline.
+
+## App changes
+
+**Code Lab removal.** Delete `src/editor/` (EditorView, CodePane, compile, Sandbox,
+starter) and its tests; AppShell drops to three tabs (Builder / Image Lab / Gallery);
+`codemirror`, `@codemirror/lang-javascript`, and `sucrase` leave package.json. The
+`/api/agent/card` route and `buildAgentPrompt`/`extractCode` die with it; `AgentClient`
+(opencode session machinery) stays and now serves `/api/agent/fill` and art-prompt
+composition. `AgentApi` (browser service) is reshaped to `fill(...)` accordingly.
+
+**Builder.**
+- Sidebar: THEME select, LAYOUT select, then an **AI prompt field above the form** with a
+  "Fill with AI" action (busy/note states per the standard boundary pattern). Below it,
+  the ordinary form renders the layout's arguments.
+- A new card immediately renders the layout's defaults in the preview — a real base card —
+  with an **empty art placeholder** in the art slot (no auto-generation).
+- Art generation is explicit: a "Generate art" action on the art field (PortraitSection)
+  runs the LLM-composed pipeline above, using the current argument values; the AI fill
+  flow may also trigger it as part of a prompted request. A source photo remains optional
+  input to the composition step.
+- State: `templateId` → `themeId` + `layoutId`; switching layouts preserves overlapping
+  argument values (decision 3).
+
+**Gallery roundtrip.** Clicking a saved card opens it in the Builder (existing
+`pendingCard` mechanism, made the card's primary click action): theme + layout + data
+load, `savedId` is retained, and Save **updates the same record** rather than duplicating.
+"Saved" list entries show `themeId/layoutId`.
+
+**Image Lab.** Kept as-is functionally; its style picker lists themes ("Arcane style" +
+"Freestyle") instead of templates, and theme styles route through the same LLM composition
+step with the theme context (freestyle remains a raw user prompt).
 
 ## Persistence & contracts
 
-- `CardRecord` (`src/contracts/records.ts`) and `StoredCard`: `templateId: string` →
-  `themeId: string` + `layoutId: string` (both required). Old sidecars drop on decode
-  (decision 2) — no other code needed.
-- `ImageRecord.styleId` keeps its name and string type; values are now theme ids or
-  `'freestyle'`. Old records still decode; stale values are harmless.
-- `AgentCardRequest` (`src/contracts/api.ts`) gains an optional theme-context block:
-  `{ themeContext?: { lookAndFeel: string; palette: string; parts: string } }` — prose
-  summaries, not component code.
-
-## Consumers
-
-- **BuilderView:** state `templateId` → `themeId` + `layoutId`. Sidebar shows two stacked
-  selects, THEME then LAYOUT (theme select has one entry today — honest about the
-  direction). Fields from theme; `Render`/`artAspect` from layout. Merged defaults
-  (theme defaults + layout overrides) seed a NEW card only — switching layouts never
-  re-applies defaults over data the user has entered (lossless switching is the point of
-  theme-level fields). Save/load and `pendingCard` carry both ids.
-- **PortraitSection:** prompt from `theme.artStylePrompt(data)`; `styleId` = theme id;
-  aspect from the active layout.
-- **ImageLabView:** style select lists `'freestyle'` + one entry per theme
-  ("Arcane style"); prompt preview from `theme.artStylePrompt(theme.defaults)`.
-- **GalleryView:** displays `themeId/layoutId`; open-in-builder passes both.
-- **EditorView / agent bridge:** the editor includes the default theme's context block in
-  its `AgentCardRequest`; `buildAgentPrompt` injects it so Code Lab generations are
-  on-theme. (A Code Lab theme picker is future work.)
-- **Untouched:** card renders, parts, CardSurface, textures, export pipeline, compile
-  sandbox `MODULE_MAP`, starter code.
+- `CardRecord` / `StoredCard`: `templateId` → required `themeId` + `layoutId`. Old
+  sidecars drop on decode (decision 2) — no other code needed.
+- `ImageRecord.styleId` keeps its name/type; values become theme ids or `'freestyle'`.
+- `src/contracts/theme.ts`: `ThemeIdentity` schema + the theme-context block shape shared
+  by fill and image-generate requests.
+- `src/contracts/api.ts`: `AgentCardRequest/Response` replaced by `AgentFillRequest/Response`;
+  `ImageGenerateRequest` gains theme-context + argument-values fields for composition.
 
 ## Testing
 
-- Registry tests → theme registry (register/get/list/getLayout, duplicate rejection,
-  manifest validation failure).
-- Contracts tests: ThemeManifest decode success/failure; CardRecord requires
-  themeId/layoutId (old templateId row fails decode — asserting the clean break).
-- Builder/gallery/images/portrait tests: id updates + the new two-select flow.
-- One agentBridge test: theme context present in the built prompt.
+- Registry: register/get/list/getLayout, duplicate rejection, identity-schema failure.
+- Contracts: ThemeIdentity decode success/failure; CardRecord requires themeId/layoutId
+  (old templateId row fails decode — asserting the clean break); AgentFill shapes.
+- Bridge: `/api/agent/fill` happy path + malformed-LLM-output failure (Schema rejects);
+  image-generate composition step (stub LLM layer) feeding replicate; activity events for
+  both steps.
+- Builder: AI fill merges values and leaves fields editable; layout switch preserves
+  overlapping values; empty art placeholder on new card; explicit generate action.
+- Gallery: click-to-open roundtrip, re-save updates in place.
+- Removals: no `src/editor` references; AppShell renders three tabs.
 - Gate throughout: `bun run verify`.
 
 ## Out of scope
 
-Runtime/data-defined themes and theme authoring UI; card types; Code Lab theme picker;
-any change to card visual output (renders are untouched — pixel output identical).
+Runtime/data-defined themes and theme-authoring UI; card types; multi-theme Code Lab
+replacement (code-level layout authoring is gone until a future need); any change to card
+visual output (renders untouched — pixel output identical).
