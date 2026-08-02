@@ -81,7 +81,57 @@ the PNG is exactly what you saw at rest.
 
 Expressive-mvc only (no React idioms): views are `Component` classes, shared
 stores (`ImageLibrary`, `CardArchive`) are adopted children of `AppShell`, and
-persistence is IndexedDB. Cross-model access uses `get(Type)` context fields
-with transitive subscription — see the expressive skills repo
-(<https://github.com/gabeklein/expressive-mvc/tree/main/skills>) and the plan in
-`docs/superpowers/plans/2026-07-31-cartis-card-studio.md`.
+persistence is file-based (`./cartis-data`). Cross-model access uses `get(Type)`
+context fields with transitive subscription — see the expressive skills repo
+(<https://github.com/gabeklein/expressive-mvc/tree/main/skills>).
+
+## Effect architecture
+
+Business logic is in [Effect v3](https://effect.website) using
+`@effect/platform` HttpClient (no HttpApi/HttpServer).
+
+### Contracts layer — `src/contracts/`
+
+Schemas (`effect` core `Schema`) + `Data.TaggedError` classes shared between
+client and server. `errors.ts` is the canonical tagged-error registry;
+`api.ts`, `records.ts`, `replicate.ts`, `opencode.ts`, `activity.ts` are wire
+schemas for the six bridge routes and the SSE activity feed.
+
+### Services and layers
+
+| Service | Tag | Description |
+|---|---|---|
+| `StoreClient` | `cartis/StoreClient` | Browser: CRUD over `/api/store/:store` |
+| `ImageProvider` | `cartis/ImageProvider` | Browser: generate an image (stub or Replicate) |
+| `AgentApi` | `cartis/AgentApi` | Browser: POST to `/api/agent/card` |
+| `ActivityClient` | `cartis/ActivityClient` | Browser: SSE stream from `/api/activity` |
+| `ActivityBus` | `cartis/ActivityBus` | Server: fan-out activity log (in-memory) |
+| `FileStore` | `cartis/FileStore` | Server: binary + sidecar I/O under `cartis-data/` |
+| `AgentClient` | `cartis/AgentClient` | Server: opencode session + prompt |
+| `ReplicateSdk` | `cartis/ReplicateSdk` | Server: thin Effect wrapper over replicate SDK |
+| `ReplicateClient` | `cartis/ReplicateClient` | Server: create prediction, poll, download |
+
+### Browser runtime seam — `src/app/runtime.ts`
+
+`runApp` / `runAppExit` / `forkApp` run Effects against the live layer. Tests
+call `setAppLayer(customLayer)` to swap in stubs; production never calls it.
+This is the only place where Effect exits into Expressive-mvc.
+
+### Expressive ↔ Effect boundary
+
+- **Snapshot reactive fields into locals** before entering `Effect.gen`; never
+  read `this.*` inside a generator (reading inside Effect executes lazily, after
+  the snapshot window closes, breaking the expressive dependency tracker).
+- **Guard for destroyed models** with `if (this.get(null)) return` at the top
+  of any async method — the model may be destroyed while an Effect is in flight.
+- **Type-level escape hatches only in test fakes**: `as` casts and non-null
+  assertions are banned in production code; use Schema decode or type narrowing.
+
+### Testing
+
+Tests use `test/effect.ts` — a minimal `@effect/vitest`-compatible adapter over
+vitest 4 + effect core. It exposes `it.effect` (TestClock-controlled),
+`it.scoped` (body may require `Scope`), and `it.live` (real clock). When
+`@effect/vitest` adds vitest 4 support, the adapter collapses to
+`export * from '@effect/vitest'`. TestClock is used in all polling/heartbeat
+tests (ReplicateClient, AgentApi heartbeat) so time advances are deterministic.

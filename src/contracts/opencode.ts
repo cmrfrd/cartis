@@ -82,9 +82,9 @@ const PromptData = Schema.Struct({
 
 export const PromptResult = Schema.Struct({
   data: Schema.optional(PromptData),
-  // flat fallback — extractCode does `rec(data?.structured_output) ?? rec(data?.structured_output)`
-  // but also: `const data = rec(rec(result)?.data) ?? rec(result)`, so result itself
-  // may be the data object when there's no wrapper.
+  // flat fallback — extractCode resolves `const data = value.data ?? value`, then
+  // walks: `data.info?.structured_output ?? data.structured_output ?? value.structured_output`
+  // so result itself may be the data object when there is no wrapper.
   structured_output: Schema.optional(StructuredOutput),
   info: Schema.optional(
     Schema.Struct({

@@ -371,6 +371,16 @@ describe('StorePutRequest', () => {
     const decoded = Schema.decodeUnknownSync(StorePutRequest)(raw);
     expect(decoded.bytesBase64).toBe('SGVsbG8=');
   });
+
+  it('extra unknown keys on the record survive encode round-trip', () => {
+    // StoredRecord carries an index signature so hand-edited sidecars with
+    // unknown fields are not stripped during encode. This locks that behaviour.
+    const raw = { record: { id: 'rec-3', name: 'Ember', customField: 'keep-me', score: 99 } };
+    const decoded = Schema.decodeUnknownSync(StorePutRequest)(raw);
+    const encoded = Schema.encodeSync(StorePutRequest)(decoded);
+    expect((encoded.record as Record<string, unknown>).customField).toBe('keep-me');
+    expect((encoded.record as Record<string, unknown>).score).toBe(99);
+  });
 });
 
 describe('ErrorBody', () => {

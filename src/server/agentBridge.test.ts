@@ -229,8 +229,8 @@ describe('ReplicateClient.generate', () => {
           }),
         ),
       );
-      // Two polls: processing, then succeeded.
-      yield* TestClock.adjust('1500 millis');
+      // First getPrediction is immediate (processing), then one spaced interval
+      // brings the second poll (succeeded) and the fiber settles.
       yield* TestClock.adjust('1500 millis');
       const dataUrl = yield* Fiber.join(fiber);
       expect(dataUrl.startsWith('data:image/png;base64,')).toBe(true);
@@ -262,7 +262,8 @@ describe('ReplicateClient.generate', () => {
           c.generate('tok', { prompt: 'p', imageDataUrl: 'data:image/png;base64,QQ==' }),
         ).pipe(Effect.flip),
       );
-      yield* TestClock.adjust('1500 millis');
+      // The first getPrediction call is immediate and returns 'failed'; the fiber
+      // already settled before any clock advance is needed.
       const error = yield* Fiber.join(fiber);
       expect(error._tag).toBe('ReplicateError');
       expect(error.message).toBe('replicate failed: nsfw block');
