@@ -81,7 +81,7 @@ describe('effect toolchain canary', () => {
     }),
   );
 
-  it.effect('tagged errors: _tag and message strings match today’s source', () =>
+  it.effect("tagged errors: _tag and message strings match today's source", () =>
     Effect.gen(function* () {
       yield* Effect.void;
       const listErr = new StoreError({ op: 'list', status: 500 });

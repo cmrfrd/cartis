@@ -2,7 +2,7 @@
  * Schema contracts for Cartis' stored records.
  *
  * Shapes mirrored from:
- *   - src/storage/storeClient.ts:9-17  (StoreName, StoreRecord)
+ *   - src/storage/StoreClient.ts       (StoreName, StoredWithFile)
  *   - src/server/fileStore.ts:10-17    (StoreName, StoredRecord)
  *   - src/storage/CardArchive.ts:5-23  (StoredCard, StoredExport, ExportFormat)
  *   - src/storage/ImageLibrary.ts:4-13 (StoredImage)
@@ -23,9 +23,8 @@ export type StoreNameT = typeof StoreName.Type;
 //
 // Typed knowns from StoreRecord/StoredRecord + index signature so unknown keys
 // in hand-edited sidecars survive encode/decode round-trips.
-// fileStore.ts:StoredRecord omits `fileName`; storeClient.ts:StoreRecord adds
-// it. We model the superset (fileName present) since both ends touch the same
-// wire shape.
+// fileStore.ts:StoredRecord omits `fileName`; StoreClient.ts adds it. We model
+// the superset (fileName present) since both ends touch the same wire shape.
 // ---------------------------------------------------------------------------
 
 export const StoredRecord = Schema.Struct(

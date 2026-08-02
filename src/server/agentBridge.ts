@@ -372,12 +372,12 @@ export const replicateClientLive: Layer.Layer<
             const status = prediction.status;
             if (status === 'failed') {
               return Effect.fail(
-                new ReplicateError({ reason: 'failed', detail: prediction.error }),
+                new ReplicateError({ reason: 'failed', detail: prediction.error ?? undefined }),
               );
             }
             if (status === 'canceled') {
               return Effect.fail(
-                new ReplicateError({ reason: 'canceled', detail: prediction.error }),
+                new ReplicateError({ reason: 'canceled', detail: prediction.error ?? undefined }),
               );
             }
             return Effect.succeed(prediction);

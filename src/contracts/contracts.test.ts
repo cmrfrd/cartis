@@ -297,6 +297,33 @@ describe('Prediction', () => {
     expect(decoded.id).toBe('pred-4');
     expect(decoded.output).toBeUndefined();
   });
+
+  it('decodes a realistic fresh prediction with explicit nulls (live API shape)', () => {
+    // The real API returns "output": null and "error": null on a fresh create —
+    // this exact shape came from a live call and MUST decode successfully.
+    const raw = {
+      id: 'gm3qorzdhgbfurvjtvhg6dckhu',
+      model: 'black-forest-labs/flux-kontext-pro',
+      version: 'hidden',
+      input: { prompt: 'stylize me' },
+      logs: '',
+      output: null,
+      error: null,
+      status: 'starting',
+      data_removed: false,
+      created_at: '2026-08-01T00:00:00.000Z',
+      urls: {
+        get: 'https://api.replicate.com/v1/predictions/gm3qorzdhgbfurvjtvhg6dckhu',
+        cancel: 'https://api.replicate.com/v1/predictions/gm3qorzdhgbfurvjtvhg6dckhu/cancel',
+      },
+    };
+    const decoded = Schema.decodeUnknownSync(Prediction)(raw);
+    expect(decoded.id).toBe('gm3qorzdhgbfurvjtvhg6dckhu');
+    expect(decoded.status).toBe('starting');
+    expect(decoded.output).toBeNull();
+    expect(decoded.error).toBeNull();
+    expect(decoded.urls?.get).toContain('/predictions/');
+  });
 });
 
 // ---------------------------------------------------------------------------

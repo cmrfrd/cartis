@@ -1,15 +1,20 @@
 /**
  * Schema contract for the Replicate API prediction payload.
  *
- * Lenient: only the fields generateWithReplicate reads are included.
- * Verified against src/server/agentBridge.ts:130-194.
+ * Lenient: only the fields the ReplicateClient reads are included.
  *
- * Fields the code reads:
- *   prediction.id        — line 161, 163
- *   prediction.urls.get  — line 159 (poll URL)
- *   prediction.status    — line 165, 170, 171
- *   prediction.output    — line 123-126 (outputUrlOf)
- *   prediction.error     — line 172
+ * Fields the code reads (src/server/agentBridge.ts):
+ *   prediction.id        — poll target
+ *   prediction.urls.get  — poll URL
+ *   prediction.status    — loop control
+ *   prediction.output    — outputUrlOf
+ *   prediction.error     — failed/canceled detail
+ *
+ * The real API returns EXPLICIT NULLS on fresh predictions ("output": null,
+ * "error": null) — observed live, and the SDK types carry `output?: any` /
+ * `error?: unknown`. So `output` and `error` accept null as well as absent.
+ * `id`, `status`, `urls`, `urls.get` are non-null in the SDK's types; they stay
+ * optional-only (leniency for partial payloads, not null-tolerance).
  */
 
 import { Schema } from 'effect';
@@ -44,8 +49,10 @@ export const Prediction = Schema.Struct({
       get: Schema.optional(Schema.String),
     }),
   ),
-  // output is string OR array of strings (agentBridge.ts:123-126 outputUrlOf)
-  output: Schema.optional(Schema.Union(Schema.String, Schema.Array(Schema.String))),
-  error: Schema.optional(Schema.String),
+  // output is string OR array of strings (outputUrlOf), and explicitly null on
+  // fresh predictions — the live API sends "output": null before completion.
+  output: Schema.optional(Schema.NullOr(Schema.Union(Schema.String, Schema.Array(Schema.String)))),
+  // error is a string on failure and explicitly null otherwise.
+  error: Schema.optional(Schema.NullOr(Schema.String)),
 });
 export type PredictionT = typeof Prediction.Type;

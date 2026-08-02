@@ -20,7 +20,7 @@ export class NetworkError extends Data.TaggedError('NetworkError')<{
   }
 }
 
-/** HTTP store-client failures. src/storage/storeClient.ts:39,54,60 */
+/** HTTP store-client failures. src/storage/StoreClient.ts */
 export class StoreError extends Data.TaggedError('StoreError')<{
   readonly op: 'list' | 'put' | 'delete';
   readonly status: number;
@@ -47,7 +47,7 @@ export class FileStoreError extends Data.TaggedError('FileStoreError')<{
   }
 }
 
-/** JSON body parse failures (wraps a ParseError). src/server/agentBridge.ts readJson */
+/** JSON body parse failures. src/server/BridgeRuntime.ts readBody */
 export class BodyError extends Data.TaggedError('BodyError')<{
   readonly cause: unknown;
 }> {
@@ -144,7 +144,7 @@ class ReplicateErrorClass extends Data.TaggedError('ReplicateError')<{
 export type ReplicateError = ReplicateErrorClass;
 export const ReplicateError: new (fields: ReplicateFields) => ReplicateError = ReplicateErrorClass;
 
-/** Client-side image-bridge failures. src/images/replicate.ts */
+/** Client-side image-bridge failures. src/images/ImageProvider.ts */
 export class ImageBridgeError extends Data.TaggedError('ImageBridgeError')<{
   readonly status: number;
   readonly detail?: string;

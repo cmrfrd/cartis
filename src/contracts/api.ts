@@ -3,8 +3,8 @@
  *
  * Verified against both ends:
  *   Server:  src/server/agentBridge.ts (route handlers)
- *   Clients: src/storage/storeClient.ts, src/images/replicate.ts,
- *            src/images/provider.ts, src/editor/EditorView.tsx
+ *   Clients: src/storage/StoreClient.ts, src/images/ImageProvider.ts,
+ *            src/editor/AgentApi.ts
  */
 
 import { Schema } from 'effect';
@@ -23,8 +23,8 @@ export type ErrorBodyT = typeof ErrorBody.Type;
 // ---------------------------------------------------------------------------
 // PUT /api/store/:store
 //
-// storeClient.ts:48-52: body JSON.stringify({ record, bytesBase64: bytes ? … : undefined })
-// agentBridge.ts:258-264: body.record + optional body.bytesBase64
+// StoreClient.ts (put): body { record, bytesBase64: bytes ? … : undefined }
+// agentBridge.ts: body.record + optional body.bytesBase64
 // ---------------------------------------------------------------------------
 
 export const StorePutRequest = Schema.Struct({
@@ -36,9 +36,9 @@ export type StorePutRequestT = typeof StorePutRequest.Type;
 // ---------------------------------------------------------------------------
 // GET /api/status
 //
-// agentBridge.ts:305-307:
+// agentBridge.ts:
 //   { image: process.env.REPLICATE_API_TOKEN ? 'replicate' : 'stub' }
-// provider.ts:27: body.image === 'replicate'
+// ImageProvider.ts: body.image === 'replicate'
 // ---------------------------------------------------------------------------
 
 export const StatusResponse = Schema.Struct({
@@ -49,9 +49,9 @@ export type StatusResponseT = typeof StatusResponse.Type;
 // ---------------------------------------------------------------------------
 // POST /api/agent/card
 //
-// Request:  EditorView.tsx:57: { prompt: this.prompt, code: this.source }
-//           agentBridge.ts:317-319: body.prompt, body.code
-// Response: agentBridge.ts:323: { code }
+// Request:  AgentApi.ts: { prompt, code }
+//           agentBridge.ts: body.prompt, body.code
+// Response: agentBridge.ts: { code }
 // ---------------------------------------------------------------------------
 
 export const AgentCardRequest = Schema.Struct({
@@ -68,10 +68,10 @@ export type AgentCardResponseT = typeof AgentCardResponse.Type;
 // ---------------------------------------------------------------------------
 // POST /api/image/generate
 //
-// Request:  replicate.ts:10-14: { prompt, imageDataUrl, aspectRatio }
-//           agentBridge.ts:338-343: body.prompt, body.imageDataUrl, body.aspectRatio?
-// Response: agentBridge.ts:344: { dataUrl }
-//           replicate.ts:19: body.dataUrl
+// Request:  ImageProvider.ts: { prompt, imageDataUrl, aspectRatio }
+//           agentBridge.ts: body.prompt, body.imageDataUrl, body.aspectRatio?
+// Response: agentBridge.ts: { dataUrl }
+//           ImageProvider.ts: body.dataUrl
 // ---------------------------------------------------------------------------
 
 export const ImageGenerateRequest = Schema.Struct({

@@ -255,6 +255,42 @@ describe('ReplicateClient.generate', () => {
     ),
   );
 
+  it.effect('polls through explicit-null outputs (live API shape) to a real output', () =>
+    Effect.gen(function* () {
+      // Fresh predictions from the real API carry "output": null / "error": null
+      // until completion — the poll loop must pass them through untouched and
+      // only read output once status is succeeded.
+      const fiber = yield* Effect.fork(
+        Effect.flatMap(ReplicateClient, (c) =>
+          c.generate('tok', { prompt: 'p', imageDataUrl: 'data:image/png;base64,QQ==' }),
+        ),
+      );
+      // Immediate poll: processing (output null); one interval later: succeeded.
+      yield* TestClock.adjust('1500 millis');
+      const dataUrl = yield* Fiber.join(fiber);
+      expect(dataUrl.startsWith('data:image/png;base64,')).toBe(true);
+    }).pipe(
+      Effect.provide(
+        replicateEnv([
+          {
+            id: 'pred-null',
+            status: 'starting',
+            urls: { get: 'https://api.replicate.com/v1/predictions/pred-null' },
+            output: null,
+            error: null,
+          },
+          { id: 'pred-null', status: 'processing', output: null, error: null },
+          {
+            id: 'pred-null',
+            status: 'succeeded',
+            output: 'https://img.example/out.png',
+            error: null,
+          },
+        ]),
+      ),
+    ),
+  );
+
   it.effect('surfaces a failed prediction as ReplicateError failed', () =>
     Effect.gen(function* () {
       const fiber = yield* Effect.fork(
