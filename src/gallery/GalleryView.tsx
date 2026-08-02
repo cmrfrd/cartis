@@ -85,7 +85,7 @@ function GalleryImages() {
   const urls = shell?.library.urls ?? {};
   if (images.length === 0) {
     return (
-      <EmptyState message="No library images yet." hint="Generate or upload in the Image Lab." />
+      <EmptyState message="No library images yet." hint="Generate in the Builder's art tools." />
     );
   }
   return (

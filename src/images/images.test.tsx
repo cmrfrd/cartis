@@ -7,7 +7,6 @@ import { httpClientFromHandler } from '../lib/http';
 import { ImageLibrary } from '../storage/ImageLibrary';
 import { CameraCapture } from './CameraCapture';
 import { bytesToDataUrl, dataUrlToBytes } from './codec';
-import { ImageLabView } from './ImageLabView';
 import {
   type GenerationInput,
   ImageProvider,
@@ -159,60 +158,5 @@ describe('CameraCapture', () => {
       expect(container.textContent).toContain('Camera unavailable');
     });
     unmount();
-  });
-});
-
-describe('ImageLabView name input stays bound (snapshot-rule regression)', () => {
-  vit('reflects state changes into the controlled input', async () => {
-    let lab: ImageLabView | undefined;
-    const { container, unmount } = mount(
-      <ImageLabView
-        is={(instance: ImageLabView) => {
-          lab = instance;
-        }}
-      />,
-    );
-    await tick();
-    if (lab) lab.imageName = 'Ember Duelist';
-    await vi.waitFor(() => {
-      const input = container.querySelector(
-        'input[placeholder="auto from prompt"]',
-      ) as HTMLInputElement | null;
-      expect(input?.value).toBe('Ember Duelist');
-    });
-    unmount();
-  });
-});
-
-describe('ImageLabView (headless)', () => {
-  vit('requires a source photo before generating', async () => {
-    const lab = ImageLabView.new();
-    await lab.generate();
-    expect(lab.note).toContain('photo first');
-    lab.set(null);
-  });
-
-  vit('generates via the app ImageProvider and stores into the injected library', async () => {
-    const generate = vi.fn((_input: GenerationInput) =>
-      Effect.succeed({ bytes: bytesOf('styled'), type: 'image/png', via: 'stub' as const }),
-    );
-    setAppLayer(
-      testAppLayerWith({ image: Layer.succeed(ImageProvider, ImageProvider.of({ generate })) }),
-    );
-    const lab = ImageLabView.new();
-    const library = ImageLibrary.new();
-    await vi.waitFor(() => {
-      expect(library.ready).toBe(true);
-    });
-    lab.acceptSource(bytesOf('face'), 'image/jpeg');
-    lab.prompt = 'as a noble knight';
-    await lab.generate(library);
-    expect(generate).toHaveBeenCalledOnce();
-    expect(library.images).toHaveLength(1);
-    expect(library.images[0]?.kind).toBe('generated');
-    expect(library.images[0]?.prompt).toContain('noble knight');
-    expect(lab.note).toContain('stub');
-    lab.set(null);
-    library.set(null);
   });
 });

@@ -1,17 +1,15 @@
 import { Component } from '@expressive/react';
 import { BuilderView } from '../builder/BuilderView';
 import { GalleryView } from '../gallery/GalleryView';
-import { ImageLabView } from '../images/ImageLabView';
 import { CardArchive, type StoredCard } from '../storage/CardArchive';
 import { ImageLibrary } from '../storage/ImageLibrary';
 import { TabBar } from '../ui';
 import { ActivityFeed } from './ActivityFeed';
 
-export type ViewId = 'builder' | 'images' | 'gallery';
+export type ViewId = 'builder' | 'gallery';
 
 const VIEW_TABS: readonly { id: ViewId; label: string }[] = [
   { id: 'builder', label: 'Builder' },
-  { id: 'images', label: 'Image Lab' },
   { id: 'gallery', label: 'Gallery' },
 ];
 
@@ -42,9 +40,6 @@ export class AppShell extends Component {
         <main className="min-h-0 flex-1">
           <Pane active={view === 'builder'}>
             <BuilderView />
-          </Pane>
-          <Pane active={view === 'images'}>
-            <ImageLabView />
           </Pane>
           <Pane active={view === 'gallery'}>
             <GalleryView />
