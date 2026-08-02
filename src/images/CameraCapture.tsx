@@ -1,4 +1,7 @@
 import { Component, ref } from '@expressive/react';
+import { Effect, Exit } from 'effect';
+import { runAppExit } from '../app/runtime';
+import { MediaError, noteFromCause } from '../contracts/errors';
 
 /** "Lock on to a webcam, take a pic" — stream starts on mount, stops on unmount. */
 export class CameraCapture extends Component {
@@ -18,16 +21,25 @@ export class CameraCapture extends Component {
       this.error = 'Camera unavailable in this environment.';
       return;
     }
-    media
-      .getUserMedia({ video: { facingMode: 'user' }, audio: false })
-      .then((stream) => {
-        this.#stream = stream;
+    // Snapshot getMedia result before async (snapshot rule).
+    const getUserMedia = media.getUserMedia.bind(media);
+    void runAppExit(
+      Effect.tryPromise({
+        try: () => getUserMedia({ video: { facingMode: 'user' }, audio: false }),
+        catch: (cause) =>
+          new MediaError({
+            detail: `Camera unavailable: ${cause instanceof Error ? cause.message : String(cause)}`,
+          }),
+      }),
+    ).then((exit) => {
+      if (Exit.isSuccess(exit)) {
+        this.#stream = exit.value;
         const el = this.video.current;
-        if (el) el.srcObject = stream;
-      })
-      .catch((cause: unknown) => {
-        this.error = `Camera unavailable: ${cause instanceof Error ? cause.message : String(cause)}`;
-      });
+        if (el) el.srcObject = exit.value;
+      } else {
+        this.error = noteFromCause(exit.cause);
+      }
+    });
     return () => {
       for (const track of this.#stream?.getTracks() ?? []) track.stop();
     };

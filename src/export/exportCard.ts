@@ -1,5 +1,7 @@
+import { Effect } from 'effect';
 import { toCanvas } from 'html-to-image';
 import { CARD_WIDTH, POINTER_VARS } from '../cards/base/CardSurface';
+import { ExportError } from '../contracts/errors';
 import type { ExportFormat } from '../storage/CardArchive';
 
 /** Prints must not depend on where the pointer happens to be — force rest state. */
@@ -154,37 +156,64 @@ export interface RenderOptions {
   createCanvas?: CanvasFactory;
 }
 
-function encode(canvas: HTMLCanvasElement, format: ExportFormat, quality: number): Promise<Blob> {
-  return new Promise<Blob>((resolve, reject) => {
-    canvas.toBlob(
-      (blob) => (blob ? resolve(blob) : reject(new Error(`could not encode ${format}`))),
-      FORMAT_MIME[format],
-      quality,
-    );
+function encode(
+  canvas: HTMLCanvasElement,
+  format: ExportFormat,
+  quality: number,
+): Effect.Effect<Blob, ExportError> {
+  return Effect.tryPromise({
+    try: () =>
+      new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob(
+          (blob) => (blob ? resolve(blob) : reject(new Error(`could not encode ${format}`))),
+          FORMAT_MIME[format],
+          quality,
+        );
+      }),
+    catch: (cause) =>
+      new ExportError({
+        detail: cause instanceof Error ? cause.message : `could not encode ${format}`,
+      }),
   });
 }
 
 /** Rasterize a card DOM node at print resolution and encode to the requested format. */
-export async function renderCardBlob(
+export function renderCardBlob(
   node: HTMLElement,
   format: ExportFormat,
   options: RenderOptions = {},
-): Promise<Blob> {
+): Effect.Effect<Blob, ExportError> {
   const { quality = 0.95, dpi = 300, bleed = false, createCanvas } = options;
-  clearInteractiveVars(node);
-  const canvas = await toCanvas(node, { pixelRatio: exportPixelRatio(node.offsetWidth, dpi) });
-  const composed = bleed ? composeBleed(canvas, dpi, createCanvas) : canvas;
-  return encode(composed, format, quality);
+  return Effect.gen(function* () {
+    clearInteractiveVars(node);
+    const canvas = yield* Effect.tryPromise({
+      try: () => toCanvas(node, { pixelRatio: exportPixelRatio(node.offsetWidth, dpi) }),
+      catch: (cause) =>
+        new ExportError({
+          detail: cause instanceof Error ? cause.message : 'could not rasterize card',
+        }),
+    });
+    const composed = bleed ? composeBleed(canvas, dpi, createCanvas) : canvas;
+    return yield* encode(composed, format, quality);
+  });
 }
 
 /** Rasterize the card once and tile it onto an A4 3×3 cut sheet (PNG-quality use case). */
-export async function renderSheetBlob(
+export function renderSheetBlob(
   node: HTMLElement,
   options: Pick<RenderOptions, 'createCanvas'> = {},
-): Promise<Blob> {
-  clearInteractiveVars(node);
-  const canvas = await toCanvas(node, { pixelRatio: exportPixelRatio(node.offsetWidth, 300) });
-  return encode(composeSheet(canvas, options.createCanvas), 'png', 0.95);
+): Effect.Effect<Blob, ExportError> {
+  return Effect.gen(function* () {
+    clearInteractiveVars(node);
+    const canvas = yield* Effect.tryPromise({
+      try: () => toCanvas(node, { pixelRatio: exportPixelRatio(node.offsetWidth, 300) }),
+      catch: (cause) =>
+        new ExportError({
+          detail: cause instanceof Error ? cause.message : 'could not rasterize card',
+        }),
+    });
+    return yield* encode(composeSheet(canvas, options.createCanvas), 'png', 0.95);
+  });
 }
 
 export function downloadUrl(url: string, fileName: string): void {

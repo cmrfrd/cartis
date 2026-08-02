@@ -1,4 +1,4 @@
-import { Effect, Layer } from 'effect';
+import { Effect, Either, Layer } from 'effect';
 import { describe, expect, it, vi } from 'vitest';
 import { mount, tick } from '../../test/util';
 import { setAppLayer, testAppLayerWith } from '../app/runtime';
@@ -86,8 +86,8 @@ describe('EditorView agent', () => {
 describe('Sandbox', () => {
   it('renders the compiled card', async () => {
     const result = compileCardSource('export default function C() { return <p>sandboxed</p> }');
-    if (!result.ok) throw new Error(result.error);
-    const { container, unmount } = mount(<Sandbox card={result.Card} />);
+    if (Either.isLeft(result)) throw new Error(result.left.detail);
+    const { container, unmount } = mount(<Sandbox card={result.right} />);
     await tick();
     expect(container.textContent).toContain('sandboxed');
     unmount();
@@ -98,8 +98,8 @@ describe('Sandbox', () => {
     const result = compileCardSource(
       'export default function Boom() { throw new Error("kaboom"); return null }',
     );
-    if (!result.ok) throw new Error(result.error);
-    const { container, unmount } = mount(<Sandbox card={result.Card} />);
+    if (Either.isLeft(result)) throw new Error(result.left.detail);
+    const { container, unmount } = mount(<Sandbox card={result.right} />);
     await vi.waitFor(() => {
       expect(container.textContent).toContain('kaboom');
     });

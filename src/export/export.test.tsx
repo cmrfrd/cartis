@@ -1,3 +1,4 @@
+import { Effect } from 'effect';
 import { describe, expect, it, vi } from 'vitest';
 import { CardArchive } from '../storage/CardArchive';
 import { ExportBar } from './ExportBar';
@@ -116,7 +117,7 @@ describe('bleed and sheet composition', () => {
 describe('renderCardBlob', () => {
   it('renders through html-to-image and converts to the requested mime', async () => {
     const node = document.createElement('div');
-    const blob = await renderCardBlob(node, 'webp');
+    const blob = await Effect.runPromise(renderCardBlob(node, 'webp'));
     expect(blob.type).toBe('image/webp');
     const { toCanvas } = await import('html-to-image');
     expect(vi.mocked(toCanvas)).toHaveBeenCalledWith(
@@ -128,7 +129,9 @@ describe('renderCardBlob', () => {
   it('composes bleed when requested', async () => {
     const { factory, calls } = fakeCanvasFactory();
     const node = document.createElement('div');
-    const blob = await renderCardBlob(node, 'png', { bleed: true, createCanvas: factory });
+    const blob = await Effect.runPromise(
+      renderCardBlob(node, 'png', { bleed: true, createCanvas: factory }),
+    );
     expect(blob.type).toBe('image/png');
     expect(calls.some((c) => c.startsWith('drawImage'))).toBe(true);
   });

@@ -1,3 +1,4 @@
+import { Effect } from 'effect';
 import { describe, expect, it } from 'vitest';
 import {
   frameLinenStyle,
@@ -25,7 +26,7 @@ describe('procedural textures', () => {
   });
 
   it('prepareTextures resolves even without canvas support (keeps svg fallback)', async () => {
-    await expect(prepareTextures()).resolves.toBeUndefined();
+    await expect(Effect.runPromise(prepareTextures())).resolves.toBeUndefined();
     for (const texture of Object.values(TEXTURES)) {
       expect(texture.startsWith('url("data:image/')).toBe(true);
     }

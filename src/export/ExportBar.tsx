@@ -1,5 +1,8 @@
 import { Component, get } from '@expressive/react';
+import { Exit } from 'effect';
 import { AppShell } from '../app/AppShell';
+import { runAppExit } from '../app/runtime';
+import { noteFromCause } from '../contracts/errors';
 import type { CardArchive, ExportFormat } from '../storage/CardArchive';
 import { Button, SelectInput } from '../ui';
 import type { ExportDpi } from './exportCard';
@@ -38,16 +41,20 @@ export class ExportBar extends Component {
       this.note = 'Nothing to export yet.';
       return;
     }
+    // Snapshot reactive fields before building the effect (snapshot rule).
+    const cardName = this.cardName;
+    const dpi = this.dpi;
+    const bleed = this.bleed;
     this.note = 'Rendering…';
+    const exit = await runAppExit(renderCardBlob(node, format, { dpi, bleed }));
+    if (Exit.isFailure(exit)) {
+      this.note = noteFromCause(exit.cause);
+      return;
+    }
+    const blob = exit.value;
+    const suffix = `${dpi === 600 ? '-600dpi' : ''}${bleed ? '-bleed' : ''}`;
     try {
-      const blob = await renderCardBlob(node, format, { dpi: this.dpi, bleed: this.bleed });
-      const suffix = `${this.dpi === 600 ? '-600dpi' : ''}${this.bleed ? '-bleed' : ''}`;
-      await this.#deliver(
-        blob,
-        exportFileName(this.cardName + suffix, format),
-        format,
-        intoArchive,
-      );
+      await this.#deliver(blob, exportFileName(cardName + suffix, format), format, intoArchive);
     } catch (cause) {
       this.note = cause instanceof Error ? cause.message : String(cause);
     }
@@ -60,15 +67,17 @@ export class ExportBar extends Component {
       this.note = 'Nothing to export yet.';
       return;
     }
+    // Snapshot reactive fields before building the effect (snapshot rule).
+    const cardName = this.cardName;
     this.note = 'Rendering sheet…';
+    const exit = await runAppExit(renderSheetBlob(node));
+    if (Exit.isFailure(exit)) {
+      this.note = noteFromCause(exit.cause);
+      return;
+    }
+    const blob = exit.value;
     try {
-      const blob = await renderSheetBlob(node);
-      await this.#deliver(
-        blob,
-        exportFileName(`${this.cardName}-sheet`, 'png'),
-        'png',
-        intoArchive,
-      );
+      await this.#deliver(blob, exportFileName(`${cardName}-sheet`, 'png'), 'png', intoArchive);
     } catch (cause) {
       this.note = cause instanceof Error ? cause.message : String(cause);
     }

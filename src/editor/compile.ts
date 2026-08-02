@@ -1,4 +1,5 @@
 import * as Expressive from '@expressive/react';
+import { Either } from 'effect';
 import type { ComponentType } from 'react';
 // Sanctioned react namespace imports: they exist solely to feed the Code Lab's
 // module map so user TSX can resolve its JSX runtime (see Global Constraints).
@@ -7,11 +8,10 @@ import * as JsxDevRuntime from 'react/jsx-dev-runtime';
 import * as JsxRuntime from 'react/jsx-runtime';
 import { transform } from 'sucrase';
 import * as Cards from '../cards';
+import { CompileError } from '../contracts/errors';
 import * as Ui from '../ui';
 
 export type CompiledCard = ComponentType<Record<string, unknown>>;
-
-export type CompileResult = { ok: true; Card: CompiledCard } | { ok: false; error: string };
 
 /** Namespace objects lack __esModule, which breaks sucrase's default-import interop; add it. */
 function asCjsModule(namespace: object): Record<string, unknown> {
@@ -39,7 +39,7 @@ function sandboxRequire(name: string): Record<string, unknown> {
   return found;
 }
 
-export function compileCardSource(source: string): CompileResult {
+export function compileCardSource(source: string): Either.Either<CompiledCard, CompileError> {
   let code: string;
   try {
     code = transform(source, {
@@ -48,7 +48,12 @@ export function compileCardSource(source: string): CompileResult {
       production: true,
     }).code;
   } catch (cause) {
-    return { ok: false, error: cause instanceof Error ? cause.message : String(cause) };
+    return Either.left(
+      new CompileError({
+        phase: 'transform',
+        detail: cause instanceof Error ? cause.message : String(cause),
+      }),
+    );
   }
 
   const moduleShim: { exports: Record<string, unknown> } = { exports: {} };
@@ -61,15 +66,22 @@ export function compileCardSource(source: string): CompileResult {
     ) => void;
     run(sandboxRequire, moduleShim, moduleShim.exports);
   } catch (cause) {
-    return { ok: false, error: cause instanceof Error ? cause.message : String(cause) };
+    return Either.left(
+      new CompileError({
+        phase: 'evaluate',
+        detail: cause instanceof Error ? cause.message : String(cause),
+      }),
+    );
   }
 
   const candidate = moduleShim.exports.default;
   if (typeof candidate !== 'function') {
-    return {
-      ok: false,
-      error: 'Module needs a component default export (export default function …)',
-    };
+    return Either.left(
+      new CompileError({
+        phase: 'shape',
+        detail: 'Module needs a component default export (export default function …)',
+      }),
+    );
   }
-  return { ok: true, Card: candidate as CompiledCard };
+  return Either.right(candidate as CompiledCard);
 }

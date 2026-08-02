@@ -27,6 +27,9 @@ describe('PhotoPicker', () => {
     expect(picker.reading).toBe(true);
     expect(onPhoto).not.toHaveBeenCalled();
 
+    // Effect boundary: file.arrayBuffer() is invoked after the runtime schedules
+    // the fiber — yield to the microtask queue so the fiber starts, then release.
+    await tick();
     release(bytesOf('photo'));
     await pending;
     expect(picker.reading).toBe(false);

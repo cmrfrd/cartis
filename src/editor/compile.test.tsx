@@ -1,3 +1,4 @@
+import { Either } from 'effect';
 import { describe, expect, it } from 'vitest';
 import { mount, tick } from '../../test/util';
 import { compileCardSource } from './compile';
@@ -11,8 +12,9 @@ describe('compileCardSource', () => {
         return <p>{title}</p>
       }
     `);
-    if (!result.ok) throw new Error(result.error);
-    const { container, unmount } = mount(<result.Card />);
+    if (Either.isLeft(result)) throw new Error(result.left.detail);
+    const Card = result.right;
+    const { container, unmount } = mount(<Card />);
     await tick();
     expect(container.textContent).toContain('Hand Rolled');
     unmount();
@@ -25,17 +27,20 @@ describe('compileCardSource', () => {
         return <ArcaneCard data={arcaneTemplate.defaults} />
       }
     `);
-    expect(result.ok).toBe(true);
+    expect(Either.isRight(result)).toBe(true);
   });
 
   it('compiles the starter source', () => {
-    expect(compileCardSource(STARTER_CARD_SOURCE).ok).toBe(true);
+    expect(Either.isRight(compileCardSource(STARTER_CARD_SOURCE))).toBe(true);
   });
 
   it('reports syntax errors as messages, not throws', () => {
     const result = compileCardSource('export default function Card() { return <p> }');
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error.length).toBeGreaterThan(0);
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) {
+      expect(result.left.phase).toBe('transform');
+      expect(result.left.detail.length).toBeGreaterThan(0);
+    }
   });
 
   it('rejects imports outside the allowed module map', () => {
@@ -44,13 +49,19 @@ describe('compileCardSource', () => {
       import fs from 'node:fs'
       export default function Card() { return <p>{String(fs)}</p> }
     `);
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error).toContain('node:fs');
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) {
+      expect(result.left.phase).toBe('evaluate');
+      expect(result.left.detail).toContain('node:fs');
+    }
   });
 
   it('rejects modules without a component default export', () => {
     const result = compileCardSource('export const nope = 1');
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error).toContain('default export');
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) {
+      expect(result.left.phase).toBe('shape');
+      expect(result.left.detail).toContain('default export');
+    }
   });
 });

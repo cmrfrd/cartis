@@ -1,3 +1,4 @@
+import { Effect } from 'effect';
 import type { CSSProperties } from 'react';
 
 /**
@@ -66,16 +67,24 @@ async function rasterizeToPng(cssUrl: string): Promise<string> {
  * Environments without canvas (tests) keep the SVG originals — fidelity there is
  * asserted visually, not in unit tests.
  */
-export async function prepareTextures(): Promise<void> {
-  await Promise.all(
-    (Object.keys(TEXTURES) as (keyof typeof TEXTURES)[]).map(async (key) => {
-      try {
-        TEXTURES[key] = await rasterizeToPng(TEXTURES[key]);
-      } catch {
-        // keep the SVG fallback
-      }
-    }),
-  );
+export function prepareTextures(): Effect.Effect<void> {
+  return Effect.all(
+    (Object.keys(TEXTURES) as (keyof typeof TEXTURES)[]).map((key) =>
+      Effect.tryPromise({
+        try: () => rasterizeToPng(TEXTURES[key]),
+        catch: (cause) => cause,
+      }).pipe(
+        Effect.tap((pngUrl) =>
+          Effect.sync(() => {
+            TEXTURES[key] = pngUrl;
+          }),
+        ),
+        Effect.catchAll(() => Effect.void), // keep the SVG fallback silently
+        Effect.asVoid,
+      ),
+    ),
+    { concurrency: 'unbounded' },
+  ).pipe(Effect.asVoid);
 }
 
 /** Plate material: parchment + grain, ink rim, bevel, drop shadow, and an

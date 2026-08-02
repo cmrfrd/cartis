@@ -1,4 +1,7 @@
 import { Component } from '@expressive/react';
+import { Effect, Exit } from 'effect';
+import { runAppExit } from '../app/runtime';
+import { MediaError, noteFromCause } from '../contracts/errors';
 import { Spinner } from '../ui';
 
 /**
@@ -11,16 +14,26 @@ export class PhotoPicker extends Component {
   note = '';
 
   async accept(file: File) {
+    // Snapshot reactive fields before building the effect (snapshot rule).
+    const onPhoto = this.onPhoto;
+    const type = file.type || 'image/png';
     this.reading = true;
     this.note = '';
-    try {
-      const bytes = await file.arrayBuffer();
-      this.onPhoto?.(bytes, file.type || 'image/png');
-    } catch (cause) {
-      this.note = cause instanceof Error ? cause.message : String(cause);
-    } finally {
-      this.reading = false;
+    const exit = await runAppExit(
+      Effect.tryPromise({
+        try: () => file.arrayBuffer(),
+        catch: (cause) =>
+          new MediaError({
+            detail: cause instanceof Error ? cause.message : String(cause),
+          }),
+      }),
+    );
+    if (Exit.isSuccess(exit)) {
+      onPhoto?.(exit.value, type);
+    } else {
+      this.note = noteFromCause(exit.cause);
     }
+    this.reading = false;
   }
 
   render() {

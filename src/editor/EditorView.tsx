@@ -1,5 +1,5 @@
 import { Component, ref } from '@expressive/react';
-import { Effect, Exit } from 'effect';
+import { Effect, Either, Exit } from 'effect';
 import { runAppExit } from '../app/runtime';
 import { noteFromCause } from '../contracts/errors';
 import { ExportBar } from '../export/ExportBar';
@@ -41,13 +41,15 @@ export class EditorView extends Component {
   }
 
   compileNow() {
-    const result = compileCardSource(this.source);
-    if (result.ok) {
-      this.card = result.Card;
-      this.compileError = '';
-    } else {
-      this.compileError = result.error;
-    }
+    Either.match(compileCardSource(this.source), {
+      onLeft: (err) => {
+        this.compileError = err.detail;
+      },
+      onRight: (Card) => {
+        this.card = Card;
+        this.compileError = '';
+      },
+    });
   }
 
   async runAgent() {
