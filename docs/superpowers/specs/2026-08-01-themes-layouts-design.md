@@ -233,6 +233,38 @@ generation does not move here).
 - Removals: no `src/editor` or `ImageLabView` references; AppShell renders two tabs.
 - Gate throughout: `bun run verify`.
 
+## Reference example: The Great Henge (north star for the fullart layout)
+
+![The Great Henge reference](../../reference/great-henge-reference.jpg)
+
+`docs/reference/great-henge-reference.jpg` is the user-supplied benchmark for what an
+arcane **fullart** card should be able to express: full-bleed painted art (mystical
+verdant henge, hooded figure), floating translucent plates — title + cost pips top,
+type-line plate ("Legendary Artifact") mid-low, multi-paragraph rules plate, collector
+strip bottom.
+
+Field mapping (how close the arcane fullart layout gets today):
+
+| Reference element | Arcane fullart argument |
+|---|---|
+| "The Great Henge" title | `name` |
+| Green world / green mana identity | `essence: 'verdant'` |
+| Cost `7 + G G` | `cost: 7` (single numeric pip model — no generic/colored split; accepted approximation) |
+| "Legendary Artifact" | `typeLine` |
+| Three rules paragraphs w/ inline symbols | `ability` (multi-line text; symbols as unicode glyphs, e.g. ⟳ ✦ — no inline icon rendering) |
+| No power/toughness | `showStats: false` |
+| Premium frame feel | `rarity: 'mythic'` |
+| "2026 Custom Proxy · QP • EN" | `collector` |
+| The henge art itself | AI-generated via the LLM-composed pipeline (verdant flavor, 3:4 aspect) |
+
+Known gaps, accepted: single-number cost pips; no inline mana-symbol glyphs in rules
+text. One **sanctioned render exception** to the renders-untouched rule: the fullart
+ability plate (`ArcaneFullArtCard.tsx:88`) needs `whitespace-pre-wrap` (the classic
+`ArcaneRulesBox` already has it, `parts.tsx:151`) so multi-paragraph rules render as
+paragraphs — without it the Henge's three rules blocks collapse into one line.
+Recreating this card end-to-end (fill → art → save → export) is the acceptance exercise
+for the whole redesign.
+
 ## Out of scope
 
 Runtime/data-defined themes and theme-authoring UI; card types; code-level layout

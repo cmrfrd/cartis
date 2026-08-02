@@ -1580,7 +1580,15 @@ Update the README to the two-tab app + themes/layouts + AI concepts, grep for de
   Fix any stragglers.
 - [ ] Run `bun run verify` — expect green.
 - [ ] Run `bun run build` — expect a clean compile smoke test.
+- [ ] **Sanctioned render exception** (spec §Reference example): add `whitespace-pre-wrap` to the fullart ability plate's className (`src/cards/arcane/ArcaneFullArtCard.tsx:88` — `font-card text-[13px] leading-snug text-white/95` → prepend `whitespace-pre-wrap`), matching classic's `ArcaneRulesBox` (`parts.tsx:151`), so multi-paragraph rules render as paragraphs. This is the ONLY card-TSX edit in the whole plan.
 - [ ] Dev-server e2e checklist (manual, `bun run dev` → http://localhost:5173): (1) new card renders the layout defaults with an EMPTY art placeholder; (2) a fill turn "rename him to Vorak" patches `name` only (other fields unchanged); (3) art Generate on the stub path (no `REPLICATE_API_TOKEN`) applies deterministic stub art and logs compose + generate activity events; (4) Save → Gallery → click the saved card → it reopens in the Builder (theme + layout + data), edit + re-save updates the SAME record (no duplicate); (5) the activity bar shows the compose/generate/fill events and the log drawer opens.
+- [ ] **Recreate The Great Henge** (the acceptance exercise — spec §Reference example, image at `docs/reference/great-henge-reference.jpg`): in the Builder pick arcane/fullart and fill (by AI or hand): name `The Great Henge`, essence `verdant`, cost `7`, typeLine `Legendary Artifact`, showStats off, rarity `mythic`, collector `2026 Custom Proxy · QP • EN`, ability (three paragraphs, unicode symbols):
+  ```
+  This spell costs ✦ less to cast, where ✦ is the greatest power among creatures you control.
+  ⟳: Add ●●. You gain 2 life.
+  Whenever a nontoken creature enters the battlefield under your control, put a +1/+1 counter on it and draw a card.
+  ```
+  Generate art (live token if available — expect a mystical verdant henge scene from the composed prompt; stub otherwise), save to gallery, export PNG. Compare side-by-side with the reference image; note remaining gaps (cost-pip model, no inline symbol icons) in the report — they are accepted, not defects.
 - [ ] Commit:
   ```
   docs: two-tab app, themes/layouts + AI concepts; dead-reference sweep + e2e checklist
