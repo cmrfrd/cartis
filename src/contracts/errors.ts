@@ -58,24 +58,10 @@ export class BodyError extends Data.TaggedError('BodyError')<{
 
 /** opencode agent contract violations. src/server/agentBridge.ts */
 export class AgentError extends Data.TaggedError('AgentError')<{
-  readonly reason: 'no-session-id' | 'no-code';
+  readonly reason: 'no-session-id';
 }> {
   override get message(): string {
-    const byReason: Record<AgentError['reason'], string> = {
-      'no-session-id': 'opencode session did not return an id',
-      'no-code': 'agent returned no code',
-    };
-    return byReason[this.reason];
-  }
-}
-
-/** Client-side agent request failures. src/editor/EditorView.tsx runAgent */
-export class AgentRequestError extends Data.TaggedError('AgentRequestError')<{
-  readonly status: number;
-  readonly detail?: string;
-}> {
-  override get message(): string {
-    return this.detail ?? `agent request failed (${this.status})`;
+    return 'opencode session did not return an id';
   }
 }
 
@@ -156,16 +142,6 @@ export class ImageBridgeError extends Data.TaggedError('ImageBridgeError')<{
 
 /** Card export/rasterization failures. src/export/exportCard.ts */
 export class ExportError extends Data.TaggedError('ExportError')<{
-  readonly detail: string;
-}> {
-  override get message(): string {
-    return this.detail;
-  }
-}
-
-/** Code Lab compile-pipeline failures. src/editor/compile.ts */
-export class CompileError extends Data.TaggedError('CompileError')<{
-  readonly phase: 'transform' | 'evaluate' | 'shape';
   readonly detail: string;
 }> {
   override get message(): string {

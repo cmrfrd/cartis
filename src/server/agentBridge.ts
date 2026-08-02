@@ -15,42 +15,14 @@ import {
 } from 'effect';
 import type { Plugin } from 'vite';
 import { ActivityEventJson } from '../contracts/activity.ts';
-import { AgentCardRequest, ImageGenerateRequest, StorePutRequest } from '../contracts/api.ts';
+import { ImageGenerateRequest, StorePutRequest } from '../contracts/api.ts';
 import { AgentError, NetworkError, ReplicateError } from '../contracts/errors.ts';
-import { PromptResult, SessionCreated } from '../contracts/opencode.ts';
+import { SessionCreated } from '../contracts/opencode.ts';
 import { Prediction, type PredictionT } from '../contracts/replicate.ts';
 import { bytesToDataUrl } from '../images/codec.ts';
 import { ActivityBus } from './activity.ts';
 import { makeBridgeRuntime, readBody, respond, sendJson } from './BridgeRuntime.ts';
 import { FileStore, type StoreName } from './fileStore.ts';
-
-// ---------- agent prompt ----------
-
-export const CARD_API_GUIDE = `You write TSX modules for Cartis, a trading-card builder.
-Rules:
-- Output a COMPLETE module whose default export is a card component.
-- Allowed imports ONLY: 'cartis/cards', 'cartis/ui', '@expressive/react'.
-- 'cartis/cards' exports: ArcaneCard (props: data, holo), CardSurface (375x525 surface, props: holo, frameClass),
-  HoloFoil, parts ArcaneTitleBar/ArcaneArtWindow/ArcaneTypeLine/ArcaneRulesBox/ArcaneStatBadge/ArcaneCostPips
-  (each takes a palette from paletteFor(essenceId)), paletteFor, ESSENCES, rarityFrom, arcaneTemplate.
-- Card data keys for ArcaneCard: name, essence (ember|tide|verdant|radiant|umbral|relic), cost (0-9),
-  typeLine, ability, flavor, might, ward, rarity (common|uncommon|rare|mythic), art (image url, optional).
-- Style with tailwind utility classNames. Do not use React hooks; expressive Component classes may be subclassed
-  (capital-letter methods of ArcaneCard are overridable subcomponents).
-- No placeholder comments; the module must compile standalone.
-- Reply with EXACTLY ONE fenced \`\`\`tsx code block containing the full revised module, nothing else.`;
-
-export function buildAgentPrompt(userPrompt: string, currentCode: string): string {
-  return [
-    CARD_API_GUIDE,
-    'Current module source:',
-    '```tsx',
-    currentCode,
-    '```',
-    'User request:',
-    userPrompt,
-  ].join('\n\n');
-}
 
 // ---------- opencode ----------
 
@@ -74,37 +46,7 @@ function envOption(name: string): Effect.Effect<Option.Option<string>> {
   );
 }
 
-const decodePromptOption = Schema.decodeUnknownOption(PromptResult);
 const decodeSessionOption = Schema.decodeUnknownOption(SessionCreated);
-
-/**
- * Extract card TSX from a prompt result. Reimplemented on the opencode contract
- * (`Schema.decodeUnknownOption`) + the existing fence regex; SAME signature and
- * behavior as today (its tests are the spec).
- */
-export function extractCode(result: unknown): string | undefined {
-  const decoded = decodePromptOption(result);
-  if (Option.isNone(decoded)) return undefined;
-  const value = decoded.value;
-  // `data` may wrap the payload, or the payload may be flat (result === data).
-  const data = value.data ?? value;
-  const structured =
-    data.info?.structured_output ?? data.structured_output ?? value.structured_output;
-  if (typeof structured?.code === 'string' && structured.code.trim().length > 0) {
-    return structured.code;
-  }
-  const parts = data.parts ?? value.parts;
-  if (parts) {
-    let text = '';
-    for (const part of parts) {
-      if (part.type === 'text' && typeof part.text === 'string') text += `\n${part.text}`;
-    }
-    const fences = [...text.matchAll(/```(?:tsx|jsx|typescript|ts)?\n([\s\S]*?)```/g)];
-    const last = fences[fences.length - 1]?.[1];
-    if (last && last.trim().length > 0) return last.trim();
-  }
-  return undefined;
-}
 
 export class AgentClient extends Context.Tag('cartis/AgentClient')<
   AgentClient,
@@ -165,51 +107,6 @@ export const agentClientLive: Layer.Layer<AgentClient> = Layer.effect(
     });
   }),
 );
-
-/**
- * Run the card agent: create a session, prompt it with a 5s heartbeat, extract
- * the code. Log messages are preserved verbatim from today's source.
- */
-export function runCardAgent(
-  userPrompt: string,
-  currentCode: string,
-): Effect.Effect<string, AgentError, AgentClient | ActivityBus> {
-  return Effect.gen(function* () {
-    const agent = yield* AgentClient;
-    const bus = yield* ActivityBus;
-    const startedAt = yield* Clock.currentTimeMillis;
-    const elapsed = Clock.currentTimeMillis.pipe(
-      Effect.map((now) => Math.round((now - startedAt) / 1000)),
-    );
-
-    yield* bus.emit(
-      'agent',
-      `request: “${userPrompt.slice(0, 80)}${userPrompt.length > 80 ? '…' : ''}”`,
-    );
-    const id = yield* agent.createSession('cartis card edit');
-    yield* bus.emit('agent', `session ${id} created — prompting model`);
-
-    const promptWithHeartbeat = Effect.scoped(
-      Effect.gen(function* () {
-        yield* Effect.forkScoped(
-          elapsed.pipe(
-            Effect.flatMap((secs) => bus.emit('agent', `still generating… (${secs}s)`)),
-            Effect.delay('5 seconds'),
-            Effect.forever,
-          ),
-        );
-        return yield* agent.prompt(id, buildAgentPrompt(userPrompt, currentCode));
-      }),
-    );
-    const result = yield* promptWithHeartbeat;
-
-    const code = extractCode(result);
-    if (!code) return yield* Effect.fail(new AgentError({ reason: 'no-code' }));
-    const secs = yield* elapsed;
-    yield* bus.emit('agent', `done in ${secs}s — ${String(code.length)} chars of card code`);
-    return code;
-  });
-}
 
 // ---------- replicate ----------
 
@@ -433,7 +330,6 @@ function parseStorePath(url: string): { store: StoreName; rest: string } | undef
 }
 
 const decodeStorePut = Schema.decodeUnknown(StorePutRequest);
-const decodeAgentCard = Schema.decodeUnknown(AgentCardRequest);
 const decodeImageGenerate = Schema.decodeUnknown(ImageGenerateRequest);
 const encodeActivity = Schema.encode(ActivityEventJson);
 
@@ -548,25 +444,6 @@ export function cartisBridge(): Plugin {
         void runtime.runPromise(envOption('REPLICATE_API_TOKEN')).then((token) => {
           sendJson(sres, 200, { image: Option.isSome(token) ? 'replicate' : 'stub' });
         });
-      });
-
-      // ----- /api/agent/card -----
-      server.middlewares.use('/api/agent/card', (req, res) => {
-        const sres = res as ServerResponse;
-        if (req.method !== 'POST') {
-          sendJson(sres, 405, { error: 'POST only' });
-          return;
-        }
-        respond(
-          runtime,
-          sres,
-          Effect.gen(function* () {
-            const body = yield* readBody(req);
-            const { prompt, code } = yield* decodeAgentCard(body);
-            const generated = yield* runCardAgent(prompt, code);
-            return { code: generated };
-          }),
-        );
       });
 
       // ----- /api/image/generate -----

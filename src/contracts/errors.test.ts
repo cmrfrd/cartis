@@ -3,7 +3,6 @@ import { describe, expect } from 'vitest';
 import { it } from '../../test/effect';
 import {
   AgentError,
-  CompileError,
   ExportError,
   MediaError,
   noteFromCause,
@@ -96,8 +95,6 @@ describe('effect toolchain canary', () => {
       const noSession = new AgentError({ reason: 'no-session-id' });
       expect(noSession._tag).toBe('AgentError');
       expect(noSession.message).toBe('opencode session did not return an id');
-      const noCode = new AgentError({ reason: 'no-code' });
-      expect(noCode.message).toBe('agent returned no code');
 
       const timeout = new ReplicateError({ reason: 'timeout' });
       expect(timeout._tag).toBe('ReplicateError');
@@ -117,13 +114,6 @@ describe('effect toolchain canary', () => {
       void new ReplicateError({ reason: 'create' });
       // @ts-expect-error 'poll' requires status
       void new ReplicateError({ reason: 'poll' });
-      const shape = new CompileError({
-        phase: 'shape',
-        detail: 'Module needs a component default export (export default function …)',
-      });
-      expect(shape.message).toBe(
-        'Module needs a component default export (export default function …)',
-      );
       const exportErr = new ExportError({ detail: 'canvas 2d unavailable' });
       expect(exportErr.message).toBe('canvas 2d unavailable');
       const media = new MediaError({ detail: 'Camera unavailable: denied' });
@@ -134,8 +124,8 @@ describe('effect toolchain canary', () => {
   it.effect('noteFromCause: failure / defect / interrupt', () =>
     Effect.gen(function* () {
       yield* Effect.void;
-      const failure = Cause.fail(new AgentError({ reason: 'no-code' }));
-      expect(noteFromCause(failure)).toBe('agent returned no code');
+      const failure = Cause.fail(new AgentError({ reason: 'no-session-id' }));
+      expect(noteFromCause(failure)).toBe('opencode session did not return an id');
 
       const defect = Cause.die(new Error('boom'));
       expect(noteFromCause(defect)).toBe('boom');

@@ -5,12 +5,12 @@
  * in src/server/agentBridge.ts:45-65 and the session-create path (~lines 68-110).
  *
  * Designed so `Schema.decodeUnknownOption` on these + the existing tsx-fence
- * regex can reimplement extractCode later — agentBridge.ts is NOT touched here.
+ * decoding of agent prompt results (fill-patch extraction reuses these shapes).
  *
  * Verified against agentBridge.ts:
  *   SessionCreated — lines 76-78:
  *     rec(rec(created)?.data) ?? rec(created)  then  createdData.id
- *   PromptResult   — lines 48-65 (extractCode):
+ *   PromptResult   — prompt-result payload walk:
  *     data.structured_output.code
  *     data.info.structured_output.code
  *     data.parts[].{ type: 'text', text }
@@ -47,7 +47,7 @@ export type SessionCreatedT = typeof SessionCreated.Type;
 // ---------------------------------------------------------------------------
 // PromptResult
 //
-// extractCode (agentBridge.ts:48-65) walks two nested paths:
+// Prompt-result consumers walk two nested paths:
 //
 // Path A — structured_output:
 //   rec(result).data.structured_output.code          (direct)
@@ -82,7 +82,7 @@ const PromptData = Schema.Struct({
 
 export const PromptResult = Schema.Struct({
   data: Schema.optional(PromptData),
-  // flat fallback — extractCode resolves `const data = value.data ?? value`, then
+  // flat fallback — consumers resolve `const data = value.data ?? value`, then
   // walks: `data.info?.structured_output ?? data.structured_output ?? value.structured_output`
   // so result itself may be the data object when there is no wrapper.
   structured_output: Schema.optional(StructuredOutput),

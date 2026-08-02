@@ -13,8 +13,6 @@ import { it } from '../../test/effect';
 import { AppHttpLive, httpClientFromHandler } from '../lib/http';
 import { ActivityEvent, ActivityEventJson } from './activity';
 import {
-  AgentCardRequest,
-  AgentCardResponse,
   ErrorBody,
   ImageGenerateRequest,
   ImageGenerateResponse,
@@ -445,23 +443,6 @@ describe('StatusResponse', () => {
   it('decodes stub status', () => {
     const decoded = Schema.decodeUnknownSync(StatusResponse)({ image: 'stub' });
     expect(decoded.image).toBe('stub');
-  });
-});
-
-describe('AgentCardRequest / AgentCardResponse', () => {
-  it('decodes request', () => {
-    const decoded = Schema.decodeUnknownSync(AgentCardRequest)({
-      prompt: 'make it holographic',
-      code: 'export default function Card() { return null; }',
-    });
-    expect(decoded.prompt).toBe('make it holographic');
-  });
-
-  it('decodes response', () => {
-    const decoded = Schema.decodeUnknownSync(AgentCardResponse)({
-      code: 'export default function Card() { return null; }',
-    });
-    expect(decoded.code).toContain('Card');
   });
 });
 

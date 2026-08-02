@@ -2,10 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { click, mountApp, tick } from '../../test/util';
 
 describe('AppShell', () => {
-  it('shows four view tabs and switches the visible pane', async () => {
+  it('shows three view tabs and switches the visible pane', async () => {
     const { container, shell, unmount } = await mountApp();
     expect(container.textContent).toContain('CARTIS');
-    for (const label of ['Builder', 'Code Lab', 'Image Lab', 'Gallery']) {
+    for (const label of ['Builder', 'Image Lab', 'Gallery']) {
       expect(container.textContent).toContain(label);
     }
     expect(shell.view).toBe('builder');
@@ -13,8 +13,8 @@ describe('AppShell', () => {
     await click(tabs.find((b) => b.textContent === 'Gallery') ?? null);
     expect(shell.view).toBe('gallery');
     const panes = Array.from(container.querySelectorAll('main > div'));
-    expect(panes).toHaveLength(4);
-    expect(panes.filter((p) => p.className.includes('hidden'))).toHaveLength(3);
+    expect(panes).toHaveLength(3);
+    expect(panes.filter((p) => p.className.includes('hidden'))).toHaveLength(2);
     // activity bar: idle by default, drawer opens with pushed events
     expect(container.textContent).toContain('AI activity');
     shell.activity.push({ at: Date.now(), source: 'image', message: 'prediction created' });

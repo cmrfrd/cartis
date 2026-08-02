@@ -36,7 +36,7 @@ describe('BuilderView', () => {
 
   it('toggles holo foil on the preview', async () => {
     const { container, unmount } = await mountApp();
-    // Scope to the visible pane — the hidden Code Lab pane keeps its own (holo) starter card mounted.
+    // Scope to the visible pane — hidden panes keep their own state mounted.
     const visiblePane = () => container.querySelector('main > div:not(.hidden)');
     expect(visiblePane()?.querySelector('[data-holo="true"]')).toBeNull();
     const holoButton = Array.from(container.querySelectorAll('button')).find((b) =>

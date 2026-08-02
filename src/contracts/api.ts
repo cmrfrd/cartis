@@ -1,10 +1,9 @@
 /**
- * Schema contracts for the 6 bridge HTTP routes.
+ * Schema contracts for the bridge HTTP routes.
  *
  * Verified against both ends:
  *   Server:  src/server/agentBridge.ts (route handlers)
- *   Clients: src/storage/StoreClient.ts, src/images/ImageProvider.ts,
- *            src/editor/AgentApi.ts
+ *   Clients: src/storage/StoreClient.ts, src/images/ImageProvider.ts
  */
 
 import { Schema } from 'effect';
@@ -45,25 +44,6 @@ export const StatusResponse = Schema.Struct({
   image: Schema.Literal('replicate', 'stub'),
 });
 export type StatusResponseT = typeof StatusResponse.Type;
-
-// ---------------------------------------------------------------------------
-// POST /api/agent/card
-//
-// Request:  AgentApi.ts: { prompt, code }
-//           agentBridge.ts: body.prompt, body.code
-// Response: agentBridge.ts: { code }
-// ---------------------------------------------------------------------------
-
-export const AgentCardRequest = Schema.Struct({
-  prompt: Schema.String,
-  code: Schema.String,
-});
-export type AgentCardRequestT = typeof AgentCardRequest.Type;
-
-export const AgentCardResponse = Schema.Struct({
-  code: Schema.String,
-});
-export type AgentCardResponseT = typeof AgentCardResponse.Type;
 
 // ---------------------------------------------------------------------------
 // POST /api/image/generate

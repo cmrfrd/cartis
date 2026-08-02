@@ -2,18 +2,17 @@
  * The browser-side Effect runtime and the test seam.
  *
  * `appLive` merges the app's live services (StoreClient, ImageProvider,
- * AgentApi, ActivityClient) over the live HTTP client. A single ManagedRuntime
+ * ActivityClient) over the live HTTP client. A single ManagedRuntime
  * backs `runApp`/`runAppExit`/`forkApp`; `setAppLayer` swaps in a different
  * layer (the tests install in-memory/stub services via `test/setup.ts`).
  *
- * `AppServices` is the seam Phase 4 widened to the full service union. Because
+ * `AppServices` is the seam through which the service union grows. Because
  * every caller reaches services through this runtime, widening the union here
  * does not reshape call sites.
  */
 
-import { Effect, Layer, ManagedRuntime } from 'effect';
-import { AgentRequestError } from '../contracts/errors';
-import { AgentApi, agentApiLive } from '../editor/AgentApi';
+import type { Effect } from 'effect';
+import { Layer, ManagedRuntime } from 'effect';
 import {
   type ImageProvider,
   imageProviderLive,
@@ -23,48 +22,32 @@ import { AppHttpLive } from '../lib/http';
 import { type StoreClient, storeClientLive, storeClientMemory } from '../storage/StoreClient';
 import { type ActivityClient, activityClientEmpty, activityClientLive } from './ActivityClient';
 
-/** The service surface the app's effects may require. Grows in Phase 4. */
-export type AppServices = StoreClient | ImageProvider | AgentApi | ActivityClient;
+/** The service surface the app's effects may require. */
+export type AppServices = StoreClient | ImageProvider | ActivityClient;
 
 /** Live app layer: real services over the live (fetch) HTTP client. */
 export const appLive: Layer.Layer<AppServices> = Layer.mergeAll(
   storeClientLive,
   imageProviderLive,
-  agentApiLive,
   activityClientLive,
 ).pipe(Layer.provide(AppHttpLive));
-
-/**
- * Test AgentApi: fails with AgentRequestError by default so tests that don't
- * install a success stub see the failure path. Tests needing success install
- * their own via `setAppLayer`.
- */
-const testAgentApiLayer: Layer.Layer<AgentApi> = Layer.succeed(
-  AgentApi,
-  AgentApi.of({
-    generateCard: () =>
-      Effect.fail(new AgentRequestError({ status: 0, detail: 'no agent in tests' })),
-  }),
-);
 
 /** Per-service test-layer overrides; each defaults to the standard test fake. */
 export interface TestAppOverrides {
   readonly store?: Layer.Layer<StoreClient>;
   readonly image?: Layer.Layer<ImageProvider>;
-  readonly agent?: Layer.Layer<AgentApi>;
   readonly activity?: Layer.Layer<ActivityClient>;
 }
 
 /**
  * Build a full test app layer from per-service overrides (each independent, so
  * no duplicate-tag merges). Store tests script the bridge via `store`; view
- * tests install recording fakes via `image`/`agent`/`activity`.
+ * tests install recording fakes via `image`/`activity`.
  */
 export function testAppLayerWith(overrides: TestAppOverrides = {}): Layer.Layer<AppServices> {
   return Layer.mergeAll(
     overrides.store ?? storeClientMemory,
     overrides.image ?? imageProviderStubLayer(),
-    overrides.agent ?? testAgentApiLayer,
     overrides.activity ?? activityClientEmpty,
   );
 }

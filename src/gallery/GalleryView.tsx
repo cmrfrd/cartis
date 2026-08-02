@@ -47,9 +47,7 @@ function GalleryExports() {
   const exports = shell?.archive.exports ?? [];
   const urls = shell?.archive.exportUrls ?? {};
   if (exports.length === 0) {
-    return (
-      <EmptyState message="No exported renders yet." hint="Export from the Builder or Code Lab." />
-    );
+    return <EmptyState message="No exported renders yet." hint="Export from the Builder." />;
   }
   return (
     <div className="grid grid-cols-3 gap-4 xl:grid-cols-5">

@@ -20,7 +20,7 @@ const MYTHIC_AURA =
 /**
  * The Arcane kit's card. The PascalCase methods here PASS the skills' extension test
  * (react/component.md): each is a renderer a subclass would genuinely replace — that is
- * the whole "build your own card style" story, in the Builder and the Code Lab alike:
+ * the whole "build your own card style" story in the Builder:
  *   class MyCard extends ArcaneCard { TitleBar = () => <div>custom</div> }
  * (Views elsewhere must NOT copy this pattern for mere implementation scoping.)
  */
