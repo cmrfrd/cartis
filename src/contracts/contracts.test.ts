@@ -92,26 +92,41 @@ describe('StoredRecord', () => {
 // ---------------------------------------------------------------------------
 
 describe('CardRecord', () => {
-  it('decodes a valid card', () => {
+  it('decodes a valid card with themeId + layoutId', () => {
     const raw = {
       id: 'card-1',
       name: 'Ember Sprite',
-      templateId: 'arcane-v1',
+      themeId: 'arcane',
+      layoutId: 'classic',
       holo: false,
       updatedAt: 1700000000,
       data: { name: 'Ember Sprite', cost: 3, holo: true, flavor: undefined },
     };
     const decoded = Schema.decodeUnknownSync(CardRecord)(raw);
-    expect(decoded.id).toBe('card-1');
+    expect(decoded.themeId).toBe('arcane');
+    expect(decoded.layoutId).toBe('classic');
     expect(decoded.data.cost).toBe(3);
     expect(decoded.data.flavor).toBeUndefined();
+  });
+
+  it('rejects an old templateId-only row (clean break, decision 2)', () => {
+    const legacy = {
+      id: 'old-1',
+      name: 'Legacy',
+      templateId: 'arcane-hero',
+      holo: false,
+      updatedAt: 1700000000,
+      data: {},
+    };
+    expect(() => Schema.decodeUnknownSync(CardRecord)(legacy)).toThrow();
   });
 
   it('rejects wrong-typed field (holo must be boolean)', () => {
     const bad = {
       id: 'card-2',
       name: 'Test',
-      templateId: 'arcane-v1',
+      themeId: 'arcane',
+      layoutId: 'classic',
       holo: 'yes', // wrong type
       updatedAt: 1700000000,
       data: {},

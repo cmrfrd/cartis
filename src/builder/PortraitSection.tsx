@@ -69,9 +69,12 @@ export class PortraitSection extends Component {
     // Snapshot reactive fields before building the effect (snapshot rule).
     const sourceType = this.pendingType;
     const fieldKey = this.fieldKey;
-    const prompt = buildPortraitPrompt(builder.template.artStylePrompt(builder.data), this.persona);
-    const styleId = builder.templateId;
-    const aspectRatio = builder.template.artAspect ?? 'match_input_image';
+    const themeArt = [builder.theme.lookAndFeel, builder.theme.artFlavor?.(builder.data) ?? '']
+      .filter((s) => s.length > 0)
+      .join(', ');
+    const prompt = buildPortraitPrompt(themeArt, this.persona);
+    const styleId = builder.themeId;
+    const aspectRatio = builder.layout.artAspect ?? 'match_input_image';
     const name = `${String(builder.data.name ?? 'card')} portrait`;
     this.busy = true;
     this.note = 'Generating portrait…';

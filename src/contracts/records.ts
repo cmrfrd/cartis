@@ -41,7 +41,9 @@ export type StoredRecordT = typeof StoredRecord.Type;
 // ---------------------------------------------------------------------------
 // CardRecord
 //
-// Mirrored from StoredCard (src/storage/CardArchive.ts:7-14).
+// Mirrored from StoredCard (src/storage/CardArchive.ts). A card names its
+// theme + layout; legacy templateId rows deliberately fail decode (clean
+// break, spec decision 2) and are dropped by the lenient list.
 // CardData = Record<string, FieldValue>; FieldValue = string | number | boolean | undefined
 // (src/cards/types.ts:4).
 // ---------------------------------------------------------------------------
@@ -51,7 +53,8 @@ const FieldValue = Schema.Union(Schema.String, Schema.Number, Schema.Boolean, Sc
 export const CardRecord = Schema.Struct({
   id: Schema.String,
   name: Schema.String,
-  templateId: Schema.String,
+  themeId: Schema.String,
+  layoutId: Schema.String,
   holo: Schema.Boolean,
   updatedAt: Schema.Number,
   data: Schema.Record({ key: Schema.String, value: FieldValue }),

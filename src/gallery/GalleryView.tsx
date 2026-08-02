@@ -146,12 +146,16 @@ function GalleryCards() {
           key={card.id}
           className="flex items-center justify-between rounded-lg border border-edge bg-panel px-4 py-2.5"
         >
-          <div className="min-w-0">
+          <button
+            type="button"
+            className="min-w-0 flex-1 text-left"
+            onClick={() => gallery.openCard(card)}
+          >
             <p className="truncate font-display text-sm">{card.name}</p>
             <p className="text-[11px] text-ink-dim">
-              {card.templateId} · {new Date(card.updatedAt).toLocaleString()}
+              {card.themeId} · {card.layoutId} · {new Date(card.updatedAt).toLocaleString()}
             </p>
-          </div>
+          </button>
           <div className="flex shrink-0 gap-1.5">
             <Button tone="ghost" onClick={() => gallery.openCard(card)}>
               Open in builder

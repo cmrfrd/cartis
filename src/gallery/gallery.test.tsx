@@ -11,7 +11,8 @@ describe('GalleryView', () => {
     });
     await shell.archive.saveCard({
       name: 'Stored Hero',
-      templateId: 'arcane-hero',
+      themeId: 'arcane',
+      layoutId: 'classic',
       data: { name: 'Stored Hero' },
       holo: false,
     });
@@ -55,7 +56,8 @@ describe('GalleryView', () => {
     });
     await shell.archive.saveCard({
       name: 'Round Trip',
-      templateId: 'arcane-hero',
+      themeId: 'arcane',
+      layoutId: 'classic',
       data: { name: 'Round Trip', essence: 'tide', ability: 'Draw a card.' },
       holo: true,
     });
@@ -78,6 +80,30 @@ describe('GalleryView', () => {
       expect(container.querySelector('[data-holo="true"]')).not.toBeNull();
     });
     expect(container.textContent).toContain('Round Trip');
+    unmount();
+  });
+
+  it('re-saving an opened card updates the same record', async () => {
+    const { shell, unmount } = await mountApp();
+    await vi.waitFor(() => expect(shell.archive.ready).toBe(true));
+    const first = await shell.archive.saveCard({
+      name: 'Once',
+      themeId: 'arcane',
+      layoutId: 'classic',
+      data: { name: 'Once' },
+      holo: false,
+    });
+    const again = await shell.archive.saveCard({
+      id: first.id,
+      name: 'Twice',
+      themeId: 'arcane',
+      layoutId: 'classic',
+      data: { name: 'Twice' },
+      holo: false,
+    });
+    expect(again.id).toBe(first.id);
+    expect(shell.archive.cards).toHaveLength(1);
+    expect(shell.archive.cards[0]?.name).toBe('Twice');
     unmount();
   });
 });

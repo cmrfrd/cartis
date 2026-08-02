@@ -12,10 +12,10 @@ const bytesOf = (text: string): ArrayBuffer => new TextEncoder().encode(text).bu
 describe('PortraitSection (headless)', () => {
   it('generates with the template style + persona prompt and assigns the image id to the card', async () => {
     const generate = vi.fn((input: GenerationInput) => {
-      expect(input.prompt).toContain('oil painting'); // template style
+      expect(input.prompt).toContain('oil'); // theme lookAndFeel
       expect(input.prompt).toContain('29'); // persona
       expect(input.prompt).toContain('chess');
-      expect(input.styleId).toBe('arcane-hero');
+      expect(input.styleId).toBe('arcane');
       return Effect.succeed({ bytes: bytesOf('styled'), type: 'image/png', via: 'stub' as const });
     });
     setAppLayer(

@@ -4,20 +4,20 @@ import { FieldRow, NumberInput, SelectInput, TextAreaInput, TextInput, ToggleInp
 import { BuilderView, PortraitSlot } from './BuilderView';
 
 /**
- * Schema-driven form for the active template. Contextual per the expressive
- * skills: reads BuilderView via .get() and writes through it directly.
+ * Schema-driven form for the active layout's arguments. Contextual per the
+ * expressive skills: reads BuilderView via .get() and writes through it directly.
  * Toggle fields render as optional-section groups: fields whose showIf points
  * at the toggle nest inside it and appear only while it is on.
  */
 export function FormRenderer() {
-  const { template, data } = BuilderView.get();
+  const { layout, data } = BuilderView.get();
   const toggleKeys = new Set(
-    template.fields.filter((spec) => spec.kind === 'toggle').map((spec) => spec.key),
+    layout.fields.filter((spec) => spec.kind === 'toggle').map((spec) => spec.key),
   );
-  const dependentsOf = (key: string) => template.fields.filter((spec) => spec.showIf?.key === key);
+  const dependentsOf = (key: string) => layout.fields.filter((spec) => spec.showIf?.key === key);
   return (
     <div className="flex flex-col gap-3">
-      {template.fields.map((spec) => {
+      {layout.fields.map((spec) => {
         // dependents of a toggle render inside their section, not in the main flow
         if (spec.showIf && toggleKeys.has(spec.showIf.key)) return null;
         // non-toggle conditions keep plain visibility semantics

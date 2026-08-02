@@ -87,7 +87,8 @@ describe('file store', () => {
         const card = {
           id: 'card-1234567',
           name: 'Nyra',
-          templateId: 'arcane-hero',
+          themeId: 'arcane',
+          layoutId: 'classic',
           data: { name: 'Nyra' },
           holo: true,
           updatedAt: 5,

@@ -22,9 +22,9 @@ describe('compileCardSource', () => {
 
   it('resolves imports from cartis/cards and @expressive/react', () => {
     const result = compileCardSource(`
-      import { ArcaneCard, arcaneTemplate } from 'cartis/cards'
+      import { ArcaneCard, arcaneTheme } from 'cartis/cards'
       export default function Card() {
-        return <ArcaneCard data={arcaneTemplate.defaults} />
+        return <ArcaneCard data={arcaneTheme.layouts[0].defaults} />
       }
     `);
     expect(Either.isRight(result)).toBe(true);

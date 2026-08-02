@@ -23,7 +23,8 @@ export type StoredExport = ExportRecordT;
 export interface SaveCardInput {
   id?: string;
   name: string;
-  templateId: string;
+  themeId: string;
+  layoutId: string;
   data: CardData;
   holo: boolean;
 }
@@ -69,7 +70,8 @@ export class CardArchive extends State {
     const card: StoredCard = {
       id: input.id ?? crypto.randomUUID(),
       name: input.name,
-      templateId: input.templateId,
+      themeId: input.themeId,
+      layoutId: input.layoutId,
       data: { ...input.data },
       holo: input.holo,
       updatedAt: Date.now(),

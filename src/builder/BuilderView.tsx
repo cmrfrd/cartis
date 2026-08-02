@@ -3,9 +3,8 @@ import { Component, get, ref } from '@expressive/react';
 // Safe: neither module touches the other's binding during module evaluation — only
 // inside method bodies at runtime, which ESM live bindings resolve correctly.
 import { AppShell } from '../app/AppShell';
-import { ArcaneCardBack } from '../cards/arcane/ArcaneCardBack';
-import { getTemplate, listTemplates } from '../cards/registry';
-import type { CardData, CardTemplate, FieldValue } from '../cards/types';
+import { getLayout, getTheme, listThemes } from '../cards/registry';
+import type { CardData, FieldValue, Layout, Theme } from '../cards/types';
 import { ExportBar } from '../export/ExportBar';
 import type { StoredCard } from '../storage/CardArchive';
 import { Button, Panel, PreviewStage, SelectInput } from '../ui';
@@ -14,7 +13,8 @@ import { PortraitSection } from './PortraitSection';
 
 export class BuilderView extends Component {
   shell = get(AppShell, false);
-  templateId = '';
+  themeId = '';
+  layoutId = '';
   data: CardData = {};
   holo = false;
   savedId?: string = undefined;
@@ -26,8 +26,8 @@ export class BuilderView extends Component {
   previewEl = ref<HTMLDivElement>();
 
   protected new() {
-    const first = listTemplates()[0];
-    if (first) this.pickTemplate(first.id);
+    const first = listThemes()[0];
+    if (first) this.pickTheme(first.id);
   }
 
   mount() {
@@ -44,15 +44,19 @@ export class BuilderView extends Component {
     return shell.set('pendingCard', consumePending);
   }
 
-  get template(): CardTemplate {
-    return getTemplate(this.templateId);
+  get theme(): Theme {
+    return getTheme(this.themeId);
+  }
+
+  get layout(): Layout {
+    return getLayout(this.themeId, this.layoutId);
   }
 
   /** Card data with image-library references resolved to displayable URLs (tracks library.urls transitively). */
   get resolved(): CardData {
     const urls = this.shell?.library.urls ?? {};
     const out: CardData = { ...this.data };
-    for (const field of this.template.fields) {
+    for (const field of this.layout.fields) {
       if (field.kind !== 'image') continue;
       const raw = out[field.key];
       const id = typeof raw === 'string' ? raw : '';
@@ -66,15 +70,32 @@ export class BuilderView extends Component {
     this.data = { ...this.data, [key]: value };
   }
 
-  pickTemplate(id: string) {
-    this.templateId = id;
-    this.data = { ...getTemplate(id).defaults };
+  /** Selecting a theme starts a fresh card: first layout, its defaults. */
+  pickTheme(id: string) {
+    this.themeId = id;
+    const first = getTheme(id).layouts[0];
+    this.layoutId = first?.id ?? '';
+    this.data = first ? { ...first.defaults } : {};
     this.savedId = undefined;
     this.savedNote = '';
   }
 
+  /** Switching layouts is lossless for shared argument keys — user data wins over defaults. */
+  pickLayout(id: string) {
+    const next = getLayout(this.themeId, id);
+    const keptKeys = new Set(next.fields.map((f) => f.key));
+    const preserved: CardData = {};
+    for (const [key, value] of Object.entries(this.data)) {
+      if (keptKeys.has(key)) preserved[key] = value;
+    }
+    // Seed defaults only for keys the user has no value for (keeps user data).
+    this.data = { ...next.defaults, ...preserved };
+    this.layoutId = id;
+  }
+
   loadCard(card: StoredCard) {
-    this.templateId = card.templateId;
+    this.themeId = card.themeId;
+    this.layoutId = card.layoutId;
     this.data = { ...card.data };
     this.holo = card.holo;
     this.savedId = card.id;
@@ -90,7 +111,8 @@ export class BuilderView extends Component {
     const saved = await shell.archive.saveCard({
       id: this.savedId,
       name: String(this.data.name ?? 'Untitled'),
-      templateId: this.templateId,
+      themeId: this.themeId,
+      layoutId: this.layoutId,
       data: this.data,
       holo: this.holo,
     });
@@ -111,16 +133,32 @@ export class BuilderView extends Component {
 /** Implementation scoping per the skills: freestanding function components + .get(),
  *  NOT subcomponent methods (those are reserved for extension points like ArcaneCard's). */
 function BuilderForm() {
-  const { is: builder, template, templateId, savedNote, portraitKey } = BuilderView.get();
+  const {
+    is: builder,
+    theme,
+    layout,
+    themeId,
+    layoutId,
+    savedNote,
+    portraitKey,
+  } = BuilderView.get();
   return (
     <aside className="flex w-96 shrink-0 flex-col gap-4 overflow-y-auto border-r border-edge p-4">
-      <Panel title="Template">
+      <Panel title="Theme">
         <SelectInput
-          value={templateId}
-          onValue={(id) => builder.pickTemplate(id)}
-          options={listTemplates().map((t) => ({ value: t.id, label: t.name }))}
+          value={themeId}
+          onValue={(id) => builder.pickTheme(id)}
+          options={listThemes().map((t) => ({ value: t.id, label: t.name }))}
         />
-        <p className="mt-2 text-xs text-ink-dim">{template.description}</p>
+        <p className="mt-2 text-xs text-ink-dim">{theme.description}</p>
+      </Panel>
+      <Panel title="Layout">
+        <SelectInput
+          value={layoutId}
+          onValue={(id) => builder.pickLayout(id)}
+          options={theme.layouts.map((l) => ({ value: l.id, label: l.name }))}
+        />
+        <p className="mt-2 text-xs text-ink-dim">{layout.description}</p>
       </Panel>
       <Panel title="Details">
         <FormRenderer />
@@ -161,14 +199,24 @@ export function PortraitSlot(props: { fieldKey: string }) {
 }
 
 function BuilderPreview() {
-  const { is: builder, template, resolved, holo, data, previewEl, showBack } = BuilderView.get();
-  const Render = template.Render;
+  const {
+    is: builder,
+    theme,
+    layout,
+    resolved,
+    holo,
+    data,
+    previewEl,
+    showBack,
+  } = BuilderView.get();
+  const Render = layout.Render;
+  const CardBack = theme.CardBack;
   return (
     <section className="flex min-w-0 flex-1 items-center justify-center overflow-auto p-6">
       <div className="flex flex-col items-center gap-4">
         <PreviewStage>
           <div ref={previewEl}>
-            {showBack ? <ArcaneCardBack holo={holo} /> : <Render data={resolved} holo={holo} />}
+            {showBack ? <CardBack holo={holo} /> : <Render data={resolved} holo={holo} />}
           </div>
         </PreviewStage>
         <div className="flex items-center gap-3">

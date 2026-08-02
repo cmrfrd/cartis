@@ -33,23 +33,6 @@ export type FieldSpec = (
 export type CardRenderProps = { data?: CardData; holo?: boolean };
 export type CardRenderer = ComponentType<CardRenderProps>;
 
-/**
- * A registered card definition: what the Builder's form edits (fields/defaults),
- * how the AI image pipeline should style portraits (artStylePrompt), and how it renders.
- */
-export interface CardTemplate {
-  id: string;
-  kitId: string;
-  name: string;
-  description: string;
-  fields: readonly FieldSpec[];
-  defaults: CardData;
-  artStylePrompt: (data: CardData) => string;
-  /** Preferred replicate aspect for this template's art slot (e.g. '3:2'). */
-  artAspect?: string;
-  Render: CardRenderer;
-}
-
 /** A card face: how theme components organize into a layout, parameterized by arguments. */
 export interface Layout {
   id: string;

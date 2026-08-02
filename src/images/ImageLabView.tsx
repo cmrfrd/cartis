@@ -2,7 +2,7 @@ import { Component, get } from '@expressive/react';
 import { Effect, Exit } from 'effect';
 import { AppShell } from '../app/AppShell';
 import { runAppExit } from '../app/runtime';
-import { getTemplate, listTemplates } from '../cards/registry';
+import { getTheme, listThemes } from '../cards/registry';
 import { noteFromCause } from '../contracts/errors';
 import type { ImageLibrary } from '../storage/ImageLibrary';
 import { Button, EmptyState, FieldRow, Panel, SelectInput, TextAreaInput, TextInput } from '../ui';
@@ -47,8 +47,11 @@ export class ImageLabView extends Component {
       this.styleId === 'freestyle'
         ? ''
         : (() => {
-            const t = getTemplate(this.styleId);
-            return t.artStylePrompt(t.defaults);
+            const t = getTheme(this.styleId);
+            const defaults = t.layouts[0]?.defaults ?? {};
+            return [t.lookAndFeel, t.artFlavor?.(defaults) ?? '']
+              .filter((s) => s.length > 0)
+              .join(', ');
           })();
     return [base, this.prompt.trim()].filter((s) => s.length > 0).join(', ');
   }
@@ -163,7 +166,7 @@ function LabControls() {
   const { is: lab, styleId, prompt, imageName, aspectRatio, busy, note } = ImageLabView.get();
   const styleOptions = [
     { value: 'freestyle', label: 'Freestyle prompt' },
-    ...listTemplates().map((t) => ({ value: t.id, label: `${t.name} style` })),
+    ...listThemes().map((t) => ({ value: t.id, label: `${t.name} style` })),
   ];
   return (
     <Panel title="Generation">
@@ -174,7 +177,7 @@ function LabControls() {
             onValue={(v) => {
               lab.styleId = v;
               if (v !== 'freestyle') {
-                const aspect = getTemplate(v).artAspect;
+                const aspect = getTheme(v).layouts[0]?.artAspect;
                 if (aspect) lab.aspectRatio = aspect;
               }
             }}

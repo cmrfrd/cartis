@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { mount, tick } from '../../../test/util';
-import { getTemplate } from '../registry';
+import { getLayout, getTheme } from '../registry';
 import { ArcaneCard } from './ArcaneCard';
 import { EssenceGlyph } from './glyphs';
 import { ESSENCES, paletteFor } from './palette';
 import { rarityGemStyle } from './parts';
-import { arcaneTemplate } from './template';
+import { arcaneFields, arcaneTheme } from './theme';
+
+const classicDefaults = arcaneTheme.layouts[0]?.defaults ?? {};
 
 describe('arcane palette', () => {
   it('resolves known essences and falls back to relic', () => {
@@ -14,28 +16,27 @@ describe('arcane palette', () => {
   });
 });
 
-describe('arcane template', () => {
+describe('arcane theme', () => {
   it('is registered by test setup', () => {
-    expect(getTemplate('arcane-hero').kitId).toBe('arcane');
+    expect(getTheme('arcane').name).toBe('Arcane');
   });
 
   it('provides defaults for every non-image field', () => {
-    for (const field of arcaneTemplate.fields) {
+    const classic = getLayout('arcane', 'classic');
+    for (const field of classic.fields) {
       if (field.kind === 'image') continue;
-      expect(arcaneTemplate.defaults[field.key], `default for ${field.key}`).toBeDefined();
+      expect(classic.defaults[field.key], `default for ${field.key}`).toBeDefined();
     }
   });
 
-  it('bakes the essence art flavor into the style prompt', () => {
-    const prompt = arcaneTemplate.artStylePrompt({ essence: 'tide' });
-    expect(prompt).toContain(paletteFor('tide').artFlavor);
-    expect(prompt.toLowerCase()).toContain('portrait');
+  it('shares one field list across layouts', () => {
+    expect(getLayout('arcane', 'fullart').fields).toBe(arcaneFields);
   });
 });
 
 describe('ArcaneCard', () => {
   it('renders name, type line, rules, and stats from data', async () => {
-    const { container, unmount } = mount(<ArcaneCard data={arcaneTemplate.defaults} />);
+    const { container, unmount } = mount(<ArcaneCard data={classicDefaults} />);
     await tick();
     const text = container.textContent ?? '';
     expect(text).toContain('Nyra, Ember Sage');
@@ -48,14 +49,14 @@ describe('ArcaneCard', () => {
   });
 
   it('shows holo foil when enabled', async () => {
-    const { container, unmount } = mount(<ArcaneCard data={arcaneTemplate.defaults} holo />);
+    const { container, unmount } = mount(<ArcaneCard data={classicDefaults} holo />);
     await tick();
     expect(container.querySelector('[data-holo="true"]')).not.toBeNull();
     unmount();
   });
 
   it('renders identity details: watermark, set symbol, filigree, collector strip', async () => {
-    const { container, unmount } = mount(<ArcaneCard data={arcaneTemplate.defaults} />);
+    const { container, unmount } = mount(<ArcaneCard data={classicDefaults} />);
     await tick();
     expect(container.querySelector('[data-testid="watermark"]')).not.toBeNull();
     expect(
@@ -72,7 +73,7 @@ describe('ArcaneCard', () => {
 describe('optional card sections', () => {
   it('hides the stat badge when showStats is false', async () => {
     const { container, unmount } = mount(
-      <ArcaneCard data={{ ...arcaneTemplate.defaults, showStats: false }} />,
+      <ArcaneCard data={{ ...classicDefaults, showStats: false }} />,
     );
     await tick();
     expect(container.querySelector('[data-testid="stat-badge"]')).toBeNull();
@@ -80,7 +81,7 @@ describe('optional card sections', () => {
   });
 
   it('keeps the stat badge for cards saved before the toggle existed', async () => {
-    const { showStats: _omit, ...legacy } = arcaneTemplate.defaults;
+    const { showStats: _omit, ...legacy } = classicDefaults;
     const { container, unmount } = mount(<ArcaneCard data={legacy} />);
     await tick();
     expect(container.querySelector('[data-testid="stat-badge"]')).not.toBeNull();
@@ -89,7 +90,7 @@ describe('optional card sections', () => {
 
   it('hides type line and collector strip when their fields are empty', async () => {
     const { container, unmount } = mount(
-      <ArcaneCard data={{ ...arcaneTemplate.defaults, typeLine: '', collector: '  ' }} />,
+      <ArcaneCard data={{ ...classicDefaults, typeLine: '', collector: '  ' }} />,
     );
     await tick();
     expect(container.querySelector('[data-testid="rarity-gem"]')).toBeNull();
@@ -99,15 +100,15 @@ describe('optional card sections', () => {
 });
 
 describe('full-art template and card back', () => {
-  it('registers the showcase template alongside the classic frame', () => {
-    expect(getTemplate('arcane-hero-fullart').Render).toBeDefined();
-    expect(getTemplate('arcane-hero-fullart').fields).toEqual(arcaneTemplate.fields);
+  it('registers the fullart layout alongside the classic frame', () => {
+    expect(getLayout('arcane', 'fullart').Render).toBeDefined();
+    expect(getLayout('arcane', 'fullart').fields).toBe(arcaneFields);
   });
 
   it('renders full-bleed art layer with floating plates', async () => {
     const { ArcaneFullArtCard } = await import('./ArcaneFullArtCard');
     const { container, unmount } = mount(
-      <ArcaneFullArtCard data={{ ...arcaneTemplate.defaults, name: 'Nyra, Unbound' }} />,
+      <ArcaneFullArtCard data={{ ...classicDefaults, name: 'Nyra, Unbound' }} />,
     );
     await tick();
     expect(container.querySelector('[data-testid="fullart-art"]')).not.toBeNull();
@@ -125,16 +126,12 @@ describe('full-art template and card back', () => {
     expect(container.querySelectorAll('[data-testid="filigree"]').length).toBe(4);
     unmount();
   });
-
-  it('bakes canvas texture into the art prompt', () => {
-    expect(arcaneTemplate.artStylePrompt({})).toContain('oil brushwork');
-  });
 });
 
 describe('foil variants and mythic aura', () => {
   it('selects the etched foil layer from card data', async () => {
     const { container, unmount } = mount(
-      <ArcaneCard data={{ ...arcaneTemplate.defaults, foilStyle: 'etched' }} holo />,
+      <ArcaneCard data={{ ...classicDefaults, foilStyle: 'etched' }} holo />,
     );
     await tick();
     expect(container.querySelector('[data-holo-variant="etched"]')).not.toBeNull();
@@ -142,7 +139,7 @@ describe('foil variants and mythic aura', () => {
   });
 
   it('defaults to the full-gloss foil layer', async () => {
-    const { container, unmount } = mount(<ArcaneCard data={arcaneTemplate.defaults} holo />);
+    const { container, unmount } = mount(<ArcaneCard data={classicDefaults} holo />);
     await tick();
     expect(container.querySelector('[data-holo-variant="full"]')).not.toBeNull();
     unmount();
@@ -150,7 +147,7 @@ describe('foil variants and mythic aura', () => {
 
   it('gives mythic cards a prismatic aura', async () => {
     const { container, unmount } = mount(
-      <ArcaneCard data={{ ...arcaneTemplate.defaults, rarity: 'mythic' }} />,
+      <ArcaneCard data={{ ...classicDefaults, rarity: 'mythic' }} />,
     );
     await tick();
     const root = container.querySelector('[data-card-root="true"]') as HTMLElement;

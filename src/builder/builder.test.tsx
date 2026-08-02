@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { click, mountApp, setInput, tick } from '../../test/util';
+import { BuilderView } from './BuilderView';
 
 describe('BuilderView', () => {
   it('renders the arcane form from its schema with defaults applied', async () => {
@@ -92,9 +93,29 @@ describe('BuilderView', () => {
       expect(shell.archive.cards).toHaveLength(1);
     });
     expect(shell.archive.cards[0]?.name).toBe('Nyra, Ember Sage');
-    expect(shell.archive.cards[0]?.templateId).toBe('arcane-hero');
+    expect(shell.archive.cards[0]?.themeId).toBe('arcane');
+    expect(shell.archive.cards[0]?.layoutId).toBe('classic');
     await tick();
     expect(container.textContent).toContain('Saved');
     unmount();
+  });
+
+  it('preserves overlapping field values and user data across a layout switch', () => {
+    const builder = BuilderView.new();
+    builder.setField('name', 'Custom Hero');
+    builder.setField('ability', 'Draw two cards.');
+    builder.pickLayout('fullart');
+    expect(builder.layoutId).toBe('fullart');
+    expect(builder.data.name).toBe('Custom Hero'); // shared key preserved
+    expect(builder.data.ability).toBe('Draw two cards.');
+    builder.set(null);
+  });
+
+  it('seeds defaults only for a fresh card, not when switching layouts with edits', () => {
+    const builder = BuilderView.new();
+    builder.setField('name', 'Edited');
+    builder.pickLayout('fullart');
+    expect(builder.data.name).toBe('Edited'); // NOT reset to the fullart default
+    builder.set(null);
   });
 });

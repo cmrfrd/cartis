@@ -55,15 +55,23 @@ describe('CardArchive', () => {
     await ready(archive);
     const first = await archive.saveCard({
       name: 'One',
-      templateId: 't',
+      themeId: 't',
+      layoutId: 'l',
       data: { name: 'One' },
       holo: false,
     });
-    await archive.saveCard({ name: 'Two', templateId: 't', data: { name: 'Two' }, holo: true });
+    await archive.saveCard({
+      name: 'Two',
+      themeId: 't',
+      layoutId: 'l',
+      data: { name: 'Two' },
+      holo: true,
+    });
     const updated = await archive.saveCard({
       id: first.id,
       name: 'One v2',
-      templateId: 't',
+      themeId: 't',
+      layoutId: 'l',
       data: { name: 'One v2' },
       holo: false,
     });
@@ -98,12 +106,13 @@ describe('CardArchive', () => {
     const good = {
       id: 'good',
       name: 'Good',
-      templateId: 't',
+      themeId: 't',
+      layoutId: 'l',
       holo: false,
       updatedAt: 100,
       data: {},
     };
-    const bad = { id: 'bad', name: 'Bad', templateId: 't', holo: false, data: {} }; // no updatedAt
+    const bad = { id: 'bad', name: 'Bad', themeId: 't', layoutId: 'l', holo: false, data: {} }; // no updatedAt
     const handler = (req: HttpClientRequest.HttpClientRequest): Response => {
       if (req.method === 'GET' && req.url.endsWith('/api/store/cards')) {
         return new Response(JSON.stringify([good, bad]), {
