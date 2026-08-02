@@ -1,8 +1,9 @@
-import { Effect, Layer } from 'effect';
+import { Effect, Layer, Schema } from 'effect';
 import { describe, expect, vi, it as vit } from 'vitest';
 import { it } from '../../test/effect';
 import { mount, tick } from '../../test/util';
 import { setAppLayer, testAppLayerWith } from '../app/runtime';
+import { ImageGenerateRequest } from '../contracts/api';
 import { httpClientFromHandler } from '../lib/http';
 import { ImageLibrary } from '../storage/ImageLibrary';
 import { CameraCapture } from './CameraCapture';
@@ -89,6 +90,26 @@ describe('ImageProvider (Live)', () => {
       );
     }).pipe(Effect.provide(layer));
   });
+
+  it.effect('forwards themeContext + argumentValues + brief on the generate wire', () =>
+    Effect.gen(function* () {
+      const wire = yield* Schema.encode(ImageGenerateRequest)({
+        prompt: 'p',
+        imageDataUrl: 'data:image/png;base64,QQ==',
+        aspectRatio: '3:4',
+        themeContext: { lookAndFeel: 'oil', palette: 'ember', argumentSummary: 'name' },
+        argumentValues: { name: 'Nyra' },
+        brief: 'angrier',
+        editCurrentArt: true,
+        currentArtFileName: 'nyra-abc123.png',
+      });
+      expect(wire.themeContext?.lookAndFeel).toBe('oil');
+      expect(wire.argumentValues?.name).toBe('Nyra');
+      expect(wire.brief).toBe('angrier');
+      expect(wire.editCurrentArt).toBe(true);
+      expect(wire.currentArtFileName).toBe('nyra-abc123.png');
+    }),
+  );
 
   it.effect('falls back to stub (no generate POST) when /api/status fails', () => {
     const posted: string[] = [];

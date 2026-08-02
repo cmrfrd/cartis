@@ -7,8 +7,6 @@ import { CameraCapture } from '../images/CameraCapture';
 import { bytesToDataUrl } from '../images/codec';
 import { ImageProvider } from '../images/ImageProvider';
 import { PhotoPicker } from '../images/PhotoPicker';
-import type { Persona } from '../images/prompt';
-import { buildPortraitPrompt } from '../images/prompt';
 import type { ImageLibrary } from '../storage/ImageLibrary';
 import { Button, FieldRow, Panel, TextInput } from '../ui';
 // Deliberate module cycle with BuilderView (it renders PortraitSection) — benign, see BuilderView.tsx.
@@ -20,27 +18,30 @@ const SOURCES = [
   { id: 'library', label: 'Library' },
 ] as const;
 
+/**
+ * Text-first art tools (spec §Builder): the default path composes art purely
+ * from the layout's argument values + theme context (empty art placeholder
+ * until asked); attaching a photo is the optional steering variant.
+ */
 export class PortraitSection extends Component {
   builder = get(BuilderView, false);
   shell = get(AppShell, false);
   fieldKey = '';
-  source: 'upload' | 'camera' | 'library' = 'upload';
-  persona: Persona = {};
+  /** 'none' = text-first (no photo attach open). */
+  source: 'none' | 'upload' | 'camera' | 'library' = 'none';
+  /** Optional emphasis folded into the LLM prompt composition. */
+  brief = '';
   pendingBytes?: ArrayBuffer = undefined;
   pendingType = '';
   pendingPreview = '';
   busy = false;
   note = '';
 
-  acceptSource(bytes: ArrayBuffer, type: string) {
+  attachPhoto(bytes: ArrayBuffer, type: string) {
     this.pendingBytes = bytes;
     this.pendingType = type;
     this.pendingPreview = bytesToDataUrl(bytes, type);
     this.note = '';
-  }
-
-  setPersona(key: keyof Persona, value: string) {
-    this.persona = { ...this.persona, [key]: value };
   }
 
   applyLibraryImage(id: string) {
@@ -49,13 +50,8 @@ export class PortraitSection extends Component {
   }
 
   /** `deps` is the DI seam for headless tests; context supplies the defaults. */
-  async generate(deps: { builder?: BuilderView; library?: ImageLibrary } = {}) {
+  async generateArt(deps: { builder?: BuilderView; library?: ImageLibrary } = {}) {
     if (this.busy) return;
-    const bytes = this.pendingBytes;
-    if (!bytes) {
-      this.note = 'Capture or upload a photo first.';
-      return;
-    }
     const builder = deps.builder ?? this.builder;
     if (!builder) {
       this.note = 'Builder unavailable.';
@@ -67,21 +63,44 @@ export class PortraitSection extends Component {
       return;
     }
     // Snapshot reactive fields before building the effect (snapshot rule).
-    const sourceType = this.pendingType;
     const fieldKey = this.fieldKey;
-    const themeArt = [builder.theme.lookAndFeel, builder.theme.artFlavor?.(builder.data) ?? '']
-      .filter((s) => s.length > 0)
-      .join(', ');
-    const prompt = buildPortraitPrompt(themeArt, this.persona);
+    const brief = this.brief.trim();
+    const bytes = this.pendingBytes;
+    const sourceType = this.pendingType;
+    const theme = builder.theme;
+    const layout = builder.layout;
+    const argumentValues: Record<string, string> = {};
+    for (const field of layout.fields) {
+      if (field.kind === 'image') continue;
+      const v = builder.data[field.key];
+      if (v !== undefined && v !== '') argumentValues[field.key] = String(v);
+    }
+    const themeContext = {
+      lookAndFeel: theme.lookAndFeel,
+      palette: theme.artFlavor?.(builder.data) ?? '',
+      argumentSummary: layout.fields
+        .filter((f) => f.kind !== 'image')
+        .map((f) => f.key)
+        .join(', '),
+    };
     const styleId = builder.themeId;
-    const aspectRatio = builder.layout.artAspect ?? 'match_input_image';
-    const name = `${String(builder.data.name ?? 'card')} portrait`;
+    const aspectRatio = layout.artAspect ?? 'match_input_image';
+    const name = `${String(builder.data.name ?? 'card')} art`;
     this.busy = true;
-    this.note = 'Generating portrait…';
+    this.note = 'Generating art…';
     try {
       const exit = await runAppExit(
         Effect.flatMap(ImageProvider, (p) =>
-          p.generate({ sourceBytes: bytes, sourceType, prompt, styleId, aspectRatio }),
+          p.generate({
+            sourceBytes: bytes ?? new ArrayBuffer(0),
+            sourceType: bytes ? sourceType : 'application/octet-stream',
+            prompt: theme.lookAndFeel,
+            styleId,
+            aspectRatio,
+            themeContext,
+            argumentValues,
+            brief: brief.length > 0 ? brief : undefined,
+          }),
         ),
       );
       if (Exit.isFailure(exit)) {
@@ -92,13 +111,13 @@ export class PortraitSection extends Component {
       const stored = await library.add({
         name,
         kind: 'generated',
-        prompt,
+        prompt: brief.length > 0 ? brief : theme.lookAndFeel,
         styleId,
         bytes: out.bytes,
         type: out.type,
       });
       builder.setField(fieldKey, stored.id);
-      this.note = `Portrait applied (via ${out.via}).`;
+      this.note = `Art applied (via ${out.via}).`;
     } catch (cause) {
       this.note = cause instanceof Error ? cause.message : String(cause);
     } finally {
@@ -109,15 +128,23 @@ export class PortraitSection extends Component {
   render() {
     const { busy, note } = this;
     return (
-      <Panel title="Portrait" className="border-accent-soft">
+      <Panel title="Art" className="border-accent-soft">
         <div className="flex flex-col gap-3">
-          <PortraitSourcePicker />
-          <PortraitPersonaForm />
+          <FieldRow label="Art brief (optional)">
+            <TextInput
+              value={this.brief}
+              onValue={(v) => {
+                this.brief = v;
+              }}
+              placeholder="a phoenix over her shoulder"
+            />
+          </FieldRow>
           <div className="flex items-center gap-3">
-            <Button disabled={busy} onClick={() => void this.generate()}>
-              {busy ? 'Generating…' : 'Generate portrait'}
+            <Button disabled={busy} onClick={() => void this.generateArt()}>
+              {busy ? 'Generating…' : 'Generate art'}
             </Button>
           </div>
+          <ArtSourcePicker />
           {note && <p className="text-xs text-ink-dim">{note}</p>}
         </div>
       </Panel>
@@ -125,18 +152,20 @@ export class PortraitSection extends Component {
   }
 }
 
-function PortraitSourcePicker() {
+/** Secondary affordance: attach a photo (upload/camera) to steer, or pick from the library. */
+function ArtSourcePicker() {
   const { is: section, source, pendingPreview, shell } = PortraitSection.get();
   const library = shell?.library;
   return (
     <div className="flex flex-col gap-2">
+      <p className="text-[11px] text-ink-dim uppercase tracking-wide">Attach photo (optional)</p>
       <div className="flex gap-1.5">
         {SOURCES.map((s) => (
           <Button
             key={s.id}
             tone={source === s.id ? 'accent' : 'ghost'}
             onClick={() => {
-              section.source = s.id;
+              section.source = section.source === s.id ? 'none' : s.id;
             }}
           >
             {s.label}
@@ -144,10 +173,10 @@ function PortraitSourcePicker() {
         ))}
       </div>
       {source === 'upload' && (
-        <PhotoPicker onPhoto={(bytes, type) => section.acceptSource(bytes, type)} />
+        <PhotoPicker onPhoto={(bytes, type) => section.attachPhoto(bytes, type)} />
       )}
       {source === 'camera' && (
-        <CameraCapture onFrame={(bytes, type) => section.acceptSource(bytes, type)} />
+        <CameraCapture onFrame={(bytes, type) => section.attachPhoto(bytes, type)} />
       )}
       {source === 'library' && (
         <div className="grid max-h-40 grid-cols-4 gap-1.5 overflow-y-auto">
@@ -172,29 +201,6 @@ function PortraitSourcePicker() {
       {pendingPreview && source !== 'library' && (
         <img src={pendingPreview} alt="pending source" className="h-20 w-20 rounded object-cover" />
       )}
-    </div>
-  );
-}
-
-function PortraitPersonaForm() {
-  const { is: section, persona } = PortraitSection.get();
-  const fields: readonly { key: keyof Persona; label: string; placeholder: string }[] = [
-    { key: 'age', label: 'Age', placeholder: '34' },
-    { key: 'gender', label: 'Gender', placeholder: 'optional' },
-    { key: 'detail', label: 'Small detail', placeholder: 'always wears red glasses' },
-    { key: 'hobby', label: 'Hobby', placeholder: 'sourdough baking' },
-  ];
-  return (
-    <div className="grid grid-cols-2 gap-2">
-      {fields.map((f) => (
-        <FieldRow key={f.key} label={f.label}>
-          <TextInput
-            value={persona[f.key] ?? ''}
-            onValue={(v) => section.setPersona(f.key, v)}
-            placeholder={f.placeholder}
-          />
-        </FieldRow>
-      ))}
     </div>
   );
 }

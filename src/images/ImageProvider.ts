@@ -134,6 +134,11 @@ export const imageProviderLive: Layer.Layer<ImageProvider, never, HttpClient.Htt
             prompt: input.prompt,
             imageDataUrl: bytesToDataUrl(input.sourceBytes, input.sourceType),
             aspectRatio: input.aspectRatio,
+            themeContext: input.themeContext,
+            argumentValues: input.argumentValues,
+            brief: input.brief,
+            editCurrentArt: input.editCurrentArt,
+            currentArtFileName: input.currentArtFileName,
           }).pipe(Effect.mapError((cause) => new NetworkError({ url, cause })));
           const request = HttpClientRequest.post(url).pipe(HttpClientRequest.bodyUnsafeJson(wire));
           const response = yield* http

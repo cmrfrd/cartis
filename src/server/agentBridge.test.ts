@@ -4,7 +4,77 @@ import { it } from '../../test/effect.ts';
 import type { PredictionT } from '../contracts/replicate.ts';
 import { httpClientFromHandler } from '../lib/http.ts';
 import { ActivityBus, activityBusTestLayer } from './activity.ts';
-import { ReplicateClient, ReplicateSdk, replicateClientLive } from './agentBridge.ts';
+import {
+  AgentClient,
+  composeArtPrompt,
+  ReplicateClient,
+  ReplicateSdk,
+  replicateClientLive,
+} from './agentBridge.ts';
+
+// ---------------------------------------------------------------------------
+// composeArtPrompt — stub AgentClient + test ActivityBus
+// ---------------------------------------------------------------------------
+
+/** Stub AgentClient whose prompt() records the instruction and answers with prose. */
+const composeStub = (record: (text: string) => void): Layer.Layer<AgentClient> =>
+  Layer.succeed(AgentClient, {
+    createSession: () => Effect.succeed('sess-c'),
+    prompt: (_id, text) => {
+      record(text);
+      return Effect.succeed({
+        data: { parts: [{ type: 'text', text: 'a mythic ember mage, oil painting' }] },
+      });
+    },
+  });
+
+describe('composeArtPrompt', () => {
+  it.effect('feeds lookAndFeel, argument values, and brief to the model', () => {
+    let seen = '';
+    return Effect.gen(function* () {
+      const prompt = yield* composeArtPrompt(
+        { lookAndFeel: 'painterly oil', palette: 'ember warm', argumentSummary: 'name, essence' },
+        { name: 'Nyra', essence: 'ember' },
+        'make him angrier',
+      );
+      expect(prompt).toContain('oil painting');
+      // the composed instruction we sent embedded every input
+      expect(seen).toContain('painterly oil');
+      expect(seen).toContain('ember warm');
+      expect(seen).toContain('Nyra');
+      expect(seen).toContain('make him angrier');
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          composeStub((t) => {
+            seen = t;
+          }),
+          activityBusTestLayer,
+        ),
+      ),
+    );
+  });
+
+  it.effect('falls back to the lookAndFeel when the model returns no text', () =>
+    Effect.gen(function* () {
+      const bus = yield* ActivityBus;
+      const prompt = yield* composeArtPrompt(
+        { lookAndFeel: 'painterly oil', palette: '', argumentSummary: '' },
+        {},
+      ).pipe(
+        Effect.provide(
+          Layer.succeed(AgentClient, {
+            createSession: () => Effect.succeed('sess-e'),
+            prompt: () => Effect.succeed({ data: { parts: [] } }),
+          }),
+        ),
+      );
+      expect(prompt).toBe('painterly oil');
+      const messages = (yield* bus.history).map((e) => e.message);
+      expect(messages.some((m) => m.includes('composing art prompt'))).toBe(true);
+    }).pipe(Effect.provide(activityBusTestLayer)),
+  );
+});
 
 // ---------------------------------------------------------------------------
 // ReplicateClient — stub ReplicateSdk + httpClientFromHandler + TestClock

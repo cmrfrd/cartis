@@ -8,6 +8,7 @@
 
 import { Schema } from 'effect';
 import { StoredRecord } from './records.ts';
+import { ThemeContext } from './theme.ts';
 
 // ---------------------------------------------------------------------------
 // Shared error body
@@ -48,8 +49,12 @@ export type StatusResponseT = typeof StatusResponse.Type;
 // ---------------------------------------------------------------------------
 // POST /api/image/generate
 //
-// Request:  ImageProvider.ts: { prompt, imageDataUrl, aspectRatio }
+// Request:  ImageProvider.ts: { prompt, imageDataUrl, aspectRatio, … }
 //           agentBridge.ts: body.prompt, body.imageDataUrl, body.aspectRatio?
+//           When themeContext is present the bridge composes the final prompt
+//           via the LLM (spec §AI pipelines) before calling replicate; when
+//           editCurrentArt + currentArtFileName are set the stored art is the
+//           editing source image.
 // Response: agentBridge.ts: { dataUrl }
 //           ImageProvider.ts: body.dataUrl
 // ---------------------------------------------------------------------------
@@ -58,6 +63,11 @@ export const ImageGenerateRequest = Schema.Struct({
   prompt: Schema.String,
   imageDataUrl: Schema.String,
   aspectRatio: Schema.optional(Schema.String),
+  themeContext: Schema.optional(ThemeContext),
+  argumentValues: Schema.optional(Schema.Record({ key: Schema.String, value: Schema.String })),
+  brief: Schema.optional(Schema.String),
+  editCurrentArt: Schema.optional(Schema.Boolean),
+  currentArtFileName: Schema.optional(Schema.String),
 });
 export type ImageGenerateRequestT = typeof ImageGenerateRequest.Type;
 

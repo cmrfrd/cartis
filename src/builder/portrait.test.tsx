@@ -9,14 +9,15 @@ import { PortraitSection } from './PortraitSection';
 
 const bytesOf = (text: string): ArrayBuffer => new TextEncoder().encode(text).buffer as ArrayBuffer;
 
-describe('PortraitSection (headless)', () => {
-  it('generates with the template style + persona prompt and assigns the image id to the card', async () => {
+describe('PortraitSection (headless, text-first)', () => {
+  it('composes art from the layout arguments (no photo) and stores the image', async () => {
     const generate = vi.fn((input: GenerationInput) => {
-      expect(input.prompt).toContain('oil'); // theme lookAndFeel
-      expect(input.prompt).toContain('29'); // persona
-      expect(input.prompt).toContain('chess');
+      expect(input.themeContext?.lookAndFeel.toLowerCase()).toContain('oil');
+      expect(input.themeContext?.palette.length).toBeGreaterThan(0); // essence artFlavor
+      expect(input.argumentValues?.name).toBeDefined();
       expect(input.styleId).toBe('arcane');
-      return Effect.succeed({ bytes: bytesOf('styled'), type: 'image/png', via: 'stub' as const });
+      expect(input.sourceBytes.byteLength).toBe(0); // text-first: no photo attached
+      return Effect.succeed({ bytes: bytesOf('art'), type: 'image/png', via: 'stub' as const });
     });
     setAppLayer(
       testAppLayerWith({ image: Layer.succeed(ImageProvider, ImageProvider.of({ generate })) }),
@@ -29,33 +30,60 @@ describe('PortraitSection (headless)', () => {
     const builder = BuilderView.new();
     const section = PortraitSection.new({ fieldKey: 'art' });
 
-    section.acceptSource(bytesOf('face'), 'image/png');
-    section.setPersona('age', '29');
-    section.setPersona('hobby', 'chess');
-
-    await section.generate({ builder, library });
+    await section.generateArt({ builder, library });
     expect(generate).toHaveBeenCalledOnce();
 
     expect(library.images).toHaveLength(1);
-    const stored = library.images[0];
-    expect(builder.data.art).toBe(stored?.id);
-    expect(builder.resolved.art).toBeUndefined(); // headless builder has no shell → no url mapping — fine
+    expect(builder.data.art).toBe(library.images[0]?.id);
+    expect(section.note).toContain('stub');
 
     section.set(null);
     builder.set(null);
     library.set(null);
   });
 
-  it('refuses to generate without a source image', async () => {
+  it('forwards an attached photo and the brief as steering input', async () => {
+    const generate = vi.fn((input: GenerationInput) => {
+      expect(new TextDecoder().decode(input.sourceBytes)).toBe('face');
+      expect(input.brief).toBe('a phoenix behind her');
+      return Effect.succeed({ bytes: bytesOf('art'), type: 'image/png', via: 'stub' as const });
+    });
+    setAppLayer(
+      testAppLayerWith({ image: Layer.succeed(ImageProvider, ImageProvider.of({ generate })) }),
+    );
+
+    const library = ImageLibrary.new();
+    await vi.waitFor(() => {
+      expect(library.ready).toBe(true);
+    });
+    const builder = BuilderView.new();
     const section = PortraitSection.new({ fieldKey: 'art' });
-    await section.generate();
-    expect(section.note).toContain('photo first');
+
+    section.attachPhoto(bytesOf('face'), 'image/png');
+    section.brief = 'a phoenix behind her';
+    await section.generateArt({ builder, library });
+    expect(generate).toHaveBeenCalledOnce();
+
     section.set(null);
+    builder.set(null);
+    library.set(null);
+  });
+
+  it('applies a library image directly to the card field', async () => {
+    const builder = BuilderView.new();
+    const section = PortraitSection.new({ fieldKey: 'art' });
+    // headless: builder ref comes from context in the app; inject via the field
+    section.builder = builder;
+    section.applyLibraryImage('img-123');
+    expect(builder.data.art).toBe('img-123');
+    expect(section.note).toContain('library');
+    section.set(null);
+    builder.set(null);
   });
 });
 
-describe('Builder portrait slot (mounted)', () => {
-  it('opens portrait tools from the image field', async () => {
+describe('Builder art tools (mounted)', () => {
+  it('opens the art tools from the image field', async () => {
     const { container, unmount } = await mountApp();
     const openButton = Array.from(container.querySelectorAll('button')).find(
       (b) => b.textContent === 'Portrait tools',
@@ -64,10 +92,9 @@ describe('Builder portrait slot (mounted)', () => {
     await click(openButton ?? null);
     await tick();
     const text = container.textContent ?? '';
-    for (const label of ['Age', 'Gender', 'Small detail', 'Hobby']) {
-      expect(text).toContain(label);
-    }
-    expect(text).toContain('Generate portrait');
+    expect(text).toContain('Art brief');
+    expect(text).toContain('Generate art');
+    expect(text).toContain('Attach photo (optional)');
     unmount();
   });
 });

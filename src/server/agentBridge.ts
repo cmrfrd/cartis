@@ -17,8 +17,9 @@ import type { Plugin } from 'vite';
 import { ActivityEventJson } from '../contracts/activity.ts';
 import { ImageGenerateRequest, StorePutRequest } from '../contracts/api.ts';
 import { AgentError, NetworkError, ReplicateError } from '../contracts/errors.ts';
-import { SessionCreated } from '../contracts/opencode.ts';
+import { PromptResult, SessionCreated } from '../contracts/opencode.ts';
 import { Prediction, type PredictionT } from '../contracts/replicate.ts';
+import type { ThemeContextT } from '../contracts/theme.ts';
 import { bytesToDataUrl } from '../images/codec.ts';
 import { ActivityBus } from './activity.ts';
 import { makeBridgeRuntime, readBody, respond, sendJson } from './BridgeRuntime.ts';
@@ -107,6 +108,63 @@ export const agentClientLive: Layer.Layer<AgentClient> = Layer.effect(
     });
   }),
 );
+
+// ---------- art-prompt composition ----------
+
+const decodePromptText = Schema.decodeUnknownOption(PromptResult);
+
+/** Concatenate the text parts of a prompt result (no fence extraction — plain prose). */
+function promptText(result: unknown): string {
+  const decoded = decodePromptText(result);
+  if (Option.isNone(decoded)) return '';
+  const value = decoded.value;
+  const data = value.data ?? value;
+  const parts = data.parts ?? value.parts ?? [];
+  let text = '';
+  for (const part of parts) {
+    if (part.type === 'text' && typeof part.text === 'string') text += `\n${part.text}`;
+  }
+  return text.trim();
+}
+
+const ART_COMPOSER_GUIDE =
+  'You are writing a single image-generation prompt for a trading-card art slot. ' +
+  'Return ONLY the prompt text — no preamble, no markdown, one paragraph.';
+
+/**
+ * LLM art-prompt composition (spec §AI pipelines): one-shot session fed the
+ * theme context + the layout's argument values (+ an optional brief from a
+ * fill turn). Falls back to the raw lookAndFeel if the model returns nothing.
+ */
+export function composeArtPrompt(
+  themeContext: ThemeContextT,
+  argumentValues: Record<string, string>,
+  brief?: string,
+): Effect.Effect<string, AgentError, AgentClient | ActivityBus> {
+  return Effect.gen(function* () {
+    const agent = yield* AgentClient;
+    const bus = yield* ActivityBus;
+    yield* bus.emit('agent', 'composing art prompt from theme + arguments');
+    const id = yield* agent.createSession('cartis art compose');
+    const argLines = Object.entries(argumentValues)
+      .map(([k, v]) => `- ${k}: ${v}`)
+      .join('\n');
+    const instruction = [
+      ART_COMPOSER_GUIDE,
+      `Look and feel: ${themeContext.lookAndFeel}`,
+      themeContext.palette.length > 0 ? `Palette: ${themeContext.palette}` : '',
+      argLines.length > 0 ? `Card arguments:\n${argLines}` : '',
+      brief !== undefined && brief.length > 0 ? `Requested emphasis: ${brief}` : '',
+    ]
+      .filter((s) => s.length > 0)
+      .join('\n\n');
+    const result = yield* agent.prompt(id, instruction);
+    const composed = promptText(result);
+    const final = composed.length > 0 ? composed : themeContext.lookAndFeel;
+    yield* bus.emit('agent', `art prompt composed (${String(final.length)} chars)`);
+    return final;
+  });
+}
 
 // ---------- replicate ----------
 
@@ -466,12 +524,35 @@ export function cartisBridge(): Plugin {
             sres,
             Effect.gen(function* () {
               const body = yield* readBody(req);
-              const { prompt, imageDataUrl, aspectRatio } = yield* decodeImageGenerate(body);
+              const parsed = yield* decodeImageGenerate(body);
+              // 1) compose the final prompt via the LLM when theme context is present
+              const prompt = parsed.themeContext
+                ? yield* composeArtPrompt(
+                    parsed.themeContext,
+                    parsed.argumentValues ?? {},
+                    parsed.brief,
+                  )
+                : parsed.prompt;
+              // 2) resolve the source image: current art (edit mode) beats the attached photo
+              let imageDataUrl = parsed.imageDataUrl;
+              if (parsed.editCurrentArt === true && parsed.currentArtFileName !== undefined) {
+                const fs = yield* FileStore;
+                const file = yield* fs.readFile('images', parsed.currentArtFileName);
+                if (Option.isSome(file)) {
+                  const raw = file.value.bytes;
+                  // Copy into a fresh ArrayBuffer (Buffer.buffer may be a SharedArrayBuffer).
+                  const copy = new ArrayBuffer(raw.byteLength);
+                  new Uint8Array(copy).set(
+                    new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength),
+                  );
+                  imageDataUrl = bytesToDataUrl(copy, file.value.type);
+                }
+              }
               const client = yield* ReplicateClient;
               const dataUrl = yield* client.generate(token, {
                 prompt,
                 imageDataUrl,
-                aspectRatio,
+                aspectRatio: parsed.aspectRatio,
               });
               return { dataUrl };
             }),
