@@ -25,11 +25,12 @@ the layout's arguments, and the Gallery becomes a true edit-roundtrip surface.
 
 ## Decisions
 
-1. **Code-defined themes, data-shaped identity.** A theme remains a code module
-   (components are TSX), but its identity fields — `id`, `name`, `description`,
-   `lookAndFeel` — are plain data on the theme object, validated by an effect Schema at
-   registration. (No separate "manifest" wrapper — the look-and-feel prompt is simply part
-   of the theme.) Fully data-defined/runtime-authorable themes are a future project.
+1. **Themes AND layouts are code-defined.** Both live as code modules (components are
+   TSX; layouts are TSX compositions of theme parts). The theme's identity fields — `id`,
+   `name`, `description`, `lookAndFeel` — are plain data on the theme object, validated by
+   an effect Schema at registration. (No separate "manifest" wrapper — the look-and-feel
+   prompt is simply part of the theme.) Fully data-defined/runtime-authorable themes are a
+   future project.
 2. **Clean break on saved data.** No migration, no compat decode. Old card sidecars fail
    the new row schema and are dropped by the existing lenient list decode. `cartis-data/cards`
    restarts from scratch.
@@ -55,8 +56,17 @@ the layout's arguments, and the Gallery becomes a true edit-roundtrip surface.
    art purely from the layout's argument values + theme context. An attached photo
    (upload/camera) steers identity/pose when provided — the original stylize-my-face flow
    becomes the optional variant, not the center.
-9. **Card types are deliberately deferred.** If themes later need creature-vs-spell style
-   variation, that becomes a grouping above layouts; not modeled now.
+9. **Everything rendered persists to `cartis-data`.** Generated art → `images/`, exports
+   → `exports/`, saved cards → `cards/` — no artifact lives only in memory. And every
+   persisted artifact is re-openable: saved cards open back into the Builder for
+   edit-and-resave (same record, same id).
+10. **The fill agent is a capable, tool-using editor on a smart model.** Fill sessions run
+    on a sonnet-class model (via `OPENCODE_MODEL`), make **targeted edits** (asked to
+    change the title, it patches only the title), and are **vision-capable for art**: it
+    can see the card's current art, understand a requested visual edit, and re-render by
+    driving the image pipeline with the current art as the editing source.
+11. **Card types are deliberately deferred.** If themes later need creature-vs-spell style
+    variation, that becomes a grouping above layouts; not modeled now.
 
 ## Model (`src/cards/types.ts`)
 
@@ -121,29 +131,37 @@ Two agent-backed features replace the Code Lab's code generation. Both receive *
 context** = `{ lookAndFeel, palette summary, layout argument spec }` as prose/JSON, never
 component code.
 
-**1. AI form fill (Builder) — conversational.** New bridge endpoint `POST /api/agent/fill`:
-request `{ sessionId?, themeContext, fields: FieldSpec-shaped summary, currentData,
-userPrompt }`. On the first prompt of a card-editing episode the bridge creates an
-opencode session and returns its id; subsequent prompts reuse it, so the LLM retains the
-conversation. Every turn ALSO includes `currentData` ("current values after user edits"),
-so hand edits between prompts win over the session's memory. The response is decoded
-against a Schema derived from the field spec → `{ sessionId, data: CardData,
-artBrief?: string }`. The Builder merges returned values into the form; every field
-remains hand-editable afterwards. The episode's session is discarded when the user
-switches card, theme, or layout, or starts a new card.
+**1. AI form fill (Builder) — conversational, targeted, vision-capable.** New bridge
+endpoint `POST /api/agent/fill`: request `{ sessionId?, themeContext, fields:
+FieldSpec-shaped summary, currentData, currentArtFileName?, userPrompt }`. On the first
+prompt of a card-editing episode the bridge creates an opencode session (sonnet-class
+model via `OPENCODE_MODEL`) and returns its id; subsequent prompts reuse it, so the LLM
+retains the conversation. Every turn ALSO includes `currentData` ("current values after
+user edits"), so hand edits between prompts win over the session's memory. When the
+prompt concerns the art and the card has art, the bridge reads the image from the
+FileStore by `currentArtFileName` and attaches it to the LLM turn (vision), so the model
+can see what it's editing.
 
-When the user's prompt implies art ("a fire mage with a phoenix"), the LLM includes an
-`artBrief`; the Builder then **auto-runs** art generation with it (decision 7), visible in
-the activity feed like any generation.
+The response is decoded against a Schema derived from the field spec →
+`{ sessionId, patch: Partial<CardData>, artAction?: { brief: string,
+editCurrentArt: boolean } }`. **`patch` is targeted**: it contains only the fields the
+model means to change ("edit the title" patches `name` and nothing else); the Builder
+merges it over current values, and every field remains hand-editable afterwards.
+`artAction`, when present, auto-runs the art pipeline (decision 7): `editCurrentArt: true`
+sends the current art as the editing source (flux-kontext-pro is an instruction-driven
+image editor — this is its native mode); `false` generates fresh from the arguments. The
+episode's session is discarded when the user switches card, theme, or layout, or starts a
+new card.
 
 **2. LLM-composed art prompts — text-first.** Card-art generation is no longer a fixed
 template string. `POST /api/image/generate` gains a composition step ahead of replicate:
 the bridge gives the LLM (a) a base instruction ("you are writing an image-generation
 prompt for a trading-card art slot"), (b) the theme's `lookAndFeel` + `artFlavor(data)`,
 (c) the layout's current argument values (so element `fire` shapes the art), (d) the
-`artBrief` from a fill turn, when one triggered this generation, and (e) the source image,
-**if** one was attached — text-to-image from the arguments is the default path; a photo is
-optional steering for identity/pose (decision 8). The LLM returns the final generation
+`artAction.brief` from a fill turn, when one triggered this generation, and (e) the source
+image, **if** one exists — an attached photo for fresh generation, or the card's current
+art when a fill turn requested an edit (`editCurrentArt`) — text-to-image from the
+arguments is the default path; images are optional steering/editing input (decision 8). The LLM returns the final generation
 prompt; the bridge then runs the existing replicate create-and-poll with it. Both steps
 emit activity events (prompt composed → generation progress). The stub provider path
 skips composition and keeps its deterministic behavior for tests/offline.
@@ -193,22 +211,24 @@ generation does not move here).
 - `src/contracts/theme.ts`: `ThemeIdentity` schema + the theme-context block shape shared
   by fill and image-generate requests.
 - `src/contracts/api.ts`: `AgentCardRequest/Response` replaced by
-  `AgentFillRequest/Response` (`sessionId` in/out, `artBrief?` out);
-  `ImageGenerateRequest` gains theme-context + argument-values + `artBrief?` fields for
-  composition.
+  `AgentFillRequest/Response` (`sessionId` in/out, `currentArtFileName?` in,
+  `patch` + `artAction?` out); `ImageGenerateRequest` gains theme-context +
+  argument-values + `brief?`/`editCurrentArt?` fields for composition.
 
 ## Testing
 
 - Registry: register/get/list/getLayout, duplicate rejection, identity-schema failure.
 - Contracts: ThemeIdentity decode success/failure; CardRecord requires themeId/layoutId
   (old templateId row fails decode — asserting the clean break); AgentFill shapes.
-- Bridge: `/api/agent/fill` happy path + session reuse across turns + malformed-LLM-output
+- Bridge: `/api/agent/fill` happy path + session reuse across turns + targeted patch
+  (only requested fields change) + current-art vision attachment + malformed-LLM-output
   failure (Schema rejects); image-generate composition step (stub LLM layer) feeding
-  replicate; `artBrief` propagation; activity events for both steps.
-- Builder: AI fill merges values and leaves fields editable; hand edits survive a
+  replicate; `artAction` propagation incl. `editCurrentArt` sourcing the current art;
+  activity events for both steps.
+- Builder: AI fill merges the patch and leaves fields editable; hand edits survive a
   subsequent fill turn (currentData wins); session discarded on card/theme/layout switch;
   layout switch preserves overlapping values; empty art placeholder on new card; generate
-  action; artBrief auto-generation path.
+  action; artAction auto-generation path (fresh + edit variants).
 - Gallery: click-to-open roundtrip, re-save updates in place; Library tab management.
 - Removals: no `src/editor` or `ImageLabView` references; AppShell renders two tabs.
 - Gate throughout: `bun run verify`.
