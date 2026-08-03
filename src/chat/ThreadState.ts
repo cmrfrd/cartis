@@ -11,20 +11,20 @@
 
 import State from '@expressive/react';
 import { Effect, Exit, Fiber, Match, Option, Stream } from 'effect';
-import { forkApp, runAppExit } from '../app/runtime';
-import type { ArtActionT, CardDataT, ChatTurnRequestT, ChatTurnResponseT } from '../contracts/api';
-import { noteFromCause } from '../contracts/errors';
-import type { FieldSummaryT } from '../contracts/fields';
-import { MessageId, type MessageIdT, type PermissionIdT, type SessionIdT } from '../contracts/ids';
-import { materializeAssistantParts } from '../contracts/materialize';
-import type { ThemeContextT } from '../contracts/theme';
+import { forkApp, runAppExit } from '@/app/runtime';
+import type { ArtActionT, CardDataT, ChatTurnRequestT, ChatTurnResponseT } from '@/contracts/api';
+import { noteFromCause } from '@/contracts/errors';
+import type { FieldSummaryT } from '@/contracts/fields';
+import { MessageId, type MessageIdT, type PermissionIdT, type SessionIdT } from '@/contracts/ids';
+import { materializeAssistantParts } from '@/contracts/materialize';
+import type { ThemeContextT } from '@/contracts/theme';
 import type {
   MessageStatusT,
   ThreadEventT,
   ThreadMessageT,
   ThreadPartT,
   ThreadSummaryT,
-} from '../contracts/thread';
+} from '@/contracts/thread';
 import { ChatEvents } from './ChatEvents';
 import { ChatThread } from './ChatThread';
 import { foldThreadEvent } from './fold';

@@ -5,9 +5,9 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { MessageId, PermissionId, SessionId } from '../contracts/ids';
-import { CARD_GENERATE_ART_TOOL } from '../contracts/materialize';
-import type { ThreadEventT, ThreadMessageT } from '../contracts/thread';
+import { MessageId, PermissionId, SessionId } from '@/contracts/ids';
+import { CARD_GENERATE_ART_TOOL } from '@/contracts/materialize';
+import type { ThreadEventT, ThreadMessageT } from '@/contracts/thread';
 import { foldThreadEvent } from './fold';
 
 const started = (messageId: string): ThreadEventT => ({

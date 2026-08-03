@@ -1,5 +1,5 @@
-import { LayoutId, ThemeId } from '../../contracts/ids';
-import type { FieldSpec, Theme } from '../types';
+import type { FieldSpec, Theme } from '@/cards/types';
+import { LayoutId, ThemeId } from '@/contracts/ids';
 import { ArcaneCard } from './ArcaneCard';
 import { ArcaneCardBack } from './ArcaneCardBack';
 import { ArcaneFullArtCard } from './ArcaneFullArtCard';

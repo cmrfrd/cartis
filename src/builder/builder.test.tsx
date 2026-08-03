@@ -1,14 +1,14 @@
 import { Effect, Layer } from 'effect';
 import { describe, expect, it, vi } from 'vitest';
+import { setAppLayer, testAppLayerWith } from '@/app/runtime';
+import { ChatThread, type ChatThreadShape } from '@/chat/ChatThread';
+import type { ChatTurnRequestT, ChatTurnResponseT } from '@/contracts/api';
+import { ChatRequestError, StoreError } from '@/contracts/errors';
+import { CardId, LayoutId, SessionId, ThemeId, Timestamp } from '@/contracts/ids';
+import { type GenerationInput, ImageProvider } from '@/images/ImageProvider';
+import type { StoredCard } from '@/storage/CardArchive';
+import { StoreClient } from '@/storage/StoreClient';
 import { click, mountApp, setInput, tick } from '../../test/util';
-import { setAppLayer, testAppLayerWith } from '../app/runtime';
-import { ChatThread, type ChatThreadShape } from '../chat/ChatThread';
-import type { ChatTurnRequestT, ChatTurnResponseT } from '../contracts/api';
-import { ChatRequestError, StoreError } from '../contracts/errors';
-import { CardId, LayoutId, SessionId, ThemeId, Timestamp } from '../contracts/ids';
-import { type GenerationInput, ImageProvider } from '../images/ImageProvider';
-import type { StoredCard } from '../storage/CardArchive';
-import { StoreClient } from '../storage/StoreClient';
 import { BuilderView } from './BuilderView';
 
 const bytesOf = (text: string): ArrayBuffer => new TextEncoder().encode(text).buffer as ArrayBuffer;

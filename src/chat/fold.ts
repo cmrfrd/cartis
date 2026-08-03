@@ -12,9 +12,9 @@
  */
 
 import { Match } from 'effect';
-import { MessageId, type MessageIdT } from '../contracts/ids';
-import { CARD_GENERATE_ART_TOOL } from '../contracts/materialize';
-import type { ArtPhaseT, ThreadEventT, ThreadMessageT, ThreadPartT } from '../contracts/thread';
+import { MessageId, type MessageIdT } from '@/contracts/ids';
+import { CARD_GENERATE_ART_TOOL } from '@/contracts/materialize';
+import type { ArtPhaseT, ThreadEventT, ThreadMessageT, ThreadPartT } from '@/contracts/thread';
 
 const runningAssistant = (id: MessageIdT, parts: ThreadPartT[] = []): ThreadMessageT => ({
   id,

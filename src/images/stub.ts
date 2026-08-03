@@ -5,7 +5,7 @@
  * ImageProvider.ts as the Effect service.
  */
 
-import type { AspectRatioT } from '../contracts/fields';
+import type { AspectRatioT } from '@/contracts/fields';
 
 /** Paint I/O shapes — the (optional) source photo in, the stylized frame out. */
 export interface GenerationInput {

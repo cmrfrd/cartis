@@ -1,10 +1,10 @@
 import { Effect, Layer, Schema } from 'effect';
 import { describe, expect, vi, it as vit } from 'vitest';
+import { ImageGenerateRequest } from '@/contracts/api';
+import { DataUrl } from '@/contracts/ids';
+import { httpClientFromHandler } from '@/lib/http';
 import { it } from '../../test/effect';
 import { mount } from '../../test/util';
-import { ImageGenerateRequest } from '../contracts/api';
-import { DataUrl } from '../contracts/ids';
-import { httpClientFromHandler } from '../lib/http';
 import { CameraCapture } from './CameraCapture';
 import { bytesToDataUrl, dataUrlToBytes } from './codec';
 import {

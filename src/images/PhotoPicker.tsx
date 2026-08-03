@@ -1,8 +1,8 @@
 import { Component } from '@expressive/react';
 import { Effect, Exit } from 'effect';
-import { runAppExit } from '../app/runtime';
-import { MediaError, noteFromCause } from '../contracts/errors';
-import { Spinner } from '../ui';
+import { runAppExit } from '@/app/runtime';
+import { MediaError, noteFromCause } from '@/contracts/errors';
+import { Spinner } from '@/ui';
 
 /**
  * File input for source photos with visible read feedback — large phone

@@ -12,10 +12,10 @@
 
 import { HttpClient, HttpClientRequest, type HttpClientResponse } from '@effect/platform';
 import { Context, Effect, Layer, Option, Ref, Schema } from 'effect';
-import { ErrorBody, StorePutRequest } from '../contracts/api';
-import { NetworkError, StoreError } from '../contracts/errors';
-import { StoredRecord, type StoreNameT } from '../contracts/records';
-import { bytesToDataUrl } from '../images/codec';
+import { ErrorBody, StorePutRequest } from '@/contracts/api';
+import { NetworkError, StoreError } from '@/contracts/errors';
+import { StoredRecord, type StoreNameT } from '@/contracts/records';
+import { bytesToDataUrl } from '@/images/codec';
 
 // ---------------------------------------------------------------------------
 // Shape

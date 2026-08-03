@@ -1,11 +1,11 @@
 import { Effect, Layer, PubSub as PS } from 'effect';
 import { describe, expect, it, vi } from 'vitest';
+import { setAppLayer, testAppLayerWith } from '@/app/runtime';
+import type { ChatTurnResponseT } from '@/contracts/api';
+import { ChatRequestError } from '@/contracts/errors';
+import { PermissionId, SessionId } from '@/contracts/ids';
+import type { ThreadEventT } from '@/contracts/thread';
 import { click, mountApp, setInput } from '../../test/util';
-import { setAppLayer, testAppLayerWith } from '../app/runtime';
-import type { ChatTurnResponseT } from '../contracts/api';
-import { ChatRequestError } from '../contracts/errors';
-import { PermissionId, SessionId } from '../contracts/ids';
-import type { ThreadEventT } from '../contracts/thread';
 import { chatEventsFromPubSub } from './ChatEvents';
 import { ChatThread, type ChatThreadShape } from './ChatThread';
 

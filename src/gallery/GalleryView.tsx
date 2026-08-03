@@ -1,10 +1,10 @@
 import { Component, get } from '@expressive/react';
 import { Option } from 'effect';
-import { AppShell } from '../app/AppShell';
-import { CARD_HEIGHT, CARD_WIDTH } from '../cards/base/CardSurface';
-import { downloadUrl } from '../export/exportCard';
-import type { StoredCard, StoredExport } from '../storage/CardArchive';
-import { Button, EmptyState, TabBar, TextInput } from '../ui';
+import { AppShell } from '@/app/AppShell';
+import { CARD_HEIGHT, CARD_WIDTH } from '@/cards/base/CardSurface';
+import { downloadUrl } from '@/export/exportCard';
+import type { StoredCard, StoredExport } from '@/storage/CardArchive';
+import { Button, EmptyState, TabBar, TextInput } from '@/ui';
 import { groupExports, layoutOf, matchesQuery, resolveCardData } from './gallery-helpers';
 
 const SECTIONS = [

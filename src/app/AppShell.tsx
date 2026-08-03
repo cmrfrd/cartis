@@ -1,9 +1,9 @@
 import { Component } from '@expressive/react';
-import { BuilderView } from '../builder/BuilderView';
-import { GalleryView } from '../gallery/GalleryView';
-import { CardArchive, type StoredCard } from '../storage/CardArchive';
-import { ImageLibrary } from '../storage/ImageLibrary';
-import { TabBar } from '../ui';
+import { BuilderView } from '@/builder/BuilderView';
+import { GalleryView } from '@/gallery/GalleryView';
+import { CardArchive, type StoredCard } from '@/storage/CardArchive';
+import { ImageLibrary } from '@/storage/ImageLibrary';
+import { TabBar } from '@/ui';
 
 export type ViewId = 'builder' | 'gallery';
 

@@ -1,9 +1,9 @@
 import type { HttpClientRequest } from '@effect/platform';
 import { Layer, Option } from 'effect';
 import { describe, expect, it, vi } from 'vitest';
-import { setAppLayer, testAppLayerWith } from '../app/runtime';
-import { CardId, LayoutId, ThemeId } from '../contracts/ids';
-import { httpClientFromHandler } from '../lib/http';
+import { setAppLayer, testAppLayerWith } from '@/app/runtime';
+import { CardId, LayoutId, ThemeId } from '@/contracts/ids';
+import { httpClientFromHandler } from '@/lib/http';
 import { CardArchive } from './CardArchive';
 import { ImageLibrary } from './ImageLibrary';
 import { storeClientLive } from './StoreClient';

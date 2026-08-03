@@ -14,6 +14,9 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [react(), tailwindcss(), cartisBridge()],
     resolve: {
+      // `@/x` = `src/x` everywhere EXCEPT the graph this config file imports
+      // (src/server/*, src/contracts/*, images/codec, lib/http): vite's native
+      // config loader can't resolve aliases, so those keep relative `.ts` paths.
       alias: {
         '@': path.resolve(import.meta.dirname, './src'),
       },

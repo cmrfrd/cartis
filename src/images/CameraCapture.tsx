@@ -1,7 +1,7 @@
 import { Component, ref } from '@expressive/react';
 import { Effect, Exit } from 'effect';
-import { runAppExit } from '../app/runtime';
-import { MediaError, noteFromCause } from '../contracts/errors';
+import { runAppExit } from '@/app/runtime';
+import { MediaError, noteFromCause } from '@/contracts/errors';
 
 /** "Lock on to a webcam, take a pic" — stream starts on mount, stops on unmount. */
 export class CameraCapture extends Component {

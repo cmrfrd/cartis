@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { getLayout, getTheme } from '@/cards/registry';
+import { LayoutId, ThemeId } from '@/contracts/ids';
 import { mount, tick } from '../../../test/util';
-import { LayoutId, ThemeId } from '../../contracts/ids';
-import { getLayout, getTheme } from '../registry';
 import { ArcaneCard } from './ArcaneCard';
 import { EssenceGlyph } from './glyphs';
 import { ESSENCES, paletteFor } from './palette';

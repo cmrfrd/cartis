@@ -3,18 +3,18 @@ import { Array as Arr, Effect, Exit, Match, Option } from 'effect';
 // Value import of AppShell is a deliberate module cycle (AppShell renders BuilderView).
 // Safe: neither module touches the other's binding during module evaluation — only
 // inside method bodies at runtime, which ESM live bindings resolve correctly.
-import { AppShell } from '../app/AppShell';
-import { runAppExit } from '../app/runtime';
-import { getLayout, getTheme, listThemes } from '../cards/registry';
-import type { CardData, FieldValue, Layout, Theme } from '../cards/types';
-import { ThreadPanel } from '../chat/ThreadPanel';
-import { type ChatContext, ThreadState } from '../chat/ThreadState';
-import { summarizeField } from '../contracts/fields';
-import { type CardIdT, LayoutId, type LayoutIdT, ThemeId, type ThemeIdT } from '../contracts/ids';
-import { ExportBar } from '../export/ExportBar';
-import { ImageProvider } from '../images/ImageProvider';
-import type { StoredCard } from '../storage/CardArchive';
-import { Button, Panel, PreviewStage, SelectInput, TextInput } from '../ui';
+import { AppShell } from '@/app/AppShell';
+import { runAppExit } from '@/app/runtime';
+import { getLayout, getTheme, listThemes } from '@/cards/registry';
+import type { CardData, FieldValue, Layout, Theme } from '@/cards/types';
+import { ThreadPanel } from '@/chat/ThreadPanel';
+import { type ChatContext, ThreadState } from '@/chat/ThreadState';
+import { summarizeField } from '@/contracts/fields';
+import { type CardIdT, LayoutId, type LayoutIdT, ThemeId, type ThemeIdT } from '@/contracts/ids';
+import { ExportBar } from '@/export/ExportBar';
+import { ImageProvider } from '@/images/ImageProvider';
+import type { StoredCard } from '@/storage/CardArchive';
+import { Button, Panel, PreviewStage, SelectInput, TextInput } from '@/ui';
 import { FormRenderer } from './FormRenderer';
 import { PortraitSection } from './PortraitSection';
 

@@ -1,7 +1,7 @@
 // Sanctioned react-dom use: tests must mount into a real root (see Global Constraints).
 import type { ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { AppShell } from '../src/app/AppShell';
+import { AppShell } from '@/app/AppShell';
 
 export function mount(node: ReactNode): { container: HTMLElement; unmount(): void } {
   const container = document.createElement('div');

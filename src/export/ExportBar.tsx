@@ -1,11 +1,11 @@
 import { Component, get } from '@expressive/react';
 import { Exit } from 'effect';
-import { AppShell } from '../app/AppShell';
-import { runAppExit } from '../app/runtime';
-import { noteFromCause } from '../contracts/errors';
-import type { CardIdT } from '../contracts/ids';
-import type { CardArchive, ExportFormat } from '../storage/CardArchive';
-import { Button, SelectInput } from '../ui';
+import { AppShell } from '@/app/AppShell';
+import { runAppExit } from '@/app/runtime';
+import { noteFromCause } from '@/contracts/errors';
+import type { CardIdT } from '@/contracts/ids';
+import type { CardArchive, ExportFormat } from '@/storage/CardArchive';
+import { Button, SelectInput } from '@/ui';
 import type { ExportDpi } from './exportCard';
 import { downloadBlob, exportFileName, renderCardBlob, renderSheetBlob } from './exportCard';
 

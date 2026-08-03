@@ -13,15 +13,15 @@
 
 import type { Effect } from 'effect';
 import { Layer, ManagedRuntime } from 'effect';
-import { type ChatEvents, chatEventsEmpty, chatEventsLive } from '../chat/ChatEvents';
-import { type ChatThread, chatThreadEmpty, chatThreadLive } from '../chat/ChatThread';
+import { type ChatEvents, chatEventsEmpty, chatEventsLive } from '@/chat/ChatEvents';
+import { type ChatThread, chatThreadEmpty, chatThreadLive } from '@/chat/ChatThread';
 import {
   type ImageProvider,
   imageProviderLive,
   imageProviderStubLayer,
-} from '../images/ImageProvider';
-import { AppHttpLive } from '../lib/http';
-import { type StoreClient, storeClientLive, storeClientMemory } from '../storage/StoreClient';
+} from '@/images/ImageProvider';
+import { AppHttpLive } from '@/lib/http';
+import { type StoreClient, storeClientLive, storeClientMemory } from '@/storage/StoreClient';
 
 /** The service surface the app's effects may require. */
 export type AppServices = StoreClient | ImageProvider | ChatThread | ChatEvents;

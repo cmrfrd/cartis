@@ -1,7 +1,7 @@
 import { Option, Schema } from 'effect';
-import { FieldSpecList } from '../contracts/fields';
-import type { LayoutIdT, ThemeIdT } from '../contracts/ids';
-import { ThemeIdentity } from '../contracts/theme';
+import { FieldSpecList } from '@/contracts/fields';
+import type { LayoutIdT, ThemeIdT } from '@/contracts/ids';
+import { ThemeIdentity } from '@/contracts/theme';
 import type { Layout, Theme } from './types';
 
 const themes = new Map<ThemeIdT, Theme>();

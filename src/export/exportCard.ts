@@ -1,8 +1,8 @@
 import { Effect } from 'effect';
 import { toCanvas } from 'html-to-image';
-import { CARD_WIDTH, POINTER_VARS } from '../cards/base/CardSurface';
-import { ExportError } from '../contracts/errors';
-import type { ExportFormat } from '../storage/CardArchive';
+import { CARD_WIDTH, POINTER_VARS } from '@/cards/base/CardSurface';
+import { ExportError } from '@/contracts/errors';
+import type { ExportFormat } from '@/storage/CardArchive';
 
 /** Prints must not depend on where the pointer happens to be — force rest state. */
 function clearInteractiveVars(node: HTMLElement): void {

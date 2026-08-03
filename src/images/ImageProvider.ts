@@ -20,8 +20,8 @@ import {
   ImageGenerateRequest,
   ImageGenerateResponse,
   StatusResponse,
-} from '../contracts/api';
-import { ImageBridgeError, NetworkError } from '../contracts/errors';
+} from '@/contracts/api';
+import { ImageBridgeError, NetworkError } from '@/contracts/errors';
 import { bytesToDataUrl, dataUrlToBytes } from './codec';
 import { type GenerationInput, type PaintFn, paintStylizedFrame, stubStyleFor } from './stub';
 

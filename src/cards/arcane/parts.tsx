@@ -1,5 +1,5 @@
 import type { CSSProperties } from 'react';
-import { plateStyle } from '../base/textures';
+import { plateStyle } from '@/cards/base/textures';
 import { EssenceGlyph } from './glyphs';
 import type { EssencePalette } from './palette';
 import { ENGRAVED_SHADOW, titleSizeFor } from './typography';

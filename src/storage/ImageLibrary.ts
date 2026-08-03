@@ -1,9 +1,9 @@
 import State from '@expressive/react';
 import { Effect, Exit, Option } from 'effect';
-import { runAppExit } from '../app/runtime';
-import { noteFromCause } from '../contracts/errors';
-import { ImageId, Timestamp } from '../contracts/ids';
-import { ImageRecord, type ImageRecordT } from '../contracts/records';
+import { runAppExit } from '@/app/runtime';
+import { noteFromCause } from '@/contracts/errors';
+import { ImageId, Timestamp } from '@/contracts/ids';
+import { ImageRecord, type ImageRecordT } from '@/contracts/records';
 import { StoreClient } from './StoreClient';
 
 /** Type continuity: views import `StoredImage`; alias the contract type. */

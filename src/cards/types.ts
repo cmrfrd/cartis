@@ -2,8 +2,8 @@
 
 import type { NonEmptyReadonlyArray } from 'effect/Array';
 import type { ComponentType } from 'react';
-import type { AspectRatioT, FieldSpecT, FieldValueT } from '../contracts/fields';
-import type { LayoutIdT, ThemeIdT } from '../contracts/ids';
+import type { AspectRatioT, FieldSpecT, FieldValueT } from '@/contracts/fields';
+import type { LayoutIdT, ThemeIdT } from '@/contracts/ids';
 
 /**
  * Single source of truth: these types DERIVE from the canonical Schemas in

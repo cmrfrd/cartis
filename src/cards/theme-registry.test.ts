@@ -1,6 +1,6 @@
 import { Array as Arr } from 'effect';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { LayoutId, ThemeId } from '../contracts/ids';
+import { LayoutId, ThemeId } from '@/contracts/ids';
 import { __clearThemesForTests, getLayout, getTheme, listThemes, registerTheme } from './registry';
 import type { Layout, Theme } from './types';
 

@@ -1,14 +1,14 @@
 import { Component, get } from '@expressive/react';
 import { Effect, Exit } from 'effect';
-import { AppShell } from '../app/AppShell';
-import { runAppExit } from '../app/runtime';
-import { noteFromCause } from '../contracts/errors';
-import { CameraCapture } from '../images/CameraCapture';
-import { bytesToDataUrl } from '../images/codec';
-import { ImageProvider } from '../images/ImageProvider';
-import { PhotoPicker } from '../images/PhotoPicker';
-import type { ImageLibrary } from '../storage/ImageLibrary';
-import { Button, FieldRow, Panel, TextInput } from '../ui';
+import { AppShell } from '@/app/AppShell';
+import { runAppExit } from '@/app/runtime';
+import { noteFromCause } from '@/contracts/errors';
+import { CameraCapture } from '@/images/CameraCapture';
+import { bytesToDataUrl } from '@/images/codec';
+import { ImageProvider } from '@/images/ImageProvider';
+import { PhotoPicker } from '@/images/PhotoPicker';
+import type { ImageLibrary } from '@/storage/ImageLibrary';
+import { Button, FieldRow, Panel, TextInput } from '@/ui';
 // Deliberate module cycle with BuilderView (it renders PortraitSection) — benign, see BuilderView.tsx.
 import { BuilderView } from './BuilderView';
 

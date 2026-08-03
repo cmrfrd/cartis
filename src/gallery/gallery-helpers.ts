@@ -4,9 +4,9 @@
  */
 
 import type { Option } from 'effect';
-import { getLayoutOption } from '../cards/registry';
-import type { CardData, Layout } from '../cards/types';
-import type { StoredCard, StoredExport } from '../storage/CardArchive';
+import { getLayoutOption } from '@/cards/registry';
+import type { CardData, Layout } from '@/cards/types';
+import type { StoredCard, StoredExport } from '@/storage/CardArchive';
 
 /** Group exports under their card; legacy (no cardId) and dangling links go to `other`. */
 export function groupExports(

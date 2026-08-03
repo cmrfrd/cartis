@@ -1,13 +1,13 @@
 import { type Context, Effect, Fiber, Layer, Option, Redacted, Ref, TestClock } from 'effect';
 import { describe, expect } from 'vitest';
+import type { ChatTurnRequestT } from '@/contracts/api.ts';
+import { AgentError } from '@/contracts/errors.ts';
+import { DataUrl, MessageId, PermissionId, SessionId } from '@/contracts/ids.ts';
+import type { SessionInfoT, SessionMessagesT } from '@/contracts/opencode.ts';
+import type { PredictionT } from '@/contracts/replicate.ts';
+import type { ThreadEventT } from '@/contracts/thread.ts';
+import { httpClientFromHandler } from '@/lib/http.ts';
 import { it } from '../../test/effect.ts';
-import type { ChatTurnRequestT } from '../contracts/api.ts';
-import { AgentError } from '../contracts/errors.ts';
-import { DataUrl, MessageId, PermissionId, SessionId } from '../contracts/ids.ts';
-import type { SessionInfoT, SessionMessagesT } from '../contracts/opencode.ts';
-import type { PredictionT } from '../contracts/replicate.ts';
-import type { ThreadEventT } from '../contracts/thread.ts';
-import { httpClientFromHandler } from '../lib/http.ts';
 import {
   AgentClient,
   agentClientFromSdk,

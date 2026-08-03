@@ -1,5 +1,5 @@
 import { Component } from '@expressive/react';
-import { CardSurface } from '../base/CardSurface';
+import { CardSurface } from '@/cards/base/CardSurface';
 import { CornerFiligree, EssenceGlyph } from './glyphs';
 
 const BACK_FRAME =

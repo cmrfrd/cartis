@@ -11,7 +11,7 @@
  */
 
 import { Context, Effect, Layer, type PubSub, Schema, Stream } from 'effect';
-import { ThreadEventJson, type ThreadEventT } from '../contracts/thread';
+import { ThreadEventJson, type ThreadEventT } from '@/contracts/thread';
 
 export interface ChatEventsShape {
   readonly events: Stream.Stream<ThreadEventT>;

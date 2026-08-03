@@ -18,10 +18,10 @@ import {
   PermissionReply,
   SessionAction,
   SessionRef,
-} from '../contracts/api';
-import { ChatRequestError, NetworkError } from '../contracts/errors';
-import { type MessageIdT, type PermissionIdT, SessionId, type SessionIdT } from '../contracts/ids';
-import type { ThreadMessageT, ThreadSummaryT } from '../contracts/thread';
+} from '@/contracts/api';
+import { ChatRequestError, NetworkError } from '@/contracts/errors';
+import { type MessageIdT, type PermissionIdT, SessionId, type SessionIdT } from '@/contracts/ids';
+import type { ThreadMessageT, ThreadSummaryT } from '@/contracts/thread';
 
 export interface ChatThreadShape {
   /** Run one conversational turn. */

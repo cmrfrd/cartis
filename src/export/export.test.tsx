@@ -1,7 +1,7 @@
 import { Effect } from 'effect';
 import { describe, expect, it, vi } from 'vitest';
-import { CardId } from '../contracts/ids';
-import { CardArchive } from '../storage/CardArchive';
+import { CardId } from '@/contracts/ids';
+import { CardArchive } from '@/storage/CardArchive';
 import { ExportBar } from './ExportBar';
 import {
   bleedLayout,

@@ -1,7 +1,7 @@
 import { Option } from 'effect';
 import { describe, expect, it } from 'vitest';
-import { CardId, ExportId, LayoutId, ThemeId, Timestamp } from '../contracts/ids';
-import type { StoredCard, StoredExport } from '../storage/CardArchive';
+import { CardId, ExportId, LayoutId, ThemeId, Timestamp } from '@/contracts/ids';
+import type { StoredCard, StoredExport } from '@/storage/CardArchive';
 import {
   exportMatchesQuery,
   groupExports,

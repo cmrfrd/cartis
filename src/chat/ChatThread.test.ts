@@ -7,9 +7,9 @@
 
 import { Effect, Layer } from 'effect';
 import { describe, expect } from 'vitest';
+import { SessionId } from '@/contracts/ids';
+import { httpClientFromHandler } from '@/lib/http';
 import { it } from '../../test/effect';
-import { SessionId } from '../contracts/ids';
-import { httpClientFromHandler } from '../lib/http';
 import { ChatThread, chatThreadLive } from './ChatThread';
 
 const failingBridge = (body: unknown, status = 500) =>

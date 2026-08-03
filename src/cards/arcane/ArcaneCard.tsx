@@ -1,6 +1,6 @@
 import { Component } from '@expressive/react';
-import { CardSurface } from '../base/CardSurface';
-import type { CardData } from '../types';
+import { CardSurface } from '@/cards/base/CardSurface';
+import type { CardData } from '@/cards/types';
 import { CornerFiligree } from './glyphs';
 import { paletteFor } from './palette';
 import {

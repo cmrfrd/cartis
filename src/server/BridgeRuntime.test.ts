@@ -2,8 +2,8 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { PassThrough } from 'node:stream';
 import { Effect, Layer, ManagedRuntime } from 'effect';
 import { describe, expect } from 'vitest';
+import { BodyError, StoreError, statusOfError } from '@/contracts/errors.ts';
 import { it } from '../../test/effect.ts';
-import { BodyError, StoreError, statusOfError } from '../contracts/errors.ts';
 import { readBody, respond } from './BridgeRuntime.ts';
 
 /**

@@ -9,8 +9,8 @@
 import { HttpClient, HttpClientError, HttpClientResponse } from '@effect/platform';
 import { Effect, Option, Schema } from 'effect';
 import { describe, expect } from 'vitest';
+import { AppHttpLive, httpClientFromHandler } from '@/lib/http';
 import { it } from '../../test/effect';
-import { AppHttpLive, httpClientFromHandler } from '../lib/http';
 import {
   ChatHistoryResponse,
   ChatTurnRequest,

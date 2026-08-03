@@ -1,8 +1,8 @@
 import { Chunk, Effect, Fiber, Option, Stream } from 'effect';
 import { describe, expect } from 'vitest';
+import { MessageId, PermissionId, SessionId } from '@/contracts/ids';
+import type { ThreadEventT, ThreadPartT } from '@/contracts/thread.ts';
 import { it } from '../../test/effect.ts';
-import { MessageId, PermissionId, SessionId } from '../contracts/ids';
-import type { ThreadEventT, ThreadPartT } from '../contracts/thread.ts';
 import { renderThreadEvent, ThreadBus, threadBusLive, threadBusTestLayer } from './threadBus.ts';
 
 /** Unwrap the Option for terse assertions. */

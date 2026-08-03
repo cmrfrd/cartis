@@ -1,6 +1,6 @@
 import { Match } from 'effect';
-import type { FieldSpec } from '../cards/types';
-import { FieldRow, NumberInput, SelectInput, TextAreaInput, TextInput, ToggleInput } from '../ui';
+import type { FieldSpec } from '@/cards/types';
+import { FieldRow, NumberInput, SelectInput, TextAreaInput, TextInput, ToggleInput } from '@/ui';
 // Deliberate module cycle (BuilderView renders FormRenderer) — benign, see BuilderView.tsx.
 import { BuilderView, PortraitSlot } from './BuilderView';
 

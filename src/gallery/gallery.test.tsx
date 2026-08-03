@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
+import { LayoutId, ThemeId } from '@/contracts/ids';
 import { click, mountApp, setInput, tick } from '../../test/util';
-import { LayoutId, ThemeId } from '../contracts/ids';
 
 const bytesOf = (text: string): ArrayBuffer => new TextEncoder().encode(text).buffer as ArrayBuffer;
 

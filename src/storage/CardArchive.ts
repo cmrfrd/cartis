@@ -1,8 +1,8 @@
 import State from '@expressive/react';
 import { Effect, Exit } from 'effect';
-import { runAppExit } from '../app/runtime';
-import type { CardData } from '../cards/types';
-import { noteFromCause } from '../contracts/errors';
+import { runAppExit } from '@/app/runtime';
+import type { CardData } from '@/cards/types';
+import { noteFromCause } from '@/contracts/errors';
 import {
   CardId,
   type CardIdT,
@@ -11,14 +11,14 @@ import {
   type SessionIdT,
   type ThemeIdT,
   Timestamp,
-} from '../contracts/ids';
+} from '@/contracts/ids';
 import {
   CardRecord,
   type CardRecordT,
   type ExportFormatT,
   ExportRecord,
   type ExportRecordT,
-} from '../contracts/records';
+} from '@/contracts/records';
 import { StoreClient } from './StoreClient';
 
 /**

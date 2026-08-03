@@ -9,9 +9,9 @@
  */
 
 import { Match } from 'effect';
-import { BuilderView } from '../builder/BuilderView';
-import { CARD_GENERATE_ART_TOOL, CARD_PATCH_TOOL } from '../contracts/materialize';
-import type { ThreadMessageT, ThreadPartT, ThreadSummaryT } from '../contracts/thread';
+import { BuilderView } from '@/builder/BuilderView';
+import { CARD_GENERATE_ART_TOOL, CARD_PATCH_TOOL } from '@/contracts/materialize';
+import type { ThreadMessageT, ThreadPartT, ThreadSummaryT } from '@/contracts/thread';
 
 export function ThreadPanel() {
   const { thread } = BuilderView.get();

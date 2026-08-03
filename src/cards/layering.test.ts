@@ -30,6 +30,7 @@ describe('cards/ layering', () => {
         expect(content, `${path} must not import ../../${layer}`).not.toContain(
           `from '../../${layer}`,
         );
+        expect(content, `${path} must not import @/${layer}`).not.toContain(`from '@/${layer}`);
       }
     }
   });

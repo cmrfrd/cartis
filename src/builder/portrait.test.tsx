@@ -1,9 +1,9 @@
 import { Effect, Layer } from 'effect';
 import { describe, expect, it, vi } from 'vitest';
+import { setAppLayer, testAppLayerWith } from '@/app/runtime';
+import { type GenerationInput, ImageProvider } from '@/images/ImageProvider';
+import { ImageLibrary } from '@/storage/ImageLibrary';
 import { click, mountApp, tick } from '../../test/util';
-import { setAppLayer, testAppLayerWith } from '../app/runtime';
-import { type GenerationInput, ImageProvider } from '../images/ImageProvider';
-import { ImageLibrary } from '../storage/ImageLibrary';
 import { BuilderView } from './BuilderView';
 import { PortraitSection } from './PortraitSection';
 
