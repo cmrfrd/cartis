@@ -48,10 +48,8 @@ export interface OpencodeClient {
     prompt(input: unknown): Promise<unknown>;
   };
   event: {
-    subscribe(options: {
-      signal?: AbortSignal;
-      onSseEvent?: (event: { data?: unknown }) => void;
-    }): Promise<unknown>;
+    /** Returns a lazy { stream } async iterable — events flow only while drained. */
+    subscribe(options: { signal?: AbortSignal }): Promise<unknown>;
   };
 }
 
@@ -195,6 +193,16 @@ export interface AgentActivityWiring {
   readonly runtime: Runtime.Runtime<never>;
 }
 
+/** Structurally narrow the SDK's subscribe result to its async event stream. */
+function eventStreamOf(result: unknown): AsyncIterable<unknown> | undefined {
+  if (typeof result !== 'object' || result === null || !('stream' in result)) return undefined;
+  const stream = (result as { stream: unknown }).stream;
+  if (typeof stream !== 'object' || stream === null || !(Symbol.asyncIterator in stream)) {
+    return undefined;
+  }
+  return stream as AsyncIterable<unknown>;
+}
+
 /** Build an AgentClient over a raw opencode SDK client. */
 export function agentClientFromSdk(
   client: OpencodeClient,
@@ -212,18 +220,20 @@ export function agentClientFromSdk(
             const controller = new AbortController();
             const state = { current: initialWatchState };
             // Best-effort: a failed subscription must never break the prompt.
-            void client.event
-              .subscribe({
-                signal: controller.signal,
-                onSseEvent: (event) => {
-                  const out = mapAgentEvent(event.data, sessionId, state.current, Date.now());
-                  state.current = out.state;
-                  if (out.message !== undefined) {
-                    Runtime.runSync(activity.runtime)(activity.bus.emit('agent', out.message));
-                  }
-                },
-              })
-              .catch(() => undefined);
+            // The SDK's SSE result is a LAZY async generator — events only
+            // flow while the stream is drained, so we pump it here.
+            void (async () => {
+              const result = await client.event.subscribe({ signal: controller.signal });
+              const stream = eventStreamOf(result);
+              if (!stream) return;
+              for await (const data of stream) {
+                const out = mapAgentEvent(data, sessionId, state.current, Date.now());
+                state.current = out.state;
+                if (out.message !== undefined) {
+                  Runtime.runSync(activity.runtime)(activity.bus.emit('agent', out.message));
+                }
+              }
+            })().catch(() => undefined);
             return controller;
           }),
           (controller) => Effect.sync(() => controller.abort()),

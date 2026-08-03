@@ -605,9 +605,21 @@ describe('mapAgentEvent', () => {
 // ---------------------------------------------------------------------------
 
 describe('AgentClient.withActivity', () => {
-  it('emits mapped events while the effect runs and aborts the subscription after', () => {
-    type Handler = (event: { data?: unknown }) => void;
-    const captured: { handler?: Handler; signal?: AbortSignal } = {};
+  it('drains mapped events while the effect runs and aborts the subscription after', () => {
+    const captured: { signal?: AbortSignal } = {};
+    const toolEvent = {
+      type: 'message.part.updated',
+      properties: {
+        part: {
+          type: 'tool',
+          sessionID: 'sess-1',
+          messageID: 'm1',
+          callID: 'c1',
+          tool: 'grep',
+          state: { status: 'running', title: 'searching' },
+        },
+      },
+    };
     const fakeClient: OpencodeClient = {
       session: {
         create: () => Promise.resolve({ id: 'sess-1' }),
@@ -615,9 +627,17 @@ describe('AgentClient.withActivity', () => {
       },
       event: {
         subscribe: (opts) => {
-          captured.handler = opts.onSseEvent;
           captured.signal = opts.signal;
-          return Promise.resolve(undefined);
+          // Lazy generator like the real SDK: yields one event, then parks
+          // until the subscriber aborts (mirrors a long-lived SSE stream).
+          const stream = (async function* () {
+            yield toolEvent;
+            await new Promise<void>((resolve) => {
+              if (opts.signal?.aborted) resolve();
+              opts.signal?.addEventListener('abort', () => resolve());
+            });
+          })();
+          return Promise.resolve({ stream });
         },
       },
     };
@@ -627,23 +647,9 @@ describe('AgentClient.withActivity', () => {
       const service = agentClientFromSdk(fakeClient, { bus, runtime });
       const result = yield* service.withActivity(
         'sess-1',
-        Effect.sync(() => {
-          // mid-flight: fire a tool event through the captured handler
-          captured.handler?.({
-            data: {
-              type: 'message.part.updated',
-              properties: {
-                part: {
-                  type: 'tool',
-                  sessionID: 'sess-1',
-                  messageID: 'm1',
-                  callID: 'c1',
-                  tool: 'grep',
-                  state: { status: 'running', title: 'searching' },
-                },
-              },
-            },
-          });
+        // async effect so the drain loop gets microtask turns while in flight
+        Effect.promise(async () => {
+          await new Promise((resolve) => setTimeout(resolve, 20));
           expect(captured.signal?.aborted).toBe(false);
           return 42;
         }),

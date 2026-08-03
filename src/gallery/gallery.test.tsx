@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { click, mountApp, tick } from '../../test/util';
+import { click, mountApp, setInput, tick } from '../../test/util';
 
 const bytesOf = (text: string): ArrayBuffer => new TextEncoder().encode(text).buffer as ArrayBuffer;
 
@@ -134,6 +134,50 @@ describe('GalleryView', () => {
     const copy = shell.archive.cards.find((c) => c.name === 'Solo copy');
     expect(copy?.holo).toBe(true);
     expect(copy?.data.name).toBe('Solo copy');
+    unmount();
+  });
+
+  it('groups renders under their card, legacy renders under Other renders, and search filters', async () => {
+    const { container, shell, unmount } = await mountApp();
+    await vi.waitFor(() => expect(shell.archive.ready).toBe(true));
+    const saved = await shell.archive.saveCard({
+      name: 'Linked Hero',
+      themeId: 'arcane',
+      layoutId: 'classic',
+      data: { name: 'Linked Hero', ability: 'Fly high.' },
+      holo: false,
+    });
+    await shell.archive.saveExport({
+      name: 'linked-hero.png',
+      format: 'png',
+      bytes: bytesOf('a'),
+      type: 'image/png',
+      cardId: saved.id,
+    });
+    await shell.archive.saveExport({
+      name: 'ancient-render.png',
+      format: 'png',
+      bytes: bytesOf('b'),
+      type: 'image/png',
+    });
+    shell.view = 'gallery';
+    await tick();
+    // default section IS the unified Saved cards view
+    const text = () => container.textContent ?? '';
+    expect(text()).toContain('Linked Hero');
+    expect(text()).toContain('linked-hero.png'); // grouped under the card
+    expect(text()).toContain('Other renders');
+    expect(text()).toContain('ancient-render.png'); // legacy, ungrouped
+    // search: ability text matches the card (renders of other cards filter out)
+    const search = container.querySelector('input[placeholder="Search cards and renders…"]');
+    await setInput(search, 'fly high');
+    expect(text()).toContain('Linked Hero');
+    expect(text()).not.toContain('Other renders'); // ancient render filtered out
+    await setInput(search, 'zzz-nothing');
+    expect(text()).toContain('Nothing matches your search.');
+    await setInput(search, 'ancient');
+    expect(text()).not.toContain('Linked Hero');
+    expect(text()).toContain('ancient-render.png');
     unmount();
   });
 });

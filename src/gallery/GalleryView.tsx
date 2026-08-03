@@ -1,20 +1,22 @@
 import { Component, get } from '@expressive/react';
 import { AppShell } from '../app/AppShell';
 import { downloadUrl } from '../export/exportCard';
-import type { StoredCard } from '../storage/CardArchive';
-import { Button, EmptyState, TabBar } from '../ui';
+import type { StoredCard, StoredExport } from '../storage/CardArchive';
+import { Button, EmptyState, TabBar, TextInput } from '../ui';
+import { exportMatchesQuery, groupExports, matchesQuery } from './gallery-helpers';
 
 const SECTIONS = [
-  { id: 'exports', label: 'Renders' },
-  { id: 'images', label: 'Library' },
   { id: 'cards', label: 'Saved cards' },
+  { id: 'images', label: 'Library' },
 ] as const;
 
 type SectionId = (typeof SECTIONS)[number]['id'];
 
 export class GalleryView extends Component {
   shell = get(AppShell, false);
-  section: SectionId = 'exports';
+  section: SectionId = 'cards';
+  /** Search over the unified Saved cards view. */
+  query = '';
 
   openCard(card: StoredCard) {
     const { shell } = this;
@@ -34,24 +36,20 @@ export class GalleryView extends Component {
             this.section = id;
           }}
         />
-        {section === 'exports' && <GalleryExports />}
-        {section === 'images' && <GalleryImages />}
         {section === 'cards' && <GalleryCards />}
+        {section === 'images' && <GalleryImages />}
       </div>
     );
   }
 }
 
-function GalleryExports() {
+/** A grid of render thumbnails with the standard download/delete actions. */
+function RenderStrip(props: { items: readonly StoredExport[] }) {
   const { shell } = GalleryView.get();
-  const exports = shell?.archive.exports ?? [];
   const urls = shell?.archive.exportUrls ?? {};
-  if (exports.length === 0) {
-    return <EmptyState message="No exported renders yet." hint="Export from the Builder." />;
-  }
   return (
     <div className="grid grid-cols-3 gap-4 xl:grid-cols-5">
-      {exports.map((item) => (
+      {props.items.map((item) => (
         <figure key={item.id} className="flex flex-col gap-1.5">
           <img
             src={urls[item.id]}
@@ -132,52 +130,81 @@ function GalleryImages() {
 }
 
 function GalleryCards() {
-  const { is: gallery, shell } = GalleryView.get();
+  const { is: gallery, shell, query } = GalleryView.get();
   const cards = shell?.archive.cards ?? [];
-  if (cards.length === 0) {
+  const exports = shell?.archive.exports ?? [];
+  const { byCard, other } = groupExports(cards, exports);
+  const visibleCards = cards.filter((card) => matchesQuery(card, query));
+  const visibleOther = other.filter((item) => exportMatchesQuery(item, query));
+  if (cards.length === 0 && exports.length === 0) {
     return <EmptyState message="No saved cards yet." hint="Save from the Builder's form panel." />;
   }
   return (
-    <ul className="flex flex-col gap-2">
-      {cards.map((card) => (
-        <li
-          key={card.id}
-          className="flex items-center justify-between rounded-lg border border-edge bg-panel px-4 py-2.5"
-        >
-          <button
-            type="button"
-            className="min-w-0 flex-1 text-left"
-            onClick={() => gallery.openCard(card)}
+    <div className="flex flex-col gap-4">
+      <TextInput
+        value={query}
+        onValue={(v) => {
+          gallery.query = v;
+        }}
+        placeholder="Search cards and renders…"
+      />
+      {visibleCards.length === 0 && visibleOther.length === 0 && (
+        <EmptyState message="Nothing matches your search." hint="Try a different query." />
+      )}
+      <ul className="flex flex-col gap-3">
+        {visibleCards.map((card) => (
+          <li
+            key={card.id}
+            className="flex flex-col gap-2.5 rounded-lg border border-edge bg-panel px-4 py-2.5"
           >
-            <p className="truncate font-display text-sm">{card.name}</p>
-            <p className="text-[11px] text-ink-dim">
-              {card.themeId} · {card.layoutId} · {new Date(card.updatedAt).toLocaleString()}
-            </p>
-          </button>
-          <div className="flex shrink-0 gap-1.5">
-            <Button tone="ghost" onClick={() => gallery.openCard(card)}>
-              Open in builder
-            </Button>
-            <Button
-              tone="ghost"
-              onClick={() =>
-                void shell?.archive.saveCard({
-                  name: `${card.name} copy`,
-                  themeId: card.themeId,
-                  layoutId: card.layoutId,
-                  data: { ...card.data, name: `${card.name} copy` },
-                  holo: card.holo,
-                })
-              }
-            >
-              Duplicate
-            </Button>
-            <Button tone="danger" onClick={() => void shell?.archive.deleteCard(card.id)}>
-              Delete
-            </Button>
-          </div>
-        </li>
-      ))}
-    </ul>
+            <div className="flex items-center justify-between">
+              <button
+                type="button"
+                className="min-w-0 flex-1 text-left"
+                onClick={() => gallery.openCard(card)}
+              >
+                <p className="truncate font-display text-sm">{card.name}</p>
+                <p className="text-[11px] text-ink-dim">
+                  {card.themeId} · {card.layoutId} · {new Date(card.updatedAt).toLocaleString()}
+                </p>
+              </button>
+              <div className="flex shrink-0 gap-1.5">
+                <Button tone="ghost" onClick={() => gallery.openCard(card)}>
+                  Open in builder
+                </Button>
+                <Button
+                  tone="ghost"
+                  onClick={() =>
+                    void shell?.archive.saveCard({
+                      name: `${card.name} copy`,
+                      themeId: card.themeId,
+                      layoutId: card.layoutId,
+                      data: { ...card.data, name: `${card.name} copy` },
+                      holo: card.holo,
+                    })
+                  }
+                >
+                  Duplicate
+                </Button>
+                <Button tone="danger" onClick={() => void shell?.archive.deleteCard(card.id)}>
+                  Delete
+                </Button>
+              </div>
+            </div>
+            {(byCard.get(card.id)?.length ?? 0) > 0 && (
+              <RenderStrip items={byCard.get(card.id) ?? []} />
+            )}
+          </li>
+        ))}
+      </ul>
+      {visibleOther.length > 0 && (
+        <section className="flex flex-col gap-2">
+          <h3 className="font-base text-[11px] text-ink-dim uppercase tracking-wide">
+            Other renders
+          </h3>
+          <RenderStrip items={visibleOther} />
+        </section>
+      )}
+    </div>
   );
 }
