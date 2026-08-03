@@ -8,6 +8,7 @@
  * ThreadMessageView → PartView (+ ToolUI registry) → Composer.
  */
 
+import { Match } from 'effect';
 import { BuilderView } from '../builder/BuilderView';
 import { CARD_GENERATE_ART_TOOL, CARD_PATCH_TOOL } from '../contracts/materialize';
 import type { ThreadMessageT, ThreadPartT, ThreadSummaryT } from '../contracts/thread';
@@ -203,8 +204,9 @@ function PartView(props: {
   error: boolean;
 }) {
   const { part, role, running, error } = props;
-  switch (part._tag) {
-    case 'Text': {
+  // Match.exhaustive (spec §Match): a new ThreadPart variant fails tsc here.
+  return Match.value(part).pipe(
+    Match.tag('Text', (p) => {
       // A running assistant's text is the raw JSON blob mid-stream — show a
       // writing indicator instead (materialization replaces it at turn end).
       if (running && role === 'assistant') {
@@ -218,19 +220,20 @@ function PartView(props: {
             : 'bg-secondary-background text-ink';
       return (
         <div className={`max-w-[85%] whitespace-pre-wrap rounded-base px-3 py-2 text-sm ${bubble}`}>
-          {part.text}
+          {p.text}
         </div>
       );
-    }
-    case 'Reasoning':
-      return <p className="max-w-[85%] px-1 text-[11px] text-ink-dim italic">{part.text}</p>;
-    case 'ToolCall':
-      return <ToolUI part={part} />;
-    case 'Image':
-      return <img src={part.url} alt="generated" className="max-w-[85%] rounded-base" />;
-    default:
-      return null; // Step — not rendered in v1
-  }
+    }),
+    Match.tag('Reasoning', (p) => (
+      <p className="max-w-[85%] px-1 text-[11px] text-ink-dim italic">{p.text}</p>
+    )),
+    Match.tag('ToolCall', (p) => <ToolUI part={p} />),
+    Match.tag('Image', (p) => (
+      <img src={p.url} alt="generated" className="max-w-[85%] rounded-base" />
+    )),
+    Match.tag('Step', () => null), // not rendered in v1
+    Match.exhaustive,
+  );
 }
 
 /** Tool-UI registry: tool name → chip. Unknown tools fall back to a generic chip. */

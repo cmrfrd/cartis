@@ -11,8 +11,8 @@
  * heartbeats) that intentionally have NO event variant.
  */
 
-import { Context, Effect, Layer, Option, PubSub, Ref, Stream } from 'effect';
-import type { ThreadEventT } from '../contracts/thread.ts';
+import { Context, Effect, Layer, Match, Option, PubSub, Ref, Stream } from 'effect';
+import type { ThreadEventT, ThreadPartT } from '../contracts/thread.ts';
 
 const HISTORY_LIMIT = 200;
 const PUBSUB_CAPACITY = 128;
@@ -41,51 +41,46 @@ export function renderThreadEvent(event: ThreadEventT): Option.Option<string> {
   return Option.fromNullable(renderLine(event));
 }
 
-function renderLine(event: ThreadEventT): string | undefined {
-  switch (event._tag) {
-    case 'TurnStarted':
-      return '[cartis:agent] turn started';
-    case 'TurnCompleted':
-      return `[cartis:agent] turn ${event.status}`;
-    case 'SessionError':
-      return `[cartis:agent] agent error: ${event.message}`;
-    case 'PermissionRequested':
-      return `[cartis:agent] permission requested: ${event.title}`;
-    case 'Art':
-      // Compose lines were agent-sourced in the old log; pipeline lines image-sourced.
-      return event.phase === 'composing'
-        ? `[cartis:agent] ${event.detail ?? 'composing art prompt'}`
-        : `[cartis:image] ${event.detail ?? event.phase}`;
-    case 'PartDelta': {
-      const part = event.part;
-      switch (part._tag) {
-        case 'Step':
-          return '[cartis:agent] step started';
-        case 'Reasoning':
-          return '[cartis:agent] thinking…';
-        case 'Text':
-          return `[cartis:agent] writing response… (${String(part.text.length)} chars)`;
-        case 'ToolCall': {
-          const title = part.title;
-          if (part.status === 'running') {
-            return `[cartis:agent] tool ${part.name}: running${
-              title !== undefined && title.length > 0 ? ` — ${title}` : ''
-            }`;
-          }
-          if (part.status === 'completed') {
-            return `[cartis:agent] tool ${part.name}: done — ${title ?? ''} (${(part.secs ?? 0).toFixed(1)}s)`;
-          }
-          if (part.status === 'error') {
-            return `[cartis:agent] tool ${part.name}: FAILED — ${part.result ?? 'unknown'}`;
-          }
-          return undefined; // pending — too noisy for the terminal
-        }
-        case 'Image':
-          return undefined;
+/** Both levels are Match.exhaustive (spec §Match): new event/part variants fail tsc here. */
+const renderPartLine = (part: ThreadPartT): string | undefined =>
+  Match.value(part).pipe(
+    Match.tag('Step', () => '[cartis:agent] step started'),
+    Match.tag('Reasoning', () => '[cartis:agent] thinking…'),
+    Match.tag('Text', (p) => `[cartis:agent] writing response… (${String(p.text.length)} chars)`),
+    Match.tag('ToolCall', (p) => {
+      const title = p.title;
+      if (p.status === 'running') {
+        return `[cartis:agent] tool ${p.name}: running${
+          title !== undefined && title.length > 0 ? ` — ${title}` : ''
+        }`;
       }
-    }
-  }
-}
+      if (p.status === 'completed') {
+        return `[cartis:agent] tool ${p.name}: done — ${title ?? ''} (${(p.secs ?? 0).toFixed(1)}s)`;
+      }
+      if (p.status === 'error') {
+        return `[cartis:agent] tool ${p.name}: FAILED — ${p.result ?? 'unknown'}`;
+      }
+      return undefined; // pending — too noisy for the terminal
+    }),
+    Match.tag('Image', () => undefined),
+    Match.exhaustive,
+  );
+
+const renderLine = (event: ThreadEventT): string | undefined =>
+  Match.value(event).pipe(
+    Match.tag('TurnStarted', () => '[cartis:agent] turn started'),
+    Match.tag('TurnCompleted', (e) => `[cartis:agent] turn ${e.status}`),
+    Match.tag('SessionError', (e) => `[cartis:agent] agent error: ${e.message}`),
+    Match.tag('PermissionRequested', (e) => `[cartis:agent] permission requested: ${e.title}`),
+    // Compose lines were agent-sourced in the old log; pipeline lines image-sourced.
+    Match.tag('Art', (e) =>
+      e.phase === 'composing'
+        ? `[cartis:agent] ${e.detail ?? 'composing art prompt'}`
+        : `[cartis:image] ${e.detail ?? e.phase}`,
+    ),
+    Match.tag('PartDelta', (e) => renderPartLine(e.part)),
+    Match.exhaustive,
+  );
 
 const capped = <A>(prev: ReadonlyArray<A>, next: A): ReadonlyArray<A> => {
   const out = [...prev, next];

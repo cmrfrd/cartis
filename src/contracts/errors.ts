@@ -1,4 +1,4 @@
-import { Cause, Data, Option } from 'effect';
+import { Cause, Data, Match, Option } from 'effect';
 
 /**
  * Tagged error hierarchy for Cartis' business logic.
@@ -109,26 +109,21 @@ export type ReplicateFields =
   | { readonly reason: 'timeout' }
   | { readonly reason: 'no-output' };
 
-/** Free function (not a getter) so exhaustive-switch narrowing satisfies biome's useGetterReturn. */
+/** Match.exhaustive over the reason union (spec §Match): a new reason fails tsc here. */
 function replicateMessage(fields: {
   readonly reason: ReplicateFields['reason'];
   readonly status?: number;
   readonly detail?: string;
 }): string {
-  switch (fields.reason) {
-    case 'create':
-      return `replicate error ${fields.status}: ${fields.detail}`;
-    case 'poll':
-      return `replicate poll error ${fields.status}`;
-    case 'failed':
-      return `replicate failed: ${fields.detail ?? 'no detail'}`;
-    case 'canceled':
-      return `replicate canceled: ${fields.detail ?? 'no detail'}`;
-    case 'timeout':
-      return 'replicate timed out after 120s';
-    case 'no-output':
-      return 'replicate succeeded but returned no output';
-  }
+  return Match.value(fields.reason).pipe(
+    Match.when('create', () => `replicate error ${fields.status}: ${fields.detail}`),
+    Match.when('poll', () => `replicate poll error ${fields.status}`),
+    Match.when('failed', () => `replicate failed: ${fields.detail ?? 'no detail'}`),
+    Match.when('canceled', () => `replicate canceled: ${fields.detail ?? 'no detail'}`),
+    Match.when('timeout', () => 'replicate timed out after 120s'),
+    Match.when('no-output', () => 'replicate succeeded but returned no output'),
+    Match.exhaustive,
+  );
 }
 
 class ReplicateErrorClass extends Data.TaggedError('ReplicateError')<{

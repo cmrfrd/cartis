@@ -1,5 +1,5 @@
 import { Component, get, ref } from '@expressive/react';
-import { Array as Arr, Effect, Exit, Option } from 'effect';
+import { Array as Arr, Effect, Exit, Match, Option } from 'effect';
 // Value import of AppShell is a deliberate module cycle (AppShell renders BuilderView).
 // Safe: neither module touches the other's binding during module evaluation — only
 // inside method bodies at runtime, which ESM live bindings resolve correctly.
@@ -198,14 +198,14 @@ export class BuilderView extends Component {
   }
 
   private executeIntent(intent: PendingIntent) {
-    switch (intent.kind) {
-      case 'new':
-        this.newCard();
-        return;
-      case 'open':
-        this.loadCard(intent.card);
-        return;
-    }
+    // Match.exhaustive (spec §Match): a new intent kind fails tsc here.
+    Match.value(intent).pipe(
+      Match.discriminators('kind')({
+        new: () => this.newCard(),
+        open: (i) => this.loadCard(i.card),
+      }),
+      Match.exhaustive,
+    );
   }
 
   async resolveIntent(resolution: GuardResolution) {

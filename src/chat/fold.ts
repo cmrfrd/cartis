@@ -11,6 +11,7 @@
  * fold is total over ThreadEvent and leaves PermissionRequested untouched.
  */
 
+import { Match } from 'effect';
 import { MessageId, type MessageIdT } from '../contracts/ids';
 import { CARD_GENERATE_ART_TOOL } from '../contracts/materialize';
 import type { ArtPhaseT, ThreadEventT, ThreadMessageT, ThreadPartT } from '../contracts/thread';
@@ -52,37 +53,35 @@ const artPart = (phase: ArtPhaseT, detail?: string): ThreadPartT => ({
   ...(detail !== undefined ? { result: detail } : {}),
 });
 
-export function foldThreadEvent(
-  messages: readonly ThreadMessageT[],
-  event: ThreadEventT,
-): ThreadMessageT[] {
-  switch (event._tag) {
-    case 'TurnStarted': {
+/** Compile-time exhaustive dispatch (spec §Match): a new ThreadEvent variant fails tsc here. */
+export function foldThreadEvent(messages: ThreadMessageT[], event: ThreadEventT): ThreadMessageT[] {
+  return Match.value(event).pipe(
+    Match.tag('TurnStarted', (e) => {
       // Idempotent: a replayed TurnStarted (SSE reconnect) never duplicates.
-      if (messages.some((m) => m.id === event.messageId)) return [...messages];
-      return [...messages, runningAssistant(event.messageId)];
-    }
+      if (messages.some((m) => m.id === e.messageId)) return [...messages];
+      return [...messages, runningAssistant(e.messageId)];
+    }),
 
-    case 'PartDelta': {
-      const index = messages.findIndex((m) => m.id === event.messageId);
+    Match.tag('PartDelta', (e) => {
+      const index = messages.findIndex((m) => m.id === e.messageId);
       if (index < 0) return [...messages]; // unknown message — no ghost
       const message = messages[index];
       if (message === undefined) return [...messages];
       const parts = [...message.parts];
-      while (parts.length <= event.partIndex) parts.push({ _tag: 'Text', text: '' });
-      parts[event.partIndex] = event.part;
+      while (parts.length <= e.partIndex) parts.push({ _tag: 'Text', text: '' });
+      parts[e.partIndex] = e.part;
       return replaceAt(messages, index, { ...message, parts });
-    }
+    }),
 
-    case 'TurnCompleted': {
-      const index = messages.findIndex((m) => m.id === event.messageId);
+    Match.tag('TurnCompleted', (e) => {
+      const index = messages.findIndex((m) => m.id === e.messageId);
       if (index < 0) return [...messages];
       const message = messages[index];
       if (message === undefined) return [...messages];
-      return replaceAt(messages, index, { ...message, status: event.status });
-    }
+      return replaceAt(messages, index, { ...message, status: e.status });
+    }),
 
-    case 'Art': {
+    Match.tag('Art', (e) => {
       const index = lastAssistantIndex(messages);
       if (index < 0) {
         // Fallback system strip — only when there is no assistant message at all.
@@ -90,9 +89,9 @@ export function foldThreadEvent(
           ...messages,
           {
             id: MessageId.make('system-art'),
-            role: 'assistant',
-            status: 'complete',
-            parts: [artPart(event.phase, event.detail)],
+            role: 'assistant' as const,
+            status: 'complete' as const,
+            parts: [artPart(e.phase, e.detail)],
           },
         ];
       }
@@ -107,16 +106,16 @@ export function foldThreadEvent(
         existing !== undefined && existing._tag === 'ToolCall'
           ? {
               ...existing,
-              status: artStatus(event.phase),
-              ...(event.detail !== undefined ? { result: event.detail } : {}),
+              status: artStatus(e.phase),
+              ...(e.detail !== undefined ? { result: e.detail } : {}),
             }
-          : artPart(event.phase, event.detail);
+          : artPart(e.phase, e.detail);
       if (pIdx >= 0) parts[pIdx] = updated;
       else parts.push(updated);
       return replaceAt(messages, index, { ...message, parts });
-    }
+    }),
 
-    case 'SessionError': {
+    Match.tag('SessionError', (e) => {
       // Mark the last running assistant message incomplete + append an error strip.
       let index = -1;
       for (let i = messages.length - 1; i >= 0; i--) {
@@ -131,12 +130,14 @@ export function foldThreadEvent(
       return replaceAt(messages, index, {
         ...message,
         status: 'incomplete',
-        parts: [...message.parts, { _tag: 'Text', text: event.message }],
+        parts: [...message.parts, { _tag: 'Text', text: e.message }],
       });
-    }
+    }),
 
-    case 'PermissionRequested':
-      // Not a message mutation — ThreadState records it as pendingPermission.
-      return messages as ThreadMessageT[];
-  }
+    // Not a message mutation — same reference back (ThreadState records it
+    // as pendingPermission; identity lets expressive skip the re-render).
+    Match.tag('PermissionRequested', () => messages),
+
+    Match.exhaustive,
+  );
 }
