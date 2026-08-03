@@ -84,6 +84,28 @@ instead of loading. Cancel keeps the current document.
 `archive.saveCard({ ...card, id: undefined, name: `${card.name} copy` })`. The list
 re-sorts by `updatedAt` as usual; no navigation.
 
+## Engineering requirements (binding)
+
+- **Type safety.** No `any`, no non-null `!`, no `as` casts on external data (repo
+  standard). `pendingIntent` is a proper discriminated union
+  (`{ kind: 'new' } | { kind: 'open'; card: StoredCard }`) — every consumer switches on
+  `kind` exhaustively; no boolean-flag soup. Guard resolutions are a closed set
+  (`'save-first' | 'discard' | 'cancel'`). Strict TS 7 + biome gates apply.
+- **Effect for every effectful path.** All persistence flows stay on the established
+  expressive↔Effect boundary pattern: snapshot reactive fields → build the Effect →
+  `runAppExit` → Exit-match → assign/note via `noteFromCause`. `saveAsCopy` and the
+  gallery Duplicate go through `CardArchive.saveCard` (already Effect-backed via
+  `StoreClient`); the guard's **Save first** path composes save-then-intent
+  sequentially and treats a failed save as cancelling the intent (typed failure → note,
+  document untouched). Pure state transitions (dirty flag, intent set/clear) remain
+  plain synchronous expressive mutations — no ceremony where there is no effect.
+- **Well tested.** The test matrix below is the floor, not the ceiling: every guard
+  intent × resolution combination, failure paths through the Effect boundary (failing
+  store on save-first), and dirty-flag transitions for every mutating action. Component
+  tests run mounted (happy-dom + `mountApp`) against the `setAppLayer`/
+  `testAppLayerWith` seam; store behavior against the memory `StoreClient` layer.
+  `bun run verify` green is the gate for every task.
+
 ## Out of scope / untouched
 
 Persistence contracts (`CardRecord`), StoreClient/FileStore, AI pipelines (fill + art),
