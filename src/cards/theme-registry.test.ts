@@ -50,6 +50,21 @@ describe('theme registry', () => {
     expect(() => registerTheme(bad)).toThrow();
   });
 
+  it('rejects a layout whose field specs fail the FieldSpec schema', () => {
+    const theme = fakeTheme('t4');
+    const broken = {
+      ...theme,
+      layouts: [
+        {
+          ...theme.layouts[0],
+          // number field missing its required min/max
+          fields: [{ kind: 'number', key: 'cost', label: 'Cost' }],
+        },
+      ],
+    } as unknown as Theme;
+    expect(() => registerTheme(broken)).toThrow(/invalid field specs/i);
+  });
+
   it('throws on unknown theme / layout', () => {
     expect(() => getTheme('nope')).toThrow(/unknown theme/i);
     registerTheme(fakeTheme('t1'));

@@ -10,6 +10,7 @@
  */
 
 import { Schema } from 'effect';
+import { FieldValue } from './fields.ts';
 
 // ---------------------------------------------------------------------------
 // StoreName
@@ -47,8 +48,6 @@ export type StoredRecordT = typeof StoredRecord.Type;
 // CardData = Record<string, FieldValue>; FieldValue = string | number | boolean | undefined
 // (src/cards/types.ts:4).
 // ---------------------------------------------------------------------------
-
-const FieldValue = Schema.Union(Schema.String, Schema.Number, Schema.Boolean, Schema.Undefined);
 
 export const CardRecord = Schema.Struct({
   id: Schema.String,

@@ -1,9 +1,11 @@
 import { Schema } from 'effect';
+import { FieldSpecList } from '../contracts/fields';
 import { ThemeIdentity } from '../contracts/theme';
 import type { Layout, Theme } from './types';
 
 const themes = new Map<string, Theme>();
 const decodeIdentity = Schema.decodeUnknownSync(ThemeIdentity);
+const decodeFieldSpecs = Schema.decodeUnknownSync(FieldSpecList);
 
 export function registerTheme(theme: Theme): void {
   decodeIdentity({
@@ -21,6 +23,17 @@ export function registerTheme(theme: Theme): void {
       throw new Error(`Theme "${theme.id}" has a duplicate layout "${layout.id}"`);
     }
     seen.add(layout.id);
+    // A malformed field definition is a caught registration error, not a
+    // latent shape bug (spec §10) — decode throws with the layout named.
+    try {
+      decodeFieldSpecs(layout.fields);
+    } catch (cause) {
+      throw new Error(
+        `Theme "${theme.id}" layout "${layout.id}" has invalid field specs: ${
+          cause instanceof Error ? cause.message : String(cause)
+        }`,
+      );
+    }
   }
   themes.set(theme.id, theme);
 }

@@ -1,30 +1,18 @@
 // Sanctioned type-only react import (see Global Constraints).
 import type { ComponentType } from 'react';
+import type { AspectRatioT, FieldSpecT, FieldValueT } from '../contracts/fields';
 
-export type FieldValue = string | number | boolean | undefined;
+/**
+ * Single source of truth: these types DERIVE from the canonical Schemas in
+ * src/contracts/fields.ts (spec: type-safety & contract hardening §7). Layout
+ * field definitions are additionally Schema-validated at theme registration.
+ */
+export type FieldValue = FieldValueT;
 
 /** The data record a template's form edits and its renderer consumes. */
 export type CardData = Record<string, FieldValue>;
 
-/** Show a field only while another field holds a specific value. */
-export interface FieldCondition {
-  key: string;
-  equals: FieldValue;
-}
-
-export type FieldSpec = (
-  | { kind: 'text'; key: string; label: string; placeholder?: string; maxLength?: number }
-  | { kind: 'textarea'; key: string; label: string; rows?: number; placeholder?: string }
-  | { kind: 'number'; key: string; label: string; min: number; max: number }
-  | {
-      kind: 'select';
-      key: string;
-      label: string;
-      options: readonly { value: string; label: string }[];
-    }
-  | { kind: 'image'; key: string; label: string }
-  | { kind: 'toggle'; key: string; label: string }
-) & { showIf?: FieldCondition };
+export type FieldSpec = FieldSpecT;
 
 /**
  * `data` is optional because expressive Component fields surface as optional JSX
@@ -40,8 +28,8 @@ export interface Layout {
   description: string;
   fields: readonly FieldSpec[];
   defaults: CardData;
-  /** Preferred replicate aspect for this layout's art slot (e.g. '3:2'). */
-  artAspect?: string;
+  /** Preferred replicate aspect for this layout's art slot (closed union). */
+  artAspect?: AspectRatioT;
   Render: CardRenderer;
 }
 

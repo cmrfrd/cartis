@@ -7,6 +7,7 @@
  */
 
 import { Schema } from 'effect';
+import { CardDataSchema } from './fields.ts';
 import { StoredRecord } from './records.ts';
 import { ThemeContext } from './theme.ts';
 import { ThreadMessage, ThreadSummary } from './thread.ts';
@@ -50,9 +51,6 @@ export type StatusResponseT = typeof StatusResponse.Type;
 // ---------------------------------------------------------------------------
 // Card chat panel (spec 2026-08-03) — session passthrough over opencode.
 // ---------------------------------------------------------------------------
-
-const FieldValue = Schema.Union(Schema.String, Schema.Number, Schema.Boolean, Schema.Undefined);
-const CardDataSchema = Schema.Record({ key: Schema.String, value: FieldValue });
 
 /** Lenient card-data record (patch shape when no field schema is available). */
 export const CardData = CardDataSchema;
