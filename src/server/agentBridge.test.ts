@@ -1,4 +1,4 @@
-import { type Context, Effect, Fiber, Layer, Option, Ref, TestClock } from 'effect';
+import { type Context, Effect, Fiber, Layer, Option, Redacted, Ref, TestClock } from 'effect';
 import { describe, expect } from 'vitest';
 import { it } from '../../test/effect.ts';
 import type { ChatTurnRequestT } from '../contracts/api.ts';
@@ -16,6 +16,7 @@ import {
   mapAgentEvent,
   mapSessionMessages,
   type OpencodeClient,
+  opencodeClientOf,
   ReplicateClient,
   ReplicateSdk,
   replicateClientLive,
@@ -345,7 +346,7 @@ describe('ReplicateClient.generate', () => {
       );
       return Effect.gen(function* () {
         yield* Effect.flatMap(ReplicateClient, (c) =>
-          c.generate('tok', {
+          c.generate(Redacted.make('tok'), {
             prompt: 'a mossy henge',
             imageDataUrl: undefined, // absent — no source photo (the sentinel is unrepresentable now)
             aspectRatio: 'match_input_image',
@@ -378,7 +379,7 @@ describe('ReplicateClient.generate', () => {
     );
     return Effect.gen(function* () {
       yield* Effect.flatMap(ReplicateClient, (c) =>
-        c.generate('tok', {
+        c.generate(Redacted.make('tok'), {
           prompt: 'stylize me',
           imageDataUrl: DataUrl.make('data:image/png;base64,QQ=='),
           aspectRatio: '3:4',
@@ -395,7 +396,7 @@ describe('ReplicateClient.generate', () => {
       const bus = yield* ThreadBus;
       const fiber = yield* Effect.fork(
         Effect.flatMap(ReplicateClient, (c) =>
-          c.generate('tok', {
+          c.generate(Redacted.make('tok'), {
             prompt: 'stylize me',
             imageDataUrl: DataUrl.make('data:image/png;base64,QQ=='),
             aspectRatio: '3:2',
@@ -440,7 +441,7 @@ describe('ReplicateClient.generate', () => {
       // only read output once status is succeeded.
       const fiber = yield* Effect.fork(
         Effect.flatMap(ReplicateClient, (c) =>
-          c.generate('tok', {
+          c.generate(Redacted.make('tok'), {
             prompt: 'p',
             imageDataUrl: DataUrl.make('data:image/png;base64,QQ=='),
             aspectRatio: 'match_input_image',
@@ -477,7 +478,7 @@ describe('ReplicateClient.generate', () => {
     Effect.gen(function* () {
       const fiber = yield* Effect.fork(
         Effect.flatMap(ReplicateClient, (c) =>
-          c.generate('tok', {
+          c.generate(Redacted.make('tok'), {
             prompt: 'p',
             imageDataUrl: DataUrl.make('data:image/png;base64,QQ=='),
             aspectRatio: 'match_input_image',
@@ -503,7 +504,7 @@ describe('ReplicateClient.generate', () => {
     Effect.gen(function* () {
       const fiber = yield* Effect.fork(
         Effect.flatMap(ReplicateClient, (c) =>
-          c.generate('tok', {
+          c.generate(Redacted.make('tok'), {
             prompt: 'p',
             imageDataUrl: DataUrl.make('data:image/png;base64,QQ=='),
             aspectRatio: 'match_input_image',
@@ -872,6 +873,51 @@ describe('AgentClient.withActivity', () => {
         ),
       ).toBe(true);
     }).pipe(Effect.provide(threadBusTestLayer));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// opencodeClientOf — SDK adapter (permission dispatch, no casts)
+// ---------------------------------------------------------------------------
+
+describe('opencodeClientOf', () => {
+  it('routes permission replies to postSessionIdPermissionsPermissionId', async () => {
+    // The REAL SDK has no `permission` method — the old `as unknown as` cast
+    // hid a runtime TypeError on every permission reply. The adapter maps it.
+    const seen: unknown[] = [];
+    const fakeSdk = {
+      session: {
+        create: () => Promise.resolve({}),
+        prompt: () => Promise.resolve({}),
+        messages: () => Promise.resolve({}),
+        get: () => Promise.resolve({}),
+        abort: () => Promise.resolve({}),
+        revert: () => Promise.resolve({}),
+        fork: () => Promise.resolve({}),
+        children: () => Promise.resolve({}),
+      },
+      postSessionIdPermissionsPermissionId: (input: unknown) => {
+        seen.push(input);
+        return Promise.resolve({ ok: true });
+      },
+      event: { subscribe: () => Promise.resolve({}) },
+    };
+    const client = opencodeClientOf(fakeSdk);
+    await client.permission({ path: { id: 's1', permissionID: 'p1' } });
+    expect(seen).toEqual([{ path: { id: 's1', permissionID: 'p1' } }]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Redacted token — the secret cannot stringify
+// ---------------------------------------------------------------------------
+
+describe('Redacted replicate token', () => {
+  it('never leaks the secret through toString/JSON', () => {
+    const token = Redacted.make('r8_super_secret');
+    expect(String(token)).not.toContain('super_secret');
+    expect(JSON.stringify({ token })).not.toContain('super_secret');
+    expect(Redacted.value(token)).toBe('r8_super_secret'); // unwrap is explicit
   });
 });
 

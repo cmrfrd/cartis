@@ -8,6 +8,7 @@ import {
   Fiber,
   Layer,
   Option,
+  Redacted,
   Ref,
   Runtime,
   Schedule,
@@ -100,6 +101,28 @@ function unwrapData(result: unknown): unknown {
   return result;
 }
 
+/** The structural surface the real SDK client exposes (permission lives under its generated name). */
+export interface OpencodeSdkSurface {
+  session: OpencodeClient['session'];
+  postSessionIdPermissionsPermissionId(input: unknown): Promise<unknown>;
+  event: OpencodeClient['event'];
+}
+
+/**
+ * Adapt the raw SDK client to our OpencodeClient WITHOUT casts. The SDK's
+ * permission reply is `postSessionIdPermissionsPermissionId` — the previous
+ * `as unknown as OpencodeClient` claimed a `permission` method that did not
+ * exist at runtime (a TypeError on every permission reply). The adapter is the
+ * one place that knows the generated name.
+ */
+export function opencodeClientOf(sdk: OpencodeSdkSurface): OpencodeClient {
+  return {
+    session: sdk.session,
+    event: sdk.event,
+    permission: (input) => sdk.postSessionIdPermissionsPermissionId(input),
+  };
+}
+
 /**
  * Env-at-request-time variable read. Empty string counts as absent — parity
  * with today's `process.env.X ?` truthiness checks. Config.option never
@@ -109,6 +132,16 @@ function unwrapData(result: unknown): unknown {
 function envOption(name: string): Effect.Effect<Option.Option<string>> {
   return Effect.orDie(Config.option(Config.string(name))).pipe(
     Effect.map(Option.filter((value) => value.length > 0)),
+  );
+}
+
+/**
+ * Redacted sibling for secrets (spec §2): the value stringifies to
+ * `<redacted>` everywhere; `Redacted.value` unwraps only at the API call.
+ */
+function envRedacted(name: string): Effect.Effect<Option.Option<Redacted.Redacted<string>>> {
+  return Effect.orDie(Config.option(Config.redacted(name))).pipe(
+    Effect.map(Option.filter((secret) => Redacted.value(secret).length > 0)),
   );
 }
 
@@ -591,7 +624,7 @@ export const agentClientLive: Layer.Layer<AgentClient, never, ThreadBus> = Layer
       const { client } = await sdk.createOpencode(
         Option.isSome(model) ? { config: { model: model.value } } : {},
       );
-      return client as unknown as OpencodeClient;
+      return opencodeClientOf(client);
     });
     const cached = yield* Effect.cached(acquire);
     // Delegate to a per-call client resolved from the cached SDK handle.
@@ -955,8 +988,14 @@ function apiErrorDetail(error: unknown): { status: number; detail: string } {
 export class ReplicateSdk extends Context.Tag('cartis/ReplicateSdk')<
   ReplicateSdk,
   {
-    createPrediction(token: string, input: object): Effect.Effect<PredictionT, ReplicateError>;
-    getPrediction(token: string, id: string): Effect.Effect<PredictionT, ReplicateError>;
+    createPrediction(
+      token: Redacted.Redacted<string>,
+      input: object,
+    ): Effect.Effect<PredictionT, ReplicateError>;
+    getPrediction(
+      token: Redacted.Redacted<string>,
+      id: string,
+    ): Effect.Effect<PredictionT, ReplicateError>;
   }
 >() {}
 
@@ -971,7 +1010,8 @@ export const replicateSdkLive: Layer.Layer<ReplicateSdk> = Layer.effect(
   ReplicateSdk,
   Effect.gen(function* () {
     const { default: Replicate } = yield* Effect.promise(() => import('replicate'));
-    const clientFor = (token: string) => new Replicate({ auth: token, useFileOutput: false });
+    const clientFor = (token: Redacted.Redacted<string>) =>
+      new Replicate({ auth: Redacted.value(token), useFileOutput: false });
 
     const decode = (
       value: unknown,
@@ -1016,7 +1056,7 @@ export class ReplicateClient extends Context.Tag('cartis/ReplicateClient')<
   ReplicateClient,
   {
     generate(
-      token: string,
+      token: Redacted.Redacted<string>,
       input: { prompt: string; imageDataUrl?: DataUrlT; aspectRatio: AspectRatioT },
     ): Effect.Effect<string, ReplicateError | NetworkError>;
   }
@@ -1036,7 +1076,7 @@ export const replicateClientLive: Layer.Layer<
       bus.emit({ _tag: 'Art', phase, detail });
 
     const generate = (
-      token: string,
+      token: Redacted.Redacted<string>,
       input: { prompt: string; imageDataUrl?: DataUrlT; aspectRatio: AspectRatioT },
     ): Effect.Effect<string, ReplicateError | NetworkError> =>
       Effect.gen(function* () {
@@ -1285,7 +1325,7 @@ export function cartisBridge(): Plugin {
       // ----- /api/status -----
       server.middlewares.use('/api/status', (_req, res) => {
         const sres = res as ServerResponse;
-        void runtime.runPromise(envOption('REPLICATE_API_TOKEN')).then((token) => {
+        void runtime.runPromise(envRedacted('REPLICATE_API_TOKEN')).then((token) => {
           sendJson(sres, 200, { image: Option.isSome(token) ? 'replicate' : 'stub' });
         });
       });
@@ -1429,7 +1469,7 @@ export function cartisBridge(): Plugin {
           sendJson(sres, 405, { error: 'POST only' });
           return;
         }
-        void runtime.runPromise(envOption('REPLICATE_API_TOKEN')).then((tokenOpt) => {
+        void runtime.runPromise(envRedacted('REPLICATE_API_TOKEN')).then((tokenOpt) => {
           if (Option.isNone(tokenOpt)) {
             sendJson(sres, 503, {
               error: 'REPLICATE_API_TOKEN not set — using stub locally',
