@@ -94,3 +94,46 @@ export const PromptResult = Schema.Struct({
   parts: Schema.optional(Schema.Array(TextPart)),
 });
 export type PromptResultT = typeof PromptResult.Type;
+
+// ---------------------------------------------------------------------------
+// AgentEvent
+//
+// Lenient slice of the opencode global event stream (client.event.subscribe →
+// SSE of the SDK's Event union). Only the fields the bridge's activity watcher
+// reads (spec 2026-08-02-agent-activity-observability): event type, the part's
+// type/session/message/call identity, tool name, and the tool state's
+// status/title/error/timing. Unknown events simply fail decode and are skipped.
+// ---------------------------------------------------------------------------
+
+const AgentToolState = Schema.Struct({
+  status: Schema.optional(Schema.String),
+  title: Schema.optional(Schema.String),
+  error: Schema.optional(Schema.String),
+  time: Schema.optional(
+    Schema.Struct({
+      start: Schema.optional(Schema.Number),
+      end: Schema.optional(Schema.Number),
+    }),
+  ),
+});
+
+const AgentEventPart = Schema.Struct({
+  type: Schema.optional(Schema.String),
+  sessionID: Schema.optional(Schema.String),
+  messageID: Schema.optional(Schema.String),
+  callID: Schema.optional(Schema.String),
+  tool: Schema.optional(Schema.String),
+  text: Schema.optional(Schema.String),
+  state: Schema.optional(AgentToolState),
+});
+
+export const AgentEvent = Schema.Struct({
+  type: Schema.String,
+  properties: Schema.optional(
+    Schema.Struct({
+      part: Schema.optional(AgentEventPart),
+      error: Schema.optional(Schema.Unknown),
+    }),
+  ),
+});
+export type AgentEventT = typeof AgentEvent.Type;

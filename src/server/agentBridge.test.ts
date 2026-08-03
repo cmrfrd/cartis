@@ -7,7 +7,11 @@ import { httpClientFromHandler } from '../lib/http.ts';
 import { ActivityBus, activityBusTestLayer } from './activity.ts';
 import {
   AgentClient,
+  agentClientFromSdk,
   composeArtPrompt,
+  initialWatchState,
+  mapAgentEvent,
+  type OpencodeClient,
   ReplicateClient,
   ReplicateSdk,
   replicateClientLive,
@@ -28,6 +32,7 @@ const composeStub = (record: (text: string) => void): Layer.Layer<AgentClient> =
         data: { parts: [{ type: 'text', text: 'a mythic ember mage, oil painting' }] },
       });
     },
+    withActivity: (_sessionId, effect) => effect,
   });
 
 describe('composeArtPrompt', () => {
@@ -68,6 +73,7 @@ describe('composeArtPrompt', () => {
           Layer.succeed(AgentClient, {
             createSession: () => Effect.succeed('sess-e'),
             prompt: () => Effect.succeed({ data: { parts: [] } }),
+            withActivity: (_sessionId, effect) => effect,
           }),
         ),
       );
@@ -103,6 +109,7 @@ const fillStub = (
       calls.push({ sessionId, text, image });
       return Effect.succeed({ data: { parts: [{ type: 'text', text: reply }] } });
     },
+    withActivity: (_sessionId, effect) => effect,
   });
 
 const noArt = () => Effect.succeed(Option.none<{ mime: string; dataUrl: string }>());
@@ -465,4 +472,212 @@ describe('ReplicateClient.generate', () => {
       ),
     ),
   );
+});
+
+// ---------------------------------------------------------------------------
+// mapAgentEvent — pure reducer for the session activity watcher
+// ---------------------------------------------------------------------------
+
+describe('mapAgentEvent', () => {
+  const S = 'sess-1';
+  const part = (over: Record<string, unknown>) => ({
+    type: 'message.part.updated',
+    properties: { part: { sessionID: S, messageID: 'm1', ...over } },
+  });
+
+  it('maps steps, tools, thinking, and text to activity lines', () => {
+    let state = initialWatchState;
+    let out = mapAgentEvent(part({ type: 'step-start' }), S, state, 0);
+    expect(out.message).toBe('step started');
+    state = out.state;
+
+    out = mapAgentEvent(
+      part({
+        type: 'tool',
+        callID: 'c1',
+        tool: 'read',
+        state: { status: 'running', title: 'src/main.tsx' },
+      }),
+      S,
+      state,
+      0,
+    );
+    expect(out.message).toBe('tool read: running — src/main.tsx');
+    state = out.state;
+
+    out = mapAgentEvent(
+      part({
+        type: 'tool',
+        callID: 'c1',
+        tool: 'read',
+        state: { status: 'completed', title: 'src/main.tsx', time: { start: 0, end: 2100 } },
+      }),
+      S,
+      state,
+      2100,
+    );
+    expect(out.message).toBe('tool read: done — src/main.tsx (2.1s)');
+    state = out.state;
+
+    out = mapAgentEvent(
+      part({
+        type: 'tool',
+        callID: 'c2',
+        tool: 'bash',
+        state: { status: 'error', error: 'exit 1' },
+      }),
+      S,
+      state,
+      3000,
+    );
+    expect(out.message).toBe('tool bash: FAILED — exit 1');
+    state = out.state;
+
+    out = mapAgentEvent(part({ type: 'reasoning' }), S, state, 3000);
+    expect(out.message).toBe('thinking…');
+    state = out.state;
+
+    out = mapAgentEvent(part({ type: 'text', text: 'Hello wor' }), S, state, 3100);
+    expect(out.message).toBe('writing response… (9 chars)');
+  });
+
+  it('dedupes running tools per callID and thinking per messageID', () => {
+    let state = initialWatchState;
+    const running = part({
+      type: 'tool',
+      callID: 'c1',
+      tool: 'read',
+      state: { status: 'running' },
+    });
+    let out = mapAgentEvent(running, S, state, 0);
+    expect(out.message).toBe('tool read: running');
+    state = out.state;
+    out = mapAgentEvent(running, S, state, 100); // repeat update, same call
+    expect(out.message).toBeUndefined();
+    state = out.state;
+    out = mapAgentEvent(part({ type: 'reasoning' }), S, state, 100);
+    expect(out.message).toBe('thinking…');
+    state = out.state;
+    out = mapAgentEvent(part({ type: 'reasoning' }), S, state, 200); // same messageID
+    expect(out.message).toBeUndefined();
+  });
+
+  it('throttles text progress to one line per 2 seconds', () => {
+    let state = initialWatchState;
+    let out = mapAgentEvent(part({ type: 'text', text: 'ab' }), S, state, 0);
+    expect(out.message).toBe('writing response… (2 chars)'); // first chunk logs
+    state = out.state;
+    out = mapAgentEvent(part({ type: 'text', text: 'abcd' }), S, state, 1500);
+    expect(out.message).toBeUndefined(); // inside the window
+    state = out.state;
+    out = mapAgentEvent(part({ type: 'text', text: 'abcdef' }), S, state, 2100);
+    expect(out.message).toBe('writing response… (6 chars)');
+  });
+
+  it('skips other sessions, session errors surface, malformed events skip', () => {
+    const state = initialWatchState;
+    expect(
+      mapAgentEvent(
+        {
+          type: 'message.part.updated',
+          properties: { part: { sessionID: 'other', type: 'step-start' } },
+        },
+        S,
+        state,
+        0,
+      ).message,
+    ).toBeUndefined();
+    expect(
+      mapAgentEvent(
+        { type: 'session.error', properties: { error: { message: 'boom' } } },
+        S,
+        state,
+        0,
+      ).message,
+    ).toBe('agent error: boom');
+    expect(mapAgentEvent({ nonsense: true }, S, state, 0).message).toBeUndefined();
+    expect(mapAgentEvent('not even an object', S, state, 0).message).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// withActivity — watcher lifecycle over a fake SDK client
+// ---------------------------------------------------------------------------
+
+describe('AgentClient.withActivity', () => {
+  it('emits mapped events while the effect runs and aborts the subscription after', () => {
+    type Handler = (event: { data?: unknown }) => void;
+    const captured: { handler?: Handler; signal?: AbortSignal } = {};
+    const fakeClient: OpencodeClient = {
+      session: {
+        create: () => Promise.resolve({ id: 'sess-1' }),
+        prompt: () => Promise.resolve({ data: { parts: [] } }),
+      },
+      event: {
+        subscribe: (opts) => {
+          captured.handler = opts.onSseEvent;
+          captured.signal = opts.signal;
+          return Promise.resolve(undefined);
+        },
+      },
+    };
+    return Effect.gen(function* () {
+      const bus = yield* ActivityBus;
+      const runtime = yield* Effect.runtime<never>();
+      const service = agentClientFromSdk(fakeClient, { bus, runtime });
+      const result = yield* service.withActivity(
+        'sess-1',
+        Effect.sync(() => {
+          // mid-flight: fire a tool event through the captured handler
+          captured.handler?.({
+            data: {
+              type: 'message.part.updated',
+              properties: {
+                part: {
+                  type: 'tool',
+                  sessionID: 'sess-1',
+                  messageID: 'm1',
+                  callID: 'c1',
+                  tool: 'grep',
+                  state: { status: 'running', title: 'searching' },
+                },
+              },
+            },
+          });
+          expect(captured.signal?.aborted).toBe(false);
+          return 42;
+        }),
+      );
+      expect(result).toBe(42);
+      expect(captured.signal?.aborted).toBe(true); // released with the scope
+      const messages = (yield* bus.history).map((e) => e.message);
+      expect(messages).toContain('tool grep: running — searching');
+    }).pipe(Effect.provide(activityBusTestLayer));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// runFillAgent heartbeat
+// ---------------------------------------------------------------------------
+
+describe('runFillAgent heartbeat', () => {
+  it('emits still-working while a slow prompt is in flight', () => {
+    const slowStub: Layer.Layer<AgentClient> = Layer.succeed(AgentClient, {
+      createSession: () => Effect.succeed('s1'),
+      prompt: () =>
+        Effect.succeed({ data: { parts: [{ type: 'text', text: '{"patch": {}}' }] } }).pipe(
+          Effect.delay('6 seconds'),
+        ),
+      withActivity: (_sessionId, effect) => effect,
+    });
+    return Effect.gen(function* () {
+      const bus = yield* ActivityBus;
+      const fiber = yield* Effect.fork(runFillAgent(fillReq(), noArt));
+      yield* TestClock.adjust('5 seconds');
+      const during = (yield* bus.history).map((e) => e.message);
+      expect(during.some((m) => m.startsWith('still working…'))).toBe(true);
+      yield* TestClock.adjust('2 seconds');
+      yield* Fiber.join(fiber);
+    }).pipe(Effect.provide(Layer.mergeAll(slowStub, activityBusTestLayer)));
+  });
 });

@@ -9,6 +9,7 @@ import {
   Layer,
   Option,
   Ref,
+  Runtime,
   Schedule,
   Schema,
   Stream,
@@ -30,7 +31,7 @@ import {
   NetworkError,
   ReplicateError,
 } from '../contracts/errors.ts';
-import { PromptResult, SessionCreated } from '../contracts/opencode.ts';
+import { AgentEvent, PromptResult, SessionCreated } from '../contracts/opencode.ts';
 import { Prediction, type PredictionT } from '../contracts/replicate.ts';
 import type { ThemeContextT } from '../contracts/theme.ts';
 import { bytesToDataUrl } from '../images/codec.ts';
@@ -45,6 +46,12 @@ export interface OpencodeClient {
   session: {
     create(input: { body: { title: string } }): Promise<unknown>;
     prompt(input: unknown): Promise<unknown>;
+  };
+  event: {
+    subscribe(options: {
+      signal?: AbortSignal;
+      onSseEvent?: (event: { data?: unknown }) => void;
+    }): Promise<unknown>;
   };
 }
 
@@ -62,6 +69,108 @@ function envOption(name: string): Effect.Effect<Option.Option<string>> {
 
 const decodeSessionOption = Schema.decodeUnknownOption(SessionCreated);
 
+// ---------- session activity watcher ----------
+
+const decodeAgentEvent = Schema.decodeUnknownOption(AgentEvent);
+
+/** Reducer state for the activity watcher (dedupe + text throttle). */
+export interface WatchState {
+  readonly runningCalls: ReadonlySet<string>;
+  readonly reasonedMessages: ReadonlySet<string>;
+  readonly lastTextLogAt: number;
+  readonly hasLoggedText: boolean;
+}
+
+export const initialWatchState: WatchState = {
+  runningCalls: new Set<string>(),
+  reasonedMessages: new Set<string>(),
+  lastTextLogAt: 0,
+  hasLoggedText: false,
+};
+
+const TEXT_LOG_INTERVAL_MS = 2000;
+
+function sessionErrorMessage(error: unknown): string {
+  if (typeof error === 'object' && error !== null && 'message' in error) {
+    const m = (error as { message?: unknown }).message;
+    if (typeof m === 'string') return m;
+  }
+  return 'unknown';
+}
+
+/**
+ * Pure per-event reducer for the watcher (spec: agent-activity-observability):
+ * every discrete agent action becomes a readable line, deduped (one 'running'
+ * per tool call, one 'thinking' per message) and text progress throttled to
+ * one line per 2 seconds. Unknown or other-session events yield no message.
+ */
+export function mapAgentEvent(
+  raw: unknown,
+  sessionId: string,
+  state: WatchState,
+  now: number,
+): { message?: string; state: WatchState } {
+  const decoded = decodeAgentEvent(raw);
+  if (Option.isNone(decoded)) return { state };
+  const event = decoded.value;
+
+  if (event.type === 'session.error') {
+    return { message: `agent error: ${sessionErrorMessage(event.properties?.error)}`, state };
+  }
+  if (event.type !== 'message.part.updated') return { state };
+  const part = event.properties?.part;
+  if (!part || part.sessionID !== sessionId) return { state };
+
+  switch (part.type) {
+    case 'step-start':
+      return { message: 'step started', state };
+    case 'tool': {
+      const tool = part.tool ?? 'tool';
+      const status = part.state?.status;
+      if (status === 'running') {
+        const callId = part.callID ?? '';
+        if (state.runningCalls.has(callId)) return { state };
+        const title = part.state?.title;
+        return {
+          message: `tool ${tool}: running${title !== undefined && title.length > 0 ? ` — ${title}` : ''}`,
+          state: { ...state, runningCalls: new Set([...state.runningCalls, callId]) },
+        };
+      }
+      if (status === 'completed') {
+        const title = part.state?.title ?? '';
+        const start = part.state?.time?.start ?? now;
+        const end = part.state?.time?.end ?? now;
+        const secs = ((end - start) / 1000).toFixed(1);
+        return { message: `tool ${tool}: done — ${title} (${secs}s)`, state };
+      }
+      if (status === 'error') {
+        return { message: `tool ${tool}: FAILED — ${part.state?.error ?? 'unknown'}`, state };
+      }
+      return { state };
+    }
+    case 'reasoning': {
+      const messageId = part.messageID ?? '';
+      if (state.reasonedMessages.has(messageId)) return { state };
+      return {
+        message: 'thinking…',
+        state: { ...state, reasonedMessages: new Set([...state.reasonedMessages, messageId]) },
+      };
+    }
+    case 'text': {
+      if (state.hasLoggedText && now - state.lastTextLogAt < TEXT_LOG_INTERVAL_MS) {
+        return { state };
+      }
+      const chars = part.text?.length ?? 0;
+      return {
+        message: `writing response… (${String(chars)} chars)`,
+        state: { ...state, hasLoggedText: true, lastTextLogAt: now },
+      };
+    }
+    default:
+      return { state };
+  }
+}
+
 export class AgentClient extends Context.Tag('cartis/AgentClient')<
   AgentClient,
   {
@@ -72,12 +181,59 @@ export class AgentClient extends Context.Tag('cartis/AgentClient')<
       text: string,
       image?: { mime: string; dataUrl: string },
     ): Effect.Effect<unknown, AgentError>;
+    /**
+     * Run `effect` with the session's activity watcher forked in scope (live:
+     * SDK event stream → ActivityBus lines; stubs: identity).
+     */
+    withActivity<A, E>(sessionId: string, effect: Effect.Effect<A, E>): Effect.Effect<A, E>;
   }
 >() {}
 
+/** Live wiring the watcher needs: the bus to emit on + a runtime for the SSE callback. */
+export interface AgentActivityWiring {
+  readonly bus: Context.Tag.Service<ActivityBus>;
+  readonly runtime: Runtime.Runtime<never>;
+}
+
 /** Build an AgentClient over a raw opencode SDK client. */
-export function agentClientFromSdk(client: OpencodeClient): Context.Tag.Service<AgentClient> {
+export function agentClientFromSdk(
+  client: OpencodeClient,
+  activity?: AgentActivityWiring,
+): Context.Tag.Service<AgentClient> {
+  const withActivity = <A, E>(
+    sessionId: string,
+    effect: Effect.Effect<A, E>,
+  ): Effect.Effect<A, E> => {
+    if (!activity) return effect;
+    return Effect.scoped(
+      Effect.gen(function* () {
+        yield* Effect.acquireRelease(
+          Effect.sync(() => {
+            const controller = new AbortController();
+            const state = { current: initialWatchState };
+            // Best-effort: a failed subscription must never break the prompt.
+            void client.event
+              .subscribe({
+                signal: controller.signal,
+                onSseEvent: (event) => {
+                  const out = mapAgentEvent(event.data, sessionId, state.current, Date.now());
+                  state.current = out.state;
+                  if (out.message !== undefined) {
+                    Runtime.runSync(activity.runtime)(activity.bus.emit('agent', out.message));
+                  }
+                },
+              })
+              .catch(() => undefined);
+            return controller;
+          }),
+          (controller) => Effect.sync(() => controller.abort()),
+        );
+        return yield* effect;
+      }),
+    );
+  };
   return {
+    withActivity,
     createSession: (title) =>
       Effect.gen(function* () {
         const created = yield* Effect.promise(() => client.session.create({ body: { title } }));
@@ -112,9 +268,12 @@ export function agentClientFromSdk(client: OpencodeClient): Context.Tag.Service<
  * `bun run dev` startup stays fast when the agent is never invoked.
  * `OPENCODE_MODEL` via Config.option.
  */
-export const agentClientLive: Layer.Layer<AgentClient> = Layer.effect(
+export const agentClientLive: Layer.Layer<AgentClient, never, ActivityBus> = Layer.effect(
   AgentClient,
   Effect.gen(function* () {
+    const bus = yield* ActivityBus;
+    const runtime = yield* Effect.runtime<never>();
+    const wiring: AgentActivityWiring = { bus, runtime };
     const model = yield* envOption('OPENCODE_MODEL');
     const acquire = Effect.promise(async () => {
       const sdk = await import('@opencode-ai/sdk');
@@ -127,10 +286,20 @@ export const agentClientLive: Layer.Layer<AgentClient> = Layer.effect(
     // Delegate to a per-call client resolved from the cached SDK handle.
     return AgentClient.of({
       createSession: (title) =>
-        cached.pipe(Effect.flatMap((client) => agentClientFromSdk(client).createSession(title))),
+        cached.pipe(
+          Effect.flatMap((client) => agentClientFromSdk(client, wiring).createSession(title)),
+        ),
       prompt: (sessionId, text, image) =>
         cached.pipe(
-          Effect.flatMap((client) => agentClientFromSdk(client).prompt(sessionId, text, image)),
+          Effect.flatMap((client) =>
+            agentClientFromSdk(client, wiring).prompt(sessionId, text, image),
+          ),
+        ),
+      withActivity: (sessionId, effect) =>
+        cached.pipe(
+          Effect.flatMap((client) =>
+            agentClientFromSdk(client, wiring).withActivity(sessionId, effect),
+          ),
         ),
     });
   }),
@@ -185,7 +354,7 @@ export function composeArtPrompt(
     ]
       .filter((s) => s.length > 0)
       .join('\n\n');
-    const result = yield* agent.prompt(id, instruction);
+    const result = yield* agent.withActivity(id, agent.prompt(id, instruction));
     const composed = promptText(result);
     const final = composed.length > 0 ? composed : themeContext.lookAndFeel;
     yield* bus.emit('agent', `art prompt composed (${String(final.length)} chars)`);
@@ -243,7 +412,23 @@ export function runFillAgent(
       `User request: ${req.userPrompt}`,
     ].join('\n\n');
     yield* bus.emit('agent', `fill: “${req.userPrompt.slice(0, 60)}”`);
-    const result = yield* agent.prompt(sessionId, text, image);
+    const startedAt = yield* Clock.currentTimeMillis;
+    const elapsed = Clock.currentTimeMillis.pipe(
+      Effect.map((now) => Math.round((now - startedAt) / 1000)),
+    );
+    const promptWithLiveness = Effect.scoped(
+      Effect.gen(function* () {
+        yield* Effect.forkScoped(
+          elapsed.pipe(
+            Effect.flatMap((secs) => bus.emit('agent', `still working… (${String(secs)}s)`)),
+            Effect.delay('5 seconds'),
+            Effect.forever,
+          ),
+        );
+        return yield* agent.withActivity(sessionId, agent.prompt(sessionId, text, image));
+      }),
+    );
+    const result = yield* promptWithLiveness;
     const json = extractJson(promptText(result));
     if (Option.isNone(json)) {
       return yield* Effect.fail(new AgentError({ reason: 'no-fill' }));

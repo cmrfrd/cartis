@@ -24,18 +24,15 @@ export function bridgeLive(
   root: string,
 ): Layer.Layer<ActivityBus | FileStore | ReplicateSdk | ReplicateClient | AgentClient> {
   // Leaf services shared across the runtime (one ActivityBus, one ReplicateSdk).
-  const leaves = Layer.mergeAll(
-    activityBusLive,
-    fileStoreLayer(root),
-    replicateSdkLive,
-    agentClientLive,
-  );
+  const leaves = Layer.mergeAll(activityBusLive, fileStoreLayer(root), replicateSdkLive);
+  // AgentClient's activity watcher emits on the SHARED bus (from `leaves`).
+  const agentClient = agentClientLive.pipe(Layer.provide(leaves));
   // ReplicateClient needs ReplicateSdk + ActivityBus (from `leaves`) + HttpClient.
   const replicateClient = replicateClientLive.pipe(
     Layer.provide(leaves),
     Layer.provide(AppHttpLive),
   );
-  return Layer.merge(leaves, replicateClient);
+  return Layer.mergeAll(leaves, agentClient, replicateClient);
 }
 
 export type BridgeRuntime = ManagedRuntime.ManagedRuntime<
