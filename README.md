@@ -82,8 +82,14 @@ themes/layouts migration used a `templateId` and are deliberately not
 migrated — old rows fail decode and are skipped (clean break); delete
 `cartis-data/cards/*` from that era if you want the folder tidy.
 
-Gallery is the roundtrip surface: click a saved card to reopen it in the
-Builder; saving again updates the **same** record.
+The Builder is a document editor: the **document bar** at the top of the form
+shows the open card's title and status (New card / Saved / ● Unsaved changes)
+with **New**, **Save**, and **Save as copy** actions. New and opening another
+card while you have unsaved changes ask first — **Save first / Discard /
+Cancel**. Switching theme or layout edits the open document (values for shared
+argument keys carry over); New is the only fresh start. The Gallery is the
+roundtrip surface: click a saved card to reopen it in the Builder (saving again
+updates the **same** record), or **Duplicate** it into a fresh copy.
 
 ## Adding a theme / adding a layout
 

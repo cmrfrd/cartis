@@ -158,6 +158,20 @@ function GalleryCards() {
             <Button tone="ghost" onClick={() => gallery.openCard(card)}>
               Open in builder
             </Button>
+            <Button
+              tone="ghost"
+              onClick={() =>
+                void shell?.archive.saveCard({
+                  name: `${card.name} copy`,
+                  themeId: card.themeId,
+                  layoutId: card.layoutId,
+                  data: { ...card.data, name: `${card.name} copy` },
+                  holo: card.holo,
+                })
+              }
+            >
+              Duplicate
+            </Button>
             <Button tone="danger" onClick={() => void shell?.archive.deleteCard(card.id)}>
               Delete
             </Button>

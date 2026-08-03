@@ -106,4 +106,34 @@ describe('GalleryView', () => {
     expect(shell.archive.cards[0]?.name).toBe('Twice');
     unmount();
   });
+
+  it('duplicates a card into a new record, leaving the original untouched', async () => {
+    const { container, shell, unmount } = await mountApp();
+    await vi.waitFor(() => expect(shell.archive.ready).toBe(true));
+    await shell.archive.saveCard({
+      name: 'Solo',
+      themeId: 'arcane',
+      layoutId: 'classic',
+      data: { name: 'Solo' },
+      holo: true,
+    });
+    shell.view = 'gallery';
+    await tick();
+    await click(
+      Array.from(container.querySelectorAll('button')).find(
+        (b) => b.textContent === 'Saved cards',
+      ) ?? null,
+    );
+    await click(
+      Array.from(container.querySelectorAll('button')).find((b) => b.textContent === 'Duplicate') ??
+        null,
+    );
+    await vi.waitFor(() => expect(shell.archive.cards).toHaveLength(2));
+    const names = shell.archive.cards.map((c) => c.name).sort();
+    expect(names).toEqual(['Solo', 'Solo copy']);
+    const copy = shell.archive.cards.find((c) => c.name === 'Solo copy');
+    expect(copy?.holo).toBe(true);
+    expect(copy?.data.name).toBe('Solo copy');
+    unmount();
+  });
 });
