@@ -91,16 +91,18 @@ export function imageProviderStubLayer(
 
 const isOk = (status: number): boolean => status >= 200 && status < 300;
 
-/** Best-effort ErrorBody detail off a non-ok response (missing → undefined). */
-function detailOf(
+/** Best-effort ErrorBody off a non-ok response — carries the server error's tag (spec §13). */
+function errorBodyOf(
   response: HttpClientResponse.HttpClientResponse,
-): Effect.Effect<string | undefined> {
+): Effect.Effect<{ detail?: string; remoteTag?: string }> {
   return response.json.pipe(
     Effect.map((body) => {
       const decoded = Schema.decodeUnknownOption(ErrorBody)(body);
-      return Option.isSome(decoded) ? decoded.value.error : undefined;
+      return Option.isSome(decoded)
+        ? { detail: decoded.value.error, remoteTag: decoded.value.tag }
+        : {};
     }),
-    Effect.orElseSucceed(() => undefined),
+    Effect.orElseSucceed(() => ({})),
   );
 }
 
@@ -149,8 +151,10 @@ export const imageProviderLive: Layer.Layer<ImageProvider, never, HttpClient.Htt
             .execute(request)
             .pipe(Effect.mapError((cause) => new NetworkError({ url, cause })));
           if (!isOk(response.status)) {
-            const detail = yield* detailOf(response);
-            return yield* Effect.fail(new ImageBridgeError({ status: response.status, detail }));
+            const { detail, remoteTag } = yield* errorBodyOf(response);
+            return yield* Effect.fail(
+              new ImageBridgeError({ status: response.status, detail, remoteTag }),
+            );
           }
           const body = yield* response.json.pipe(
             Effect.mapError((cause) => new NetworkError({ url, cause })),

@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { Cause, Effect, Layer, ManagedRuntime, Option } from 'effect';
-import { BodyError } from '../contracts/errors.ts';
+import { BodyError, statusOfError } from '../contracts/errors.ts';
 import { AppHttpLive } from '../lib/http.ts';
 import {
   type AgentClient,
@@ -76,13 +76,22 @@ export function readBody(req: IncomingMessage): Effect.Effect<unknown, BodyError
   });
 }
 
+/** The failure's tag when it is a tagged error (every domain failure is). */
+function tagOf(error: unknown): string {
+  if (typeof error === 'object' && error !== null && '_tag' in error) {
+    const { _tag } = error;
+    if (typeof _tag === 'string') return _tag;
+  }
+  return 'UnknownError';
+}
+
 /**
- * Run `effect` on the runtime and translate the result to an HTTP response:
+ * Run `effect` on the runtime and translate the result to an HTTP response
+ * (spec Pillar C §13 — the error TAG survives the round-trip):
  *   - success        → 200 + JSON value
- *   - typed failure  → 500 `{ error: e.message }`   (parity with respondWith)
- *   - defect         → 500 `{ error: String(defect) }`
- * Explicit non-500 statuses (404/405/503) are produced by route logic before
- * this helper is reached.
+ *   - typed failure  → statusOfError(tag) + `{ tag, error: e.message }`
+ *   - defect         → 500 `{ tag: 'Defect', error: String(defect) }`
+ * Explicit route-level statuses (404/405/503) are produced before this helper.
  */
 export function respond<A, E extends { message: string }, R>(
   runtime: ManagedRuntime.ManagedRuntime<R, never>,
@@ -97,16 +106,17 @@ export function respond<A, E extends { message: string }, R>(
     // failureOption/dieOption see through nested causes (Sequential/Parallel).
     const failure = Cause.failureOption(exit.cause);
     if (Option.isSome(failure)) {
-      sendJson(res, 500, { error: failure.value.message });
+      const tag = tagOf(failure.value);
+      sendJson(res, statusOfError(tag), { tag, error: failure.value.message });
       return;
     }
     const defect = Cause.dieOption(exit.cause);
     if (Option.isSome(defect)) {
       const d = defect.value;
-      sendJson(res, 500, { error: d instanceof Error ? d.message : String(d) });
+      sendJson(res, 500, { tag: 'Defect', error: d instanceof Error ? d.message : String(d) });
       return;
     }
     // Interrupt / empty — nothing sensible to say, but keep the 500 contract.
-    sendJson(res, 500, { error: 'request failed' });
+    sendJson(res, 500, { tag: 'Interrupted', error: 'request failed' });
   });
 }

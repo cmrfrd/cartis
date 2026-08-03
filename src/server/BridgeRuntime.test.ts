@@ -3,6 +3,7 @@ import { PassThrough } from 'node:stream';
 import { Effect, Layer, ManagedRuntime } from 'effect';
 import { describe, expect } from 'vitest';
 import { it } from '../../test/effect.ts';
+import { BodyError, StoreError, statusOfError } from '../contracts/errors.ts';
 import { readBody, respond } from './BridgeRuntime.ts';
 
 /**
@@ -37,8 +38,49 @@ function fakeRes(): { res: ServerResponse; statusCode: () => number; body: () =>
   };
 }
 
+describe('respond — typed errors survive the round-trip (spec §13)', () => {
+  it('serializes a tagged failure as { tag, error } with the mapped status', () =>
+    new Promise<void>((resolve) => {
+      const failing = Effect.fail(
+        new StoreError({ op: 'list', status: 500, detail: 'disk exploded' }),
+      );
+      const runtime = ManagedRuntime.make(Layer.empty);
+      const { res, statusCode, body } = fakeRes();
+      respond(runtime, res, failing);
+      setTimeout(() => {
+        const parsed = JSON.parse(body()) as { tag: string; error: string };
+        expect(parsed.tag).toBe('StoreError'); // the typed identity crosses the wire
+        expect(parsed.error).toBe('store list failed (500)'); // message byte-parity
+        expect(statusCode()).toBe(500);
+        void runtime.dispose().then(resolve);
+      }, 50);
+    }));
+
+  it('maps malformed-input tags to 400 via statusOfError', () =>
+    new Promise<void>((resolve) => {
+      const failing = Effect.fail(new BodyError({ cause: new Error('bad json') }));
+      const runtime = ManagedRuntime.make(Layer.empty);
+      const { res, statusCode, body } = fakeRes();
+      respond(runtime, res, failing);
+      setTimeout(() => {
+        const parsed = JSON.parse(body()) as { tag: string };
+        expect(parsed.tag).toBe('BodyError');
+        expect(statusCode()).toBe(400); // caller's fault, not a 500
+        void runtime.dispose().then(resolve);
+      }, 50);
+    }));
+
+  it('statusOfError: BodyError/ParseError → 400, everything else → 500', () => {
+    expect(statusOfError('BodyError')).toBe(400);
+    expect(statusOfError('ParseError')).toBe(400);
+    expect(statusOfError('StoreError')).toBe(500);
+    expect(statusOfError('AgentError')).toBe(500);
+    expect(statusOfError('Defect')).toBe(500);
+  });
+});
+
 describe('respond — defect branch', () => {
-  it('renders Error defects as message only (no "Error: " prefix)', () =>
+  it('renders Error defects as message only (no "Error: " prefix) with tag Defect', () =>
     new Promise<void>((resolve) => {
       // A never-failing Effect that immediately dies with an Error — this is the
       // same path that agentClientLive takes when opencode is not installed.
@@ -48,8 +90,9 @@ describe('respond — defect branch', () => {
       respond(runtime, res, dying);
       // respond is fire-and-forget (void); settle after the micro-task queue drains.
       setTimeout(() => {
-        const parsed = JSON.parse(body()) as { error: string };
+        const parsed = JSON.parse(body()) as { tag: string; error: string };
         expect(parsed.error).toBe('spawn opencode ENOENT');
+        expect(parsed.tag).toBe('Defect');
         void runtime.dispose().then(resolve);
       }, 50);
     }));

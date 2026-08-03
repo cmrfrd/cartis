@@ -52,16 +52,22 @@ export class ChatThread extends Context.Tag('cartis/ChatThread')<ChatThread, Cha
 
 const isOk = (status: number): boolean => status >= 200 && status < 300;
 
-/** Best-effort ErrorBody detail off a non-ok response (missing → undefined). */
-function detailOf(
+/**
+ * Best-effort ErrorBody off a non-ok response. The decoded `tag` is the
+ * server-side error's identity (spec §13) — it rides on the client error as
+ * `remoteTag`, so failures are structurally discriminable end-to-end.
+ */
+function errorBodyOf(
   response: HttpClientResponse.HttpClientResponse,
-): Effect.Effect<string | undefined> {
+): Effect.Effect<{ detail?: string; remoteTag?: string }> {
   return response.json.pipe(
     Effect.map((body) => {
       const decoded = Schema.decodeUnknownOption(ErrorBody)(body);
-      return Option.isSome(decoded) ? decoded.value.error : undefined;
+      return Option.isSome(decoded)
+        ? { detail: decoded.value.error, remoteTag: decoded.value.tag }
+        : {};
     }),
-    Effect.orElseSucceed(() => undefined),
+    Effect.orElseSucceed(() => ({})),
   );
 }
 
@@ -82,8 +88,10 @@ export const chatThreadLive: Layer.Layer<ChatThread, never, HttpClient.HttpClien
           .execute(request)
           .pipe(Effect.mapError((cause) => new NetworkError({ url, cause })));
         if (!isOk(response.status)) {
-          const detail = yield* detailOf(response);
-          return yield* Effect.fail(new ChatRequestError({ status: response.status, detail }));
+          const { detail, remoteTag } = yield* errorBodyOf(response);
+          return yield* Effect.fail(
+            new ChatRequestError({ status: response.status, detail, remoteTag }),
+          );
         }
         const json = yield* response.json.pipe(
           Effect.mapError((cause) => new NetworkError({ url, cause })),

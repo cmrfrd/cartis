@@ -20,6 +20,12 @@ import { ThreadMessage, ThreadSummary } from './thread.ts';
 
 export const ErrorBody = Schema.Struct({
   error: Schema.String,
+  /**
+   * The server-side tagged error's `_tag` (spec §13) — a failure crosses the
+   * wire as a TYPED error the client can discriminate structurally, not a
+   * bare string. Optional for leniency toward older/foreign payloads.
+   */
+  tag: Schema.optional(Schema.String),
 });
 export type ErrorBodyT = typeof ErrorBody.Type;
 
