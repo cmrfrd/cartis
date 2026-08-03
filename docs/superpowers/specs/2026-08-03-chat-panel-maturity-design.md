@@ -49,7 +49,10 @@ replacing the top branch strip.
 - New state: `pendingAttachments: ChatAttachmentT[]`.
 - `addAttachments(files: FileList | File[])`: async; per file —
   - accepted mimes: `image/*`, `text/*`, `application/json`, plus `.md` by
-    extension (browsers give `.md` an empty mime);
+    extension (browsers give `.md` an EMPTY mime — the gate must infer one
+    before minting the branded `MimeType`: `.md` → `text/markdown`, any other
+    extension-accepted file → `text/plain`; an empty string would fail the
+    brand at decode);
   - caps: **8 MB per file**, **6 attachments per message**; violations skip the
     file and set `note` naming it (e.g. `attachment too large: ref.png (max 8 MB)`,
     `unsupported attachment type: art.psd`);
@@ -57,9 +60,14 @@ replacing the top branch strip.
     `src`; no object-URL lifecycle).
 - `removeAttachment(index)` — composer × button.
 - `submitDraft` sends when **text OR attachments** exist; submit clears both.
+  An attachment-only send (empty draft) still sends the full prompt scaffold;
+  the `USER_REQUEST_MARKER` is followed by the stand-in text
+  `(see attached files)` so the stored request — and its rehydrated user
+  bubble — is never empty.
 - `clear()` also clears `pendingAttachments`.
-- **Edit semantics (v1):** `beginEdit` seeds from text only — an edited resend
-  drops the original attachments. Stated, intentional.
+- **Edit and regenerate drop attachments (v1):** `beginEdit` seeds from text
+  only, and `runRegenerate` replays only the stored user text — a resend by
+  either path loses the original attachments. Stated, intentional.
 
 ### Wire + opencode (bridge)
 
@@ -137,18 +145,24 @@ can't-scroll-up-while-streaming defect.
 
 The top branch strip is deleted. `ThreadState.loadBranches` upgrades:
 
-1. Fetch the sibling set: current session's parent + the parent's children
-   (via existing `children` endpoint; when unforked, self + own children).
-   `Session.parentID` is the link; the revert marker is NOT used (it does not
-   reliably survive a resend).
+1. Fetch the sibling set via a **new `/api/chat/siblings?sessionId=…` route
+   that REPLACES `/api/chat/children`** (the client cannot compute siblings
+   itself — nothing exposes `Session.parentID` to it). Server-side the bridge
+   does `session.get(sid) → parentID`, then `children(parentID ?? sid)`, and
+   returns the full sibling set INCLUDING the root: `ThreadSummary` gains no
+   new fields, but the response lists the parent first (`parentId` absent
+   marks it). When unforked with no children, the set is just the session
+   itself → no arrows. The revert marker is NOT used (it does not reliably
+   survive a resend).
 2. Fetch each sibling's history via the existing history endpoint (sibling
    counts are tiny — one per edit).
 3. Compute the **divergence point** with a pure function
    `divergencePoint(current, sibling histories)` comparing (role, text-part
    text) prefixes; result stored as
-   `branchPoint?: { messageId, index, count }` where `index`/`count` are the
-   current session's 1-based position among id-sorted siblings (opencode ids
-   are creation-ordered).
+   `branchPoint?: { messageId, index, count }`. Ordering is COSMETIC:
+   parent first, then children sorted by sessionId; if live testing shows
+   wrong chronology, the bridge switches the sort to the session's
+   `time.created` (server-side data, no contract change).
 4. Render ‹ n/m › arrows on the message named by `branchPoint.messageId`
    (fallback when comparison is inconclusive: the last user message; hidden
    when no siblings). Arrows call the existing `switchBranch` with the
@@ -165,7 +179,9 @@ computation; zero usable siblings → no arrows (today's silent behavior).
   inconclusive).
 - **Bridge:** `runChatTurn` emits filename'd FilePartInputs before the unnamed
   art part and the text part (stub agent asserts part order/shape);
-  `mapSessionMessages` maps named file parts → Image/File and skips unnamed.
+  `mapSessionMessages` maps named file parts → Image/File and skips unnamed;
+  `/api/chat/siblings` returns parent-first sibling sets for forked, unforked,
+  and parentless sessions (stub client).
 - **Mounted (happy-dom):** `+` wires the hidden input; thumbs render/remove;
   Send morphs (disabled-empty → enabled → Stop) ; empty state appears and
   yields to messages; markdown renders (bold → `<strong>`); ✓ copy feedback;
