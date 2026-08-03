@@ -9,7 +9,7 @@ describe('GalleryView', () => {
     await vi.waitFor(() => {
       expect(shell.archive.ready && shell.library.ready).toBe(true);
     });
-    await shell.archive.saveCard({
+    const hero = await shell.archive.saveCard({
       name: 'Stored Hero',
       themeId: 'arcane',
       layoutId: 'classic',
@@ -21,6 +21,7 @@ describe('GalleryView', () => {
       format: 'png',
       bytes: bytesOf('x'),
       type: 'image/png',
+      cardId: hero.id,
     });
     await shell.library.add({
       name: 'A Knight',
@@ -32,6 +33,11 @@ describe('GalleryView', () => {
 
     shell.view = 'gallery';
     await tick();
+    // renders live in the LIST view, grouped under their card
+    await click(
+      Array.from(container.querySelectorAll('button')).find((b) => b.textContent === 'List') ??
+        null,
+    );
     await vi.waitFor(() => {
       expect(container.textContent).toContain('stored-hero.png');
     });
@@ -69,9 +75,8 @@ describe('GalleryView', () => {
       ) ?? null,
     );
     await click(
-      Array.from(container.querySelectorAll('button')).find(
-        (b) => b.textContent === 'Open in builder',
-      ) ?? null,
+      Array.from(container.querySelectorAll('button')).find((b) => b.textContent === 'Open') ??
+        null,
     );
     await tick();
     expect(shell.view).toBe('builder');
@@ -137,7 +142,7 @@ describe('GalleryView', () => {
     unmount();
   });
 
-  it('groups renders under their card, legacy renders under Other renders, and search filters', async () => {
+  it('shows grouped renders in list view, hides unlinked exports, and search filters', async () => {
     const { container, shell, unmount } = await mountApp();
     await vi.waitFor(() => expect(shell.archive.ready).toBe(true));
     const saved = await shell.archive.saveCard({
@@ -162,22 +167,78 @@ describe('GalleryView', () => {
     });
     shell.view = 'gallery';
     await tick();
-    // default section IS the unified Saved cards view
     const text = () => container.textContent ?? '';
+    // Tile view (default): compact grid, no render strips, no unlinked exports.
     expect(text()).toContain('Linked Hero');
-    expect(text()).toContain('linked-hero.png'); // grouped under the card
-    expect(text()).toContain('Other renders');
-    expect(text()).toContain('ancient-render.png'); // legacy, ungrouped
-    // search: ability text matches the card (renders of other cards filter out)
+    expect(text()).not.toContain('Other renders');
+    expect(text()).not.toContain('ancient-render.png');
+    // List view: the card's renders appear grouped under it.
+    await click(
+      Array.from(container.querySelectorAll('button')).find((b) => b.textContent === 'List') ??
+        null,
+    );
+    expect(text()).toContain('linked-hero.png');
+    expect(text()).not.toContain('ancient-render.png'); // unlinked stays hidden
+    // Search narrows by ability text and shows the empty state on no hit.
     const search = container.querySelector('input[placeholder="Search cards and renders…"]');
     await setInput(search, 'fly high');
     expect(text()).toContain('Linked Hero');
-    expect(text()).not.toContain('Other renders'); // ancient render filtered out
     await setInput(search, 'zzz-nothing');
     expect(text()).toContain('Nothing matches your search.');
-    await setInput(search, 'ancient');
-    expect(text()).not.toContain('Linked Hero');
-    expect(text()).toContain('ancient-render.png');
+    unmount();
+  });
+
+  it('re-saving an opened card updates the same record', async () => {
+    const { shell, unmount } = await mountApp();
+    await vi.waitFor(() => expect(shell.archive.ready).toBe(true));
+    const first = await shell.archive.saveCard({
+      name: 'Once',
+      themeId: 'arcane',
+      layoutId: 'classic',
+      data: { name: 'Once' },
+      holo: false,
+    });
+    const again = await shell.archive.saveCard({
+      id: first.id,
+      name: 'Twice',
+      themeId: 'arcane',
+      layoutId: 'classic',
+      data: { name: 'Twice' },
+      holo: false,
+    });
+    expect(again.id).toBe(first.id);
+    expect(shell.archive.cards).toHaveLength(1);
+    expect(shell.archive.cards[0]?.name).toBe('Twice');
+    unmount();
+  });
+
+  it('duplicates a card into a new record, leaving the original untouched', async () => {
+    const { container, shell, unmount } = await mountApp();
+    await vi.waitFor(() => expect(shell.archive.ready).toBe(true));
+    await shell.archive.saveCard({
+      name: 'Solo',
+      themeId: 'arcane',
+      layoutId: 'classic',
+      data: { name: 'Solo' },
+      holo: true,
+    });
+    shell.view = 'gallery';
+    await tick();
+    await click(
+      Array.from(container.querySelectorAll('button')).find(
+        (b) => b.textContent === 'Saved cards',
+      ) ?? null,
+    );
+    await click(
+      Array.from(container.querySelectorAll('button')).find((b) => b.textContent === 'Duplicate') ??
+        null,
+    );
+    await vi.waitFor(() => expect(shell.archive.cards).toHaveLength(2));
+    const names = shell.archive.cards.map((c) => c.name).sort();
+    expect(names).toEqual(['Solo', 'Solo copy']);
+    const copy = shell.archive.cards.find((c) => c.name === 'Solo copy');
+    expect(copy?.holo).toBe(true);
+    expect(copy?.data.name).toBe('Solo copy');
     unmount();
   });
 
@@ -199,7 +260,7 @@ describe('GalleryView', () => {
     expect(tile?.textContent).toContain('Tile Hero');
     expect(tile?.textContent).toContain('Tessellate.');
     // Info block appears alongside (name appears in both face and info).
-    expect(container.textContent).toContain('Open in builder');
+    expect(container.textContent).toContain('Open');
     // Toggle to list: tiles disappear, info rows remain.
     await click(
       Array.from(container.querySelectorAll('button')).find((b) => b.textContent === 'List') ??
@@ -207,7 +268,7 @@ describe('GalleryView', () => {
     );
     expect(container.querySelector('[data-testid="card-tile"]')).toBeNull();
     expect(container.textContent).toContain('Tile Hero');
-    expect(container.textContent).toContain('Open in builder');
+    expect(container.textContent).toContain('Open');
     // Back to tiles.
     await click(
       Array.from(container.querySelectorAll('button')).find((b) => b.textContent === 'Tiles') ??

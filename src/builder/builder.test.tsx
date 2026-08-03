@@ -476,4 +476,24 @@ describe('document bar (mounted)', () => {
     expect(container.textContent).toContain('Nyra, Ember Sage copy'); // rebound title
     unmount();
   });
+
+  it('renames a saved card through the document bar title input', async () => {
+    const { container, shell, unmount } = await mountApp();
+    await vi.waitFor(() => expect(shell.archive.ready).toBe(true));
+    const saveButton = Array.from(container.querySelectorAll('button')).find(
+      (b) => b.textContent === 'Save',
+    );
+    await click(saveButton ?? null);
+    await vi.waitFor(() => expect(shell.archive.cards).toHaveLength(1));
+    // The first text input in the form aside is the document-bar title.
+    const titleInput = container.querySelector('aside input[type="text"]');
+    await setInput(titleInput, 'Renamed Hero');
+    expect(container.textContent).toContain('● Unsaved changes');
+    await click(saveButton ?? null);
+    await vi.waitFor(() => {
+      expect(shell.archive.cards[0]?.name).toBe('Renamed Hero');
+      expect(shell.archive.cards[0]?.data.name).toBe('Renamed Hero');
+    });
+    unmount();
+  });
 });

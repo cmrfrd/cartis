@@ -11,7 +11,7 @@ import { noteFromCause } from '../contracts/errors';
 import { ExportBar } from '../export/ExportBar';
 import { ImageProvider } from '../images/ImageProvider';
 import type { StoredCard } from '../storage/CardArchive';
-import { Button, Panel, PreviewStage, SelectInput, TextAreaInput } from '../ui';
+import { Button, Panel, PreviewStage, SelectInput, TextAreaInput, TextInput } from '../ui';
 import { AgentFill } from './AgentFill';
 import { FormRenderer } from './FormRenderer';
 import { PortraitSection } from './PortraitSection';
@@ -378,7 +378,13 @@ function DocumentBar() {
     <Panel title="Card">
       <div className="flex flex-col gap-2">
         <div className="flex items-center justify-between gap-2">
-          <p className="truncate font-display text-sm">{title}</p>
+          <div className="min-w-0 flex-1">
+            <TextInput
+              value={String(data.name ?? '')}
+              onValue={(v) => builder.setField('name', v)}
+              placeholder="Untitled card"
+            />
+          </div>
           <span className="shrink-0 text-[11px] text-ink-dim">
             {dirty ? '● Unsaved changes' : savedId ? 'Saved' : 'New card'}
           </span>

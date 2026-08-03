@@ -4,13 +4,7 @@ import { CARD_HEIGHT, CARD_WIDTH } from '../cards/base/CardSurface';
 import { downloadUrl } from '../export/exportCard';
 import type { StoredCard, StoredExport } from '../storage/CardArchive';
 import { Button, EmptyState, TabBar, TextInput } from '../ui';
-import {
-  exportMatchesQuery,
-  groupExports,
-  layoutOf,
-  matchesQuery,
-  resolveCardData,
-} from './gallery-helpers';
+import { groupExports, layoutOf, matchesQuery, resolveCardData } from './gallery-helpers';
 
 const SECTIONS = [
   { id: 'cards', label: 'Saved cards' },
@@ -138,7 +132,7 @@ function GalleryImages() {
   );
 }
 
-const TILE_SCALE = 0.42;
+const TILE_SCALE = 0.55;
 
 /** The full card face, live-rendered at mini scale (tile view). */
 function CardTile(props: { card: StoredCard }) {
@@ -169,9 +163,39 @@ function CardTile(props: { card: StoredCard }) {
   );
 }
 
-/** The shared info block: identity, actions, and the card's grouped renders. */
-function CardEntryInfo(props: { card: StoredCard; renders: readonly StoredExport[] }) {
+/** Shared per-card actions (both views). */
+function CardActions(props: { card: StoredCard }) {
   const { is: gallery, shell } = GalleryView.get();
+  const { card } = props;
+  return (
+    <div className="flex gap-1.5">
+      <Button tone="ghost" onClick={() => gallery.openCard(card)}>
+        Open
+      </Button>
+      <Button
+        tone="ghost"
+        onClick={() =>
+          void shell?.archive.saveCard({
+            name: `${card.name} copy`,
+            themeId: card.themeId,
+            layoutId: card.layoutId,
+            data: { ...card.data, name: `${card.name} copy` },
+            holo: card.holo,
+          })
+        }
+      >
+        Duplicate
+      </Button>
+      <Button tone="danger" onClick={() => void shell?.archive.deleteCard(card.id)}>
+        Delete
+      </Button>
+    </div>
+  );
+}
+
+/** List entry: identity + actions + the card's renders. */
+function CardListEntry(props: { card: StoredCard; renders: readonly StoredExport[] }) {
+  const { is: gallery } = GalleryView.get();
   const { card } = props;
   return (
     <div className="flex min-w-0 flex-1 flex-col gap-2.5">
@@ -186,27 +210,8 @@ function CardEntryInfo(props: { card: StoredCard; renders: readonly StoredExport
             {card.themeId} · {card.layoutId} · {new Date(card.updatedAt).toLocaleString()}
           </p>
         </button>
-        <div className="flex shrink-0 gap-1.5">
-          <Button tone="ghost" onClick={() => gallery.openCard(card)}>
-            Open in builder
-          </Button>
-          <Button
-            tone="ghost"
-            onClick={() =>
-              void shell?.archive.saveCard({
-                name: `${card.name} copy`,
-                themeId: card.themeId,
-                layoutId: card.layoutId,
-                data: { ...card.data, name: `${card.name} copy` },
-                holo: card.holo,
-              })
-            }
-          >
-            Duplicate
-          </Button>
-          <Button tone="danger" onClick={() => void shell?.archive.deleteCard(card.id)}>
-            Delete
-          </Button>
+        <div className="shrink-0">
+          <CardActions card={card} />
         </div>
       </div>
       {props.renders.length > 0 && <RenderStrip items={props.renders} />}
@@ -218,10 +223,9 @@ function GalleryCards() {
   const { is: gallery, shell, query, cardsView } = GalleryView.get();
   const cards = shell?.archive.cards ?? [];
   const exports = shell?.archive.exports ?? [];
-  const { byCard, other } = groupExports(cards, exports);
+  const { byCard } = groupExports(cards, exports);
   const visibleCards = cards.filter((card) => matchesQuery(card, query));
-  const visibleOther = other.filter((item) => exportMatchesQuery(item, query));
-  if (cards.length === 0 && exports.length === 0) {
+  if (cards.length === 0) {
     return <EmptyState message="No saved cards yet." hint="Save from the Builder's form panel." />;
   }
   return (
@@ -253,25 +257,31 @@ function GalleryCards() {
           List
         </Button>
       </div>
-      {visibleCards.length === 0 && visibleOther.length === 0 && (
+      {visibleCards.length === 0 && (
         <EmptyState message="Nothing matches your search." hint="Try a different query." />
       )}
       {cardsView === 'tiles' ? (
-        <ul className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+        <ul className="flex flex-wrap gap-4">
           {visibleCards.map((card) => (
             <li
               key={card.id}
-              className="flex gap-4 rounded-lg border border-edge bg-panel px-4 py-3"
+              className="flex w-fit flex-col items-center gap-2 rounded-lg border border-edge bg-panel p-3"
             >
               <button
                 type="button"
-                className="shrink-0 cursor-pointer"
+                className="cursor-pointer rounded-lg transition-transform hover:scale-[1.02]"
                 onClick={() => gallery.openCard(card)}
                 aria-label={`Open ${card.name} in builder`}
               >
                 <CardTile card={card} />
               </button>
-              <CardEntryInfo card={card} renders={byCard.get(card.id) ?? []} />
+              <p
+                className="max-w-full truncate font-display text-sm"
+                style={{ maxWidth: CARD_WIDTH * TILE_SCALE }}
+              >
+                {card.name}
+              </p>
+              <CardActions card={card} />
             </li>
           ))}
         </ul>
@@ -279,18 +289,10 @@ function GalleryCards() {
         <ul className="flex flex-col gap-3">
           {visibleCards.map((card) => (
             <li key={card.id} className="rounded-lg border border-edge bg-panel px-4 py-2.5">
-              <CardEntryInfo card={card} renders={byCard.get(card.id) ?? []} />
+              <CardListEntry card={card} renders={byCard.get(card.id) ?? []} />
             </li>
           ))}
         </ul>
-      )}
-      {visibleOther.length > 0 && (
-        <section className="flex flex-col gap-2">
-          <h3 className="font-base text-[11px] text-ink-dim uppercase tracking-wide">
-            Other renders
-          </h3>
-          <RenderStrip items={visibleOther} />
-        </section>
       )}
     </div>
   );
