@@ -7,12 +7,12 @@ import { AppShell } from '../app/AppShell';
 import { runAppExit } from '../app/runtime';
 import { getLayout, getTheme, listThemes } from '../cards/registry';
 import type { CardData, FieldValue, Layout, Theme } from '../cards/types';
-import { noteFromCause } from '../contracts/errors';
+import { ThreadPanel } from '../chat/ThreadPanel';
+import { type ChatContext, ThreadState } from '../chat/ThreadState';
 import { ExportBar } from '../export/ExportBar';
 import { ImageProvider } from '../images/ImageProvider';
 import type { StoredCard } from '../storage/CardArchive';
-import { Button, Panel, PreviewStage, SelectInput, TextAreaInput, TextInput } from '../ui';
-import { AgentFill } from './AgentFill';
+import { Button, Panel, PreviewStage, SelectInput, TextInput } from '../ui';
 import { FormRenderer } from './FormRenderer';
 import { PortraitSection } from './PortraitSection';
 
@@ -33,22 +33,43 @@ export class BuilderView extends Component {
   /** Preview the shared card back instead of the front (both export). */
   showBack = false;
   previewEl = ref<HTMLDivElement>();
-  /** Conversational fill: one opencode session per card-editing episode. */
-  fillSessionId?: string = undefined;
-  aiPrompt = '';
-  aiBusy = false;
-  aiNote = '';
+  /** The card's chat sidebar (adopted child; opencode session per card). */
+  thread = new ThreadState();
   /** Modified-flag: any edit sets it; save/load/new clear it. */
   dirty = false;
   /** A guarded destructive intent awaiting the user's choice (document guard). */
   pendingIntent?: PendingIntent = undefined;
 
   protected new() {
+    this.thread.context = () => this.chatContext();
     const first = listThemes()[0];
     if (first) {
       this.pickTheme(first.id);
       this.dirty = false; // initialization is not an edit
     }
+  }
+
+  /** The card context + appliers the chat turn edits through (spec §Decision 3). */
+  private chatContext(): ChatContext {
+    const theme = this.theme;
+    const layout = this.layout;
+    return {
+      themeContext: {
+        lookAndFeel: theme.lookAndFeel,
+        palette: theme.artFlavor?.(this.data) ?? '',
+        argumentSummary: layout.fields.map((f) => f.key).join(', '),
+      },
+      fields: layout.fields.map((f) => ({ kind: f.kind, key: f.key, label: f.label })),
+      currentData: { ...this.data },
+      currentArtFileName: this.currentArtFileName(),
+      applyPatch: (patch) => {
+        this.data = { ...this.data, ...patch };
+        this.dirty = true;
+      },
+      runArt: (action) => {
+        void this.runArtAction(action.brief, action.editCurrentArt);
+      },
+    };
   }
 
   mount() {
@@ -110,7 +131,7 @@ export class BuilderView extends Component {
     this.layoutId = first?.id ?? '';
     this.data = { ...(first ? first.defaults : {}), ...preserved };
     this.dirty = true;
-    this.fillSessionId = undefined; // new episode (spec decision 6)
+    // The chat session belongs to the card, not the theme — it persists here.
   }
 
   /** Switching layouts is lossless for shared argument keys — user data wins over defaults. */
@@ -125,7 +146,6 @@ export class BuilderView extends Component {
     this.data = { ...next.defaults, ...preserved };
     this.layoutId = id;
     this.dirty = true;
-    this.fillSessionId = undefined; // new episode (spec decision 6)
   }
 
   loadCard(card: StoredCard) {
@@ -136,7 +156,9 @@ export class BuilderView extends Component {
     this.savedId = card.id;
     this.savedNote = '';
     this.dirty = false;
-    this.fillSessionId = undefined; // new episode (spec decision 6)
+    // Rehydrate the card's conversation, or start fresh (spec: edge semantics).
+    if (card.chatSessionId !== undefined) this.thread.bind(card.chatSessionId);
+    else this.thread.clear();
   }
 
   /** Unguarded executor: blank card in the CURRENT theme + layout. */
@@ -147,9 +169,8 @@ export class BuilderView extends Component {
     this.savedId = undefined;
     this.savedNote = '';
     this.dirty = false;
-    this.fillSessionId = undefined;
-    this.aiNote = '';
     this.portraitKey = undefined;
+    this.thread.clear();
   }
 
   requestNew() {
@@ -230,61 +251,15 @@ export class BuilderView extends Component {
     return this.shell?.library.images.find((i) => i.id === artId)?.fileName;
   }
 
-  /** One conversational fill turn (spec decisions 6, 7, 10). */
-  async fillWithAI() {
-    if (this.aiBusy || this.aiPrompt.trim().length === 0) return;
-    // Snapshot reactive fields before building the effect (snapshot rule).
-    const userPrompt = this.aiPrompt.trim();
-    const sessionId = this.fillSessionId;
-    const currentData = { ...this.data };
-    const theme = this.theme;
-    const layout = this.layout;
-    const currentArtFileName = this.currentArtFileName();
-    const request = {
-      sessionId,
-      themeContext: {
-        lookAndFeel: theme.lookAndFeel,
-        palette: theme.artFlavor?.(currentData) ?? '',
-        argumentSummary: layout.fields.map((f) => f.key).join(', '),
-      },
-      fields: layout.fields.map((f) => ({ kind: f.kind, key: f.key, label: f.label })),
-      currentData,
-      currentArtFileName,
-      userPrompt,
-    };
-    this.aiBusy = true;
-    this.aiNote = 'Asking the assistant…';
-    try {
-      const exit = await runAppExit(Effect.flatMap(AgentFill, (a) => a.fill(request)));
-      if (Exit.isFailure(exit)) {
-        this.aiNote = noteFromCause(exit.cause);
-        return;
-      }
-      const out = exit.value;
-      this.fillSessionId = out.sessionId;
-      // Targeted merge — only the returned keys change (spec decision 10).
-      this.data = { ...this.data, ...out.patch };
-      this.dirty = true;
-      this.aiPrompt = '';
-      if (out.artAction) {
-        this.aiNote = 'Applied — generating art…';
-        await this.generateFromArtAction(out.artAction.brief, out.artAction.editCurrentArt);
-      } else {
-        this.aiNote = 'Applied.';
-      }
-    } finally {
-      this.aiBusy = false;
-    }
-  }
-
-  /** Auto-run of the art pipeline from a fill turn's artAction (spec decision 7). */
-  private async generateFromArtAction(brief: string, editCurrentArt: boolean) {
+  /**
+   * Run the art pipeline for a chat turn's artAction (spec decision 7). Progress
+   * streams into the chat as Art events; success updates the art slot. Called by
+   * ThreadState via the injected chat context.
+   */
+  async runArtAction(brief: string, editCurrentArt: boolean) {
     const library = this.shell?.library;
     const artKey = this.artKey;
-    if (!library || !artKey) {
-      this.aiNote = 'Applied (art skipped — no art slot or library).';
-      return;
-    }
+    if (!library || !artKey) return; // no art slot or library — nothing to do
     // Snapshot before the effect.
     const theme = this.theme;
     const layout = this.layout;
@@ -319,10 +294,7 @@ export class BuilderView extends Component {
         }),
       ),
     );
-    if (Exit.isFailure(exit)) {
-      this.aiNote = noteFromCause(exit.cause);
-      return;
-    }
+    if (Exit.isFailure(exit)) return; // the Art 'error' event surfaces it in chat
     const out = exit.value;
     const stored = await library.add({
       name: `${String(this.data.name ?? 'card')} art`,
@@ -333,7 +305,6 @@ export class BuilderView extends Component {
       type: out.type,
     });
     this.setField(artKey, stored.id);
-    this.aiNote = `Applied — art generated (via ${out.via}).`;
   }
 
   async saveCard() {
@@ -350,6 +321,8 @@ export class BuilderView extends Component {
         layoutId: this.layoutId,
         data: this.data,
         holo: this.holo,
+        // Persist the card→session pointer once a conversation exists (lazy).
+        chatSessionId: this.thread.sessionId,
       });
       this.savedId = saved.id;
       this.savedNote = `Saved “${saved.name}” to the gallery.`;
@@ -364,6 +337,7 @@ export class BuilderView extends Component {
       <div className="flex h-full">
         <BuilderForm />
         <BuilderPreview />
+        <ThreadPanel />
       </div>
     );
   }
@@ -425,17 +399,7 @@ function GuardConfirm(props: { title: string }) {
 }
 
 function BuilderForm() {
-  const {
-    is: builder,
-    theme,
-    layout,
-    themeId,
-    layoutId,
-    portraitKey,
-    aiPrompt,
-    aiBusy,
-    aiNote,
-  } = BuilderView.get();
+  const { is: builder, theme, layout, themeId, layoutId, portraitKey } = BuilderView.get();
   return (
     <aside className="flex w-96 shrink-0 flex-col gap-4 overflow-y-auto border-r border-edge p-4">
       <DocumentBar />
@@ -454,24 +418,6 @@ function BuilderForm() {
           options={theme.layouts.map((l) => ({ value: l.id, label: l.name }))}
         />
         <p className="mt-2 text-xs text-ink-dim">{layout.description}</p>
-      </Panel>
-      <Panel title="AI assistant">
-        <div className="flex flex-col gap-2">
-          <TextAreaInput
-            value={aiPrompt}
-            onValue={(v) => {
-              builder.aiPrompt = v;
-            }}
-            rows={2}
-            placeholder="a fire mage with a phoenix companion…"
-          />
-          <div className="flex items-center gap-3">
-            <Button disabled={aiBusy} onClick={() => void builder.fillWithAI()}>
-              {aiBusy ? 'Thinking…' : 'Fill with AI'}
-            </Button>
-            {aiNote && <span className="text-xs text-ink-dim">{aiNote}</span>}
-          </div>
-        </div>
       </Panel>
       <Panel title="Details">
         <FormRenderer />

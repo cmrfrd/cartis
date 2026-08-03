@@ -13,7 +13,6 @@
 
 import type { Effect } from 'effect';
 import { Layer, ManagedRuntime } from 'effect';
-import { type AgentFill, agentFillEmpty, agentFillLive } from '../builder/AgentFill';
 import { type ChatEvents, chatEventsEmpty, chatEventsLive } from '../chat/ChatEvents';
 import { type ChatThread, chatThreadEmpty, chatThreadLive } from '../chat/ChatThread';
 import {
@@ -25,13 +24,12 @@ import { AppHttpLive } from '../lib/http';
 import { type StoreClient, storeClientLive, storeClientMemory } from '../storage/StoreClient';
 
 /** The service surface the app's effects may require. */
-export type AppServices = StoreClient | ImageProvider | AgentFill | ChatThread | ChatEvents;
+export type AppServices = StoreClient | ImageProvider | ChatThread | ChatEvents;
 
 /** Live app layer: real services over the live (fetch) HTTP client. */
 export const appLive: Layer.Layer<AppServices> = Layer.mergeAll(
   storeClientLive,
   imageProviderLive,
-  agentFillLive,
   chatThreadLive,
   chatEventsLive,
 ).pipe(Layer.provide(AppHttpLive));
@@ -40,7 +38,6 @@ export const appLive: Layer.Layer<AppServices> = Layer.mergeAll(
 export interface TestAppOverrides {
   readonly store?: Layer.Layer<StoreClient>;
   readonly image?: Layer.Layer<ImageProvider>;
-  readonly fill?: Layer.Layer<AgentFill>;
   readonly thread?: Layer.Layer<ChatThread>;
   readonly threadEvents?: Layer.Layer<ChatEvents>;
 }
@@ -54,7 +51,6 @@ export function testAppLayerWith(overrides: TestAppOverrides = {}): Layer.Layer<
   return Layer.mergeAll(
     overrides.store ?? storeClientMemory,
     overrides.image ?? imageProviderStubLayer(),
-    overrides.fill ?? agentFillEmpty,
     overrides.thread ?? chatThreadEmpty,
     overrides.threadEvents ?? chatEventsEmpty,
   );

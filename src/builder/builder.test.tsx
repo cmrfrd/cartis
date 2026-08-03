@@ -2,15 +2,33 @@ import { Effect, Layer } from 'effect';
 import { describe, expect, it, vi } from 'vitest';
 import { click, mountApp, setInput, tick } from '../../test/util';
 import { setAppLayer, testAppLayerWith } from '../app/runtime';
-import type { AgentFillRequestT } from '../contracts/api';
-import { StoreError } from '../contracts/errors';
+import { ChatThread, type ChatThreadShape } from '../chat/ChatThread';
+import type { ChatTurnRequestT, ChatTurnResponseT } from '../contracts/api';
+import { AgentFillError, StoreError } from '../contracts/errors';
 import { type GenerationInput, ImageProvider } from '../images/ImageProvider';
 import type { StoredCard } from '../storage/CardArchive';
 import { StoreClient } from '../storage/StoreClient';
-import { AgentFill } from './AgentFill';
 import { BuilderView } from './BuilderView';
 
 const bytesOf = (text: string): ArrayBuffer => new TextEncoder().encode(text).buffer as ArrayBuffer;
+
+/** A ChatThread fake — turn defaults to a canned reply; the rest are inert. */
+const chatStub = (over: Partial<ChatThreadShape> = {}): Layer.Layer<ChatThread> =>
+  Layer.succeed(ChatThread, {
+    turn: () =>
+      Effect.succeed({
+        sessionId: 's1',
+        assistantText: '{"reply":"ok"}',
+        patch: {},
+      } satisfies ChatTurnResponseT),
+    history: () => Effect.succeed([]),
+    cancel: () => Effect.void,
+    revert: () => Effect.void,
+    regenerate: () => Effect.fail(new AgentFillError({ status: 0, detail: 'x' })),
+    fork: () => Effect.succeed('fork-1'),
+    replyPermission: () => Effect.void,
+    ...over,
+  });
 
 describe('BuilderView', () => {
   it('renders the arcane form from its schema with defaults applied', async () => {
@@ -129,95 +147,73 @@ describe('BuilderView', () => {
     builder.set(null);
   });
 
-  it('merges a targeted fill patch and leaves other fields intact', async () => {
+  it('applies a chat turn patch and leaves other fields intact', async () => {
     setAppLayer(
       testAppLayerWith({
-        fill: Layer.succeed(
-          AgentFill,
-          AgentFill.of({
-            fill: () => Effect.succeed({ sessionId: 's1', patch: { name: 'Vorak' } }),
-          }),
-        ),
+        thread: chatStub({
+          turn: () =>
+            Effect.succeed({
+              sessionId: 'ses-1',
+              assistantText: '{"reply":"Renamed him.","patch":{"name":"Vorak"}}',
+              patch: { name: 'Vorak' },
+            }),
+        }),
       }),
     );
     const builder = BuilderView.new();
     builder.setField('ability', 'Draw a card.');
-    builder.aiPrompt = 'rename him';
-    await builder.fillWithAI();
+    await builder.thread.send('rename him');
     expect(builder.data.name).toBe('Vorak');
     expect(builder.data.ability).toBe('Draw a card.'); // untouched
-    expect(builder.fillSessionId).toBe('s1');
-    expect(builder.aiNote).toBe('Applied.');
+    expect(builder.thread.sessionId).toBe('ses-1');
+    expect(builder.dirty).toBe(true);
     builder.set(null);
   });
 
-  it('sends the CURRENT data on later turns so hand edits survive', async () => {
-    const seen: AgentFillRequestT[] = [];
+  it('sends the CURRENT data + session on later turns so hand edits survive', async () => {
+    const seen: ChatTurnRequestT[] = [];
     setAppLayer(
       testAppLayerWith({
-        fill: Layer.succeed(
-          AgentFill,
-          AgentFill.of({
-            fill: (req) => {
-              seen.push(req);
-              return Effect.succeed({ sessionId: 's1', patch: {} });
-            },
-          }),
-        ),
+        thread: chatStub({
+          turn: (req) => {
+            seen.push(req);
+            return Effect.succeed({ sessionId: 's1', assistantText: '{"reply":"ok"}', patch: {} });
+          },
+        }),
       }),
     );
     const builder = BuilderView.new();
-    builder.aiPrompt = 'first turn';
-    await builder.fillWithAI();
+    await builder.thread.send('first turn');
     builder.setField('ability', 'Hand edit wins.');
-    builder.aiPrompt = 'second turn';
-    await builder.fillWithAI();
-    expect(seen[0]?.sessionId).toBeUndefined(); // first turn creates the episode
+    await builder.thread.send('second turn');
+    expect(seen[0]?.sessionId).toBeUndefined(); // first turn creates the session
     expect(seen[1]?.sessionId).toBe('s1'); // later turns reuse it
     expect(seen[1]?.currentData.ability).toBe('Hand edit wins.');
     builder.set(null);
   });
 
-  it('discards the fill session on theme, layout, or card switch', async () => {
+  it('keeps the chat session across theme/layout switches, resets on new card', async () => {
     setAppLayer(
       testAppLayerWith({
-        fill: Layer.succeed(
-          AgentFill,
-          AgentFill.of({
-            fill: () => Effect.succeed({ sessionId: 's1', patch: {} }),
-          }),
-        ),
+        thread: chatStub({
+          turn: () =>
+            Effect.succeed({ sessionId: 's1', assistantText: '{"reply":"ok"}', patch: {} }),
+        }),
       }),
     );
     const builder = BuilderView.new();
-    builder.aiPrompt = 'start';
-    await builder.fillWithAI();
-    expect(builder.fillSessionId).toBe('s1');
+    await builder.thread.send('start');
+    expect(builder.thread.sessionId).toBe('s1');
     builder.pickLayout('fullart');
-    expect(builder.fillSessionId).toBeUndefined();
-
-    builder.aiPrompt = 'again';
-    await builder.fillWithAI();
-    expect(builder.fillSessionId).toBe('s1');
+    expect(builder.thread.sessionId).toBe('s1'); // same card — chat persists
     builder.pickTheme('arcane');
-    expect(builder.fillSessionId).toBeUndefined();
-
-    builder.aiPrompt = 'once more';
-    await builder.fillWithAI();
-    builder.loadCard({
-      id: 'c1',
-      name: 'Loaded',
-      themeId: 'arcane',
-      layoutId: 'classic',
-      data: { name: 'Loaded' },
-      holo: false,
-      updatedAt: 1,
-    });
-    expect(builder.fillSessionId).toBeUndefined();
+    expect(builder.thread.sessionId).toBe('s1'); // same card — chat persists
+    builder.newCard();
+    expect(builder.thread.sessionId).toBeUndefined(); // new card — fresh chat
     builder.set(null);
   });
 
-  it('auto-runs art generation when the fill returns an artAction', async () => {
+  it('runs art generation when a chat turn returns an artAction', async () => {
     const generate = vi.fn((input: GenerationInput) => {
       expect(input.brief).toBe('a phoenix companion');
       expect(input.themeContext?.lookAndFeel.toLowerCase()).toContain('oil');
@@ -227,34 +223,25 @@ describe('BuilderView', () => {
     });
     setAppLayer(
       testAppLayerWith({
-        fill: Layer.succeed(
-          AgentFill,
-          AgentFill.of({
-            fill: () =>
-              Effect.succeed({
-                sessionId: 's1',
-                patch: { name: 'Vorak' },
-                artAction: { brief: 'a phoenix companion', editCurrentArt: true },
-              }),
-          }),
-        ),
+        thread: chatStub({
+          turn: () =>
+            Effect.succeed({
+              sessionId: 's1',
+              assistantText:
+                '{"reply":"Making art.","patch":{"name":"Vorak"},"artAction":{"brief":"a phoenix companion","editCurrentArt":true}}',
+              patch: { name: 'Vorak' },
+              artAction: { brief: 'a phoenix companion', editCurrentArt: true },
+            }),
+        }),
         image: Layer.succeed(ImageProvider, ImageProvider.of({ generate })),
       }),
     );
     const { shell, unmount } = await mountApp();
     await vi.waitFor(() => expect(shell.library.ready).toBe(true));
-    // Reach the mounted BuilderView through its context (headless BuilderView has no shell/library).
-    const builderEl = document.querySelector('aside');
-    expect(builderEl).not.toBeNull();
-    // Drive the fill through the mounted app: find the AI textarea + button.
-    const textarea = document.querySelector(
-      'textarea[placeholder="a fire mage with a phoenix companion…"]',
-    );
+    // Drive a turn through the mounted composer.
+    const textarea = document.querySelector('textarea[placeholder="Message the assistant…"]');
     await setInput(textarea, 'make him a phoenix mage');
-    const fillButton = Array.from(document.querySelectorAll('button')).find(
-      (b) => b.textContent === 'Fill with AI',
-    );
-    await click(fillButton ?? null);
+    await click(document.querySelector('[data-testid="composer-send"]'));
     await vi.waitFor(() => {
       expect(generate).toHaveBeenCalledOnce();
       expect(shell.library.images).toHaveLength(1);
@@ -294,27 +281,27 @@ describe('document lifecycle (headless)', () => {
     builder.set(null);
   });
 
-  it('pickTheme edits the same document: keeps savedId, preserves overlap, drops fill session', () => {
+  it('pickTheme edits the same document: keeps savedId, preserves overlap, keeps chat session', () => {
     const builder = BuilderView.new();
     builder.loadCard(makeCard({ data: { name: 'Keeper', essence: 'tide' } }));
-    builder.fillSessionId = 's1';
+    builder.thread.sessionId = 's1';
     builder.pickTheme('arcane');
     expect(builder.savedId).toBe('card-1'); // identity kept
     expect(builder.data.name).toBe('Keeper'); // overlapping key preserved
     expect(builder.dirty).toBe(true);
-    expect(builder.fillSessionId).toBeUndefined();
+    expect(builder.thread.sessionId).toBe('s1'); // chat is per-card — survives the theme switch
     builder.set(null);
   });
 
-  it('newCard seeds current theme+layout defaults and clears the document', () => {
+  it('newCard seeds current theme+layout defaults and clears the document + chat', () => {
     const builder = BuilderView.new();
     builder.loadCard(makeCard());
     builder.pickLayout('fullart');
-    builder.fillSessionId = 's1';
+    builder.thread.sessionId = 's1';
     builder.newCard();
     expect(builder.savedId).toBeUndefined();
     expect(builder.dirty).toBe(false);
-    expect(builder.fillSessionId).toBeUndefined();
+    expect(builder.thread.sessionId).toBeUndefined(); // fresh card → fresh chat
     expect(builder.layoutId).toBe('fullart'); // stays in the current context
     expect(builder.data.name).toBe('Nyra, Unbound'); // fullart defaults
     builder.set(null);

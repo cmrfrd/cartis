@@ -69,6 +69,8 @@ export class ThreadState extends State {
   sessionId?: string = undefined;
   pendingPermission?: PendingPermission = undefined;
   note?: string = undefined;
+  /** The composer draft (UI state; cleared on submit). */
+  draft = '';
 
   /** Injected by BuilderView: the current card's chat context + appliers. */
   context?: () => ChatContext | undefined = undefined;
@@ -121,6 +123,22 @@ export class ThreadState extends State {
     this.pendingPermission = undefined;
     this.running = false;
     this.note = undefined;
+    this.draft = '';
+  }
+
+  /** Submit the composer draft as a turn (Enter / Send button). */
+  submitDraft(): void {
+    const text = this.draft.trim();
+    if (text.length === 0 || this.running) return;
+    this.draft = '';
+    void this.send(text);
+  }
+
+  /** Interrupt the running turn (abort the opencode session). */
+  async cancel(): Promise<void> {
+    const sid = this.sessionId;
+    if (!this.running || sid === undefined) return;
+    await runAppExit(Effect.flatMap(ChatThread, (c) => c.cancel(sid)));
   }
 
   /** Reload the conversation from opencode (stale session → fresh/empty). */

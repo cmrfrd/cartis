@@ -48,11 +48,7 @@ export const StatusResponse = Schema.Struct({
 export type StatusResponseT = typeof StatusResponse.Type;
 
 // ---------------------------------------------------------------------------
-// POST /api/agent/fill
-//
-// Conversational AI form fill (spec §AI pipelines): session-per-episode,
-// per-turn currentData snapshot (hand edits win), optional vision attach of
-// the current art, targeted patch out.
+// Card chat panel (spec 2026-08-03) — session passthrough over opencode.
 // ---------------------------------------------------------------------------
 
 const FieldValue = Schema.Union(Schema.String, Schema.Number, Schema.Boolean, Schema.Undefined);
@@ -69,32 +65,11 @@ const FieldSummary = Schema.Struct({
   label: Schema.String,
 });
 
-export const AgentFillRequest = Schema.Struct({
-  sessionId: Schema.optional(Schema.String),
-  themeContext: ThemeContext,
-  fields: Schema.Array(FieldSummary),
-  currentData: CardDataSchema,
-  currentArtFileName: Schema.optional(Schema.String),
-  userPrompt: Schema.String,
-});
-export type AgentFillRequestT = typeof AgentFillRequest.Type;
-
 export const ArtAction = Schema.Struct({
   brief: Schema.String,
   editCurrentArt: Schema.Boolean,
 });
 export type ArtActionT = typeof ArtAction.Type;
-
-export const AgentFillResponse = Schema.Struct({
-  sessionId: Schema.String,
-  patch: CardDataSchema,
-  artAction: Schema.optional(ArtAction),
-});
-export type AgentFillResponseT = typeof AgentFillResponse.Type;
-
-// ---------------------------------------------------------------------------
-// Card chat panel (spec 2026-08-03) — session passthrough over opencode.
-// ---------------------------------------------------------------------------
 
 // POST /api/chat/turn — one conversational card-editing turn.
 // Request mirrors the fill request (session-per-card, currentData snapshot,

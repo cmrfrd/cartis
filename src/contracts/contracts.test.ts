@@ -13,8 +13,6 @@ import { it } from '../../test/effect';
 import type { FieldSpec } from '../cards/types';
 import { AppHttpLive, httpClientFromHandler } from '../lib/http';
 import {
-  AgentFillRequest,
-  AgentFillResponse,
   ChatHistoryResponse,
   ChatTurnRequest,
   ChatTurnResponse,
@@ -442,25 +440,6 @@ describe('StatusResponse', () => {
   it('decodes stub status', () => {
     const decoded = Schema.decodeUnknownSync(StatusResponse)({ image: 'stub' });
     expect(decoded.image).toBe('stub');
-  });
-});
-
-describe('AgentFillRequest / Response', () => {
-  it('decodes a request and a response with an artAction', () => {
-    const req = Schema.decodeUnknownSync(AgentFillRequest)({
-      themeContext: { lookAndFeel: 'oil', palette: 'ember', argumentSummary: 'name' },
-      fields: [{ kind: 'text', key: 'name', label: 'Name' }],
-      currentData: { name: 'Nyra' },
-      userPrompt: 'make him angrier',
-    });
-    expect(req.userPrompt).toBe('make him angrier');
-    const res = Schema.decodeUnknownSync(AgentFillResponse)({
-      sessionId: 's1',
-      patch: { name: 'Vorak' },
-      artAction: { brief: 'angrier face', editCurrentArt: true },
-    });
-    expect(res.patch.name).toBe('Vorak');
-    expect(res.artAction?.editCurrentArt).toBe(true);
   });
 });
 

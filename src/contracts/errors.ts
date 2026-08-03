@@ -69,7 +69,7 @@ export class AgentError extends Data.TaggedError('AgentError')<{
   }
 }
 
-/** Client-side fill request failures. src/builder/AgentFill.ts */
+/** Client-side chat/turn request failures. src/chat/ChatThread.ts */
 export class AgentFillError extends Data.TaggedError('AgentFillError')<{
   readonly status: number;
   readonly detail?: string;
