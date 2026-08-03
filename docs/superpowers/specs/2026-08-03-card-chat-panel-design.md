@@ -137,6 +137,41 @@ Gap-analysis resolutions — binding, same weight as Decisions:
 - **Reverted messages.** History mapping excludes reverted messages —
   edit/regenerate leaves no ghosts after rehydrate.
 
+## Future-proofing invariants (robustness pass)
+
+Rules that keep the design stable as opencode, the transport, and the UI evolve:
+
+1. **One materializer, both transports, forever.** Under the v1 JSON transport the
+   assistant's opencode-side message TEXT is the raw JSON blob — so history would
+   rehydrate as JSON unless the same materialization runs there too. One shared
+   pure function (`materializeAssistantParts(text): ThreadPart[]` in
+   `src/contracts/materialize.ts` — reply text + `card_patch`/`card_generate_art`
+   ToolCall parts) is used by BOTH the live turn path and server history mapping.
+   After the P4 MCP inversion it stays on as the fallback parser: old sessions
+   carry JSON-contract turns, new ones carry real tool calls; history mapping
+   handles both indefinitely.
+2. **No raw JSON on screen, even mid-stream.** Streaming text deltas of a v1 turn
+   are the JSON blob accumulating — so text parts of a RUNNING assistant message
+   render as a dimmed writing indicator (reasoning and tool parts still stream
+   visibly); materialization replaces them at turn end. P4's plain-text replies
+   flip this rule to true incremental text with no model change.
+3. **Tolerant boundaries, surviving streams.** The bridge maps the opencode
+   part/event types it knows and DROPS the rest (SDK drift never crashes the
+   pipeline — `mapAgentEvent` returning no event is the normal path, not an
+   error); the client skips SSE events that fail decode (one bad event never kills
+   the stream). Same lenient philosophy as store rows.
+4. **Dependency direction is law.** `contracts/thread.ts` imports nothing from
+   `contracts/opencode.ts`; only the server bridge maps opencode shapes → thread
+   shapes; UI and ThreadState import thread contracts only. The guiding
+   principle's replaceability claim becomes a grep, enforced in the sweep.
+5. **cartis persists pointers, never transcripts.** `chatSessionId` is the only
+   chat state we store; opencode owns the transcript and rehydration re-derives
+   the rest. Thread schema changes therefore never require a data migration.
+6. **Pure fold, portable store.** The event fold is a standalone pure function
+   (`foldThreadEvent(messages, event): ThreadMessage[]` — gallery-helpers
+   precedent); `ThreadState` merely applies it. Exhaustively testable without
+   mounting; survives any future store change.
+
 ## Engineering requirements (binding)
 
 Repo standards: no `any`/`!`/`as`-on-external-data; every wire shape Schema-decoded;
@@ -148,7 +183,8 @@ matrix (every part/event variant); bridge passthrough decode + revert/fork/abort
 routes + history part-mapping; ThreadState assembly (ordered upserts, streaming text,
 status transitions, branch switch, rehydration, lifecycle bind/clear); mounted UI
 (send flow, part rendering incl. tool registry, composer/cancel swap, action bar,
-branch picker); removal greps. `bun run verify` green per task; live e2e per phase
+branch picker); removal greps + the dependency-direction grep
+(`contracts/opencode` imports confined to the server bridge). `bun run verify` green per task; live e2e per phase
 (real conversation with streamed tool parts; edit/regenerate/branch live; persistence
 across reopen + server restart).
 
@@ -157,4 +193,8 @@ across reopen + server restart).
 Markdown/code-highlight rendering (plain text first); attachments in the composer
 (photo attach stays in art tools; the model supports adding it later); speech;
 feedback buttons; multi-thread list UI beyond the card's own branch tree; thread
-titles/summarize; cost controls; deleting opencode sessions with cards.
+titles/summarize; cost controls; deleting opencode sessions with cards;
+server-side turn exclusivity (one-turn-at-a-time is client-enforced —
+single-window assumption); canceling an in-flight replicate art run (turn cancel
+aborts the session only); history virtualization/caps for very long
+conversations.
