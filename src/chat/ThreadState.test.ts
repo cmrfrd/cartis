@@ -451,15 +451,88 @@ describe('ThreadState capabilities', () => {
     state.set(null);
   });
 
-  it('loadBranches() lists the session forks', async () => {
+  it('loadBranches() computes a branchPoint from sibling divergence', async () => {
+    const mine = [
+      {
+        id: MessageId.make('u1'),
+        role: 'user' as const,
+        status: 'complete' as const,
+        parts: [{ _tag: 'Text' as const, text: 'hi' }],
+      },
+      {
+        id: MessageId.make('u2'),
+        role: 'user' as const,
+        status: 'complete' as const,
+        parts: [{ _tag: 'Text' as const, text: 'mine' }],
+      },
+    ];
+    const theirs = [
+      mine[0] as (typeof mine)[number],
+      {
+        id: MessageId.make('x2'),
+        role: 'user' as const,
+        status: 'complete' as const,
+        parts: [{ _tag: 'Text' as const, text: 'theirs' }],
+      },
+    ];
     const state = makeThread(
       threadStub({
-        siblings: () => Effect.succeed([{ sessionId: SessionId.make('b1'), title: 'branch a' }]),
+        siblings: () =>
+          Effect.succeed([
+            { sessionId: SessionId.make('root') }, // parent first (no parentId)
+            { sessionId: SessionId.make('fork-1'), parentId: SessionId.make('root') },
+          ]),
+        history: (sid) => Effect.succeed(sid === 'root' ? theirs : mine),
+      }),
+    );
+    state.sessionId = SessionId.make('fork-1');
+    state.messages = mine;
+    await state.loadBranches();
+    expect(state.siblingIds).toEqual(['root', 'fork-1']);
+    expect(state.branchPoint).toEqual({
+      messageId: MessageId.make('u2'), // where the fork's history diverges
+      index: 2, // fork-1 is the 2nd sibling
+      count: 2,
+    });
+    state.set(null);
+  });
+
+  it('loadBranches() with a lone session clears the branchPoint (no arrows)', async () => {
+    const state = makeThread(
+      threadStub({
+        siblings: () => Effect.succeed([{ sessionId: SessionId.make('orig') }]),
       }),
     );
     state.sessionId = SessionId.make('orig');
     await state.loadBranches();
-    expect(state.branches.map((b) => b.sessionId)).toEqual(['b1']);
+    expect(state.branchPoint).toBeUndefined();
+    expect(state.siblingIds).toEqual(['orig']);
+    state.set(null);
+  });
+
+  it('switchSibling() moves prev/next through the ordered sibling set', async () => {
+    const switched: string[] = [];
+    const state = makeThread(
+      threadStub({
+        siblings: () =>
+          Effect.succeed([
+            { sessionId: SessionId.make('root') },
+            { sessionId: SessionId.make('fork-1'), parentId: SessionId.make('root') },
+          ]),
+        history: () => Effect.succeed([]),
+      }),
+    );
+    state.sessionId = SessionId.make('fork-1');
+    state.siblingIds = [SessionId.make('root'), SessionId.make('fork-1')];
+    const original = state.switchBranch.bind(state);
+    state.switchBranch = async (sid) => {
+      switched.push(sid);
+      await original(sid);
+    };
+    await state.switchSibling(-1);
+    expect(switched).toEqual(['root']);
+    await state.switchSibling(-1); // already at the first sibling → no move
+    expect(switched).toEqual(['root']);
     state.set(null);
   });
 

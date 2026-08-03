@@ -42,6 +42,7 @@ import type {
 import { attachmentPolicy, fileToDataUrl, MAX_ATTACHMENTS } from './attachments';
 import { ChatEvents } from './ChatEvents';
 import { ChatThread } from './ChatThread';
+import { divergencePoint } from './divergence';
 import { foldThreadEvent } from './fold';
 
 /** The card context + appliers BuilderView injects so a turn can edit the card. */
@@ -86,6 +87,10 @@ export class ThreadState extends State {
   pendingAttachments: ChatAttachmentT[] = [];
   /** Branch (fork) siblings of the current session (branch picker). */
   branches: ThreadSummaryT[] = [];
+  /** Ordered sibling session ids (parent first) for ‹ n/m › navigation. */
+  siblingIds: SessionIdT[] = [];
+  /** Where the ‹ n/m › arrows anchor: the divergence message + our position. */
+  branchPoint?: { messageId: MessageIdT; index: number; count: number } = undefined;
   /** True between cancel() and the turn settling — makes the turn finalize incomplete. */
   canceling = false;
   /** The user message currently being inline-edited, and its working text. */
@@ -147,6 +152,8 @@ export class ThreadState extends State {
     this.draft = '';
     this.pendingAttachments = [];
     this.branches = [];
+    this.siblingIds = [];
+    this.branchPoint = undefined;
     this.canceling = false;
   }
 
@@ -304,16 +311,68 @@ export class ThreadState extends State {
     void this.loadBranches();
   }
 
-  /** Load the current session's branch siblings into `branches`. */
+  /**
+   * Load the parent-first sibling set and compute the ‹ n/m › branch point:
+   * fetch the OTHER siblings' histories (failures drop that sibling), find
+   * where the current history diverges, fall back to the last user message.
+   */
   async loadBranches(): Promise<void> {
     const sid = this.sessionId;
     if (sid === undefined) {
       this.branches = [];
+      this.siblingIds = [];
+      this.branchPoint = undefined;
       return;
     }
     const exit = await runAppExit(Effect.flatMap(ChatThread, (c) => c.siblings(sid)));
     if (this.get(null)) return;
-    if (Exit.isSuccess(exit)) this.branches = [...exit.value];
+    if (!Exit.isSuccess(exit)) return;
+    const siblings = [...exit.value];
+    this.branches = siblings;
+    this.siblingIds = siblings.map((s) => s.sessionId);
+    if (siblings.length < 2) {
+      this.branchPoint = undefined;
+      return;
+    }
+    const others = siblings.filter((s) => s.sessionId !== sid);
+    const historiesExit = await runAppExit(
+      Effect.flatMap(ChatThread, (c) =>
+        Effect.all(
+          others.map((s) =>
+            c
+              .history(s.sessionId)
+              .pipe(Effect.orElseSucceed(() => [] as readonly ThreadMessageT[])),
+          ),
+        ),
+      ),
+    );
+    if (this.get(null)) return;
+    const histories = Exit.isSuccess(historiesExit)
+      ? historiesExit.value.filter((h) => h.length > 0)
+      : [];
+    const messages = this.messages;
+    const anchor = divergencePoint(messages, histories).pipe(
+      Option.orElse(() =>
+        // Inconclusive (e.g. identical prefixes) → the last user message.
+        Option.fromNullable([...messages].reverse().find((m) => m.role === 'user')?.id),
+      ),
+      Option.getOrUndefined,
+    );
+    const index = this.siblingIds.indexOf(sid);
+    this.branchPoint =
+      anchor !== undefined && index >= 0
+        ? { messageId: anchor, index: index + 1, count: this.siblingIds.length }
+        : undefined;
+  }
+
+  /** Step to the previous/next sibling branch (the ‹ › arrows). */
+  async switchSibling(delta: 1 | -1): Promise<void> {
+    const sid = this.sessionId;
+    if (sid === undefined) return;
+    const at = this.siblingIds.indexOf(sid);
+    const target = at >= 0 ? this.siblingIds[at + delta] : undefined;
+    if (target === undefined) return;
+    await this.switchBranch(target);
   }
 
   /** Reply to the pending permission request (allow/deny), then clear it. */
