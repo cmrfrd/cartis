@@ -57,8 +57,8 @@ export class BuilderView extends Component {
     const consumePending = () => {
       const card = shell.pendingCard;
       if (card) {
-        this.loadCard(card);
         shell.pendingCard = undefined;
+        this.requestOpen(card); // dirty documents get the guard, clean ones load
       }
     };
     consumePending(); // a card may already be waiting when the builder mounts
@@ -371,6 +371,53 @@ export class BuilderView extends Component {
 
 /** Implementation scoping per the skills: freestanding function components + .get(),
  *  NOT subcomponent methods (those are reserved for extension points like ArcaneCard's). */
+function DocumentBar() {
+  const { is: builder, data, savedId, dirty, savedNote, pendingIntent } = BuilderView.get();
+  const title = String(data.name ?? '').trim() || 'Untitled card';
+  return (
+    <Panel title="Card">
+      <div className="flex flex-col gap-2">
+        <div className="flex items-center justify-between gap-2">
+          <p className="truncate font-display text-sm">{title}</p>
+          <span className="shrink-0 text-[11px] text-ink-dim">
+            {dirty ? '● Unsaved changes' : savedId ? 'Saved' : 'New card'}
+          </span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <Button tone="ghost" onClick={() => builder.requestNew()}>
+            New
+          </Button>
+          <Button onClick={() => void builder.saveCard()}>Save</Button>
+          <Button tone="ghost" onClick={() => void builder.saveAsCopy()}>
+            Save as copy
+          </Button>
+        </div>
+        {savedNote && <p className="text-xs text-ink-dim">{savedNote}</p>}
+        {pendingIntent && <GuardConfirm title={title} />}
+      </div>
+    </Panel>
+  );
+}
+
+/** Inline Save-first / Discard / Cancel choice for a guarded destructive intent. */
+function GuardConfirm(props: { title: string }) {
+  const { is: builder } = BuilderView.get();
+  return (
+    <div className="flex flex-col gap-2 rounded-base border-2 border-border bg-secondary-background p-2">
+      <p className="text-xs">Unsaved changes on “{props.title}”</p>
+      <div className="flex gap-1.5">
+        <Button onClick={() => void builder.resolveIntent('save-first')}>Save first</Button>
+        <Button tone="ghost" onClick={() => void builder.resolveIntent('discard')}>
+          Discard
+        </Button>
+        <Button tone="ghost" onClick={() => void builder.resolveIntent('cancel')}>
+          Cancel
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 function BuilderForm() {
   const {
     is: builder,
@@ -378,7 +425,6 @@ function BuilderForm() {
     layout,
     themeId,
     layoutId,
-    savedNote,
     portraitKey,
     aiPrompt,
     aiBusy,
@@ -386,6 +432,7 @@ function BuilderForm() {
   } = BuilderView.get();
   return (
     <aside className="flex w-96 shrink-0 flex-col gap-4 overflow-y-auto border-r border-edge p-4">
+      <DocumentBar />
       <Panel title="Theme">
         <SelectInput
           value={themeId}
@@ -424,10 +471,6 @@ function BuilderForm() {
         <FormRenderer />
       </Panel>
       {portraitKey && <PortraitSection fieldKey={portraitKey} />}
-      <div className="flex items-center gap-3">
-        <Button onClick={() => void builder.saveCard()}>Save to gallery</Button>
-        {savedNote && <span className="text-xs text-ink-dim">{savedNote}</span>}
-      </div>
     </aside>
   );
 }
@@ -480,12 +523,7 @@ function BuilderPreview() {
           </div>
         </PreviewStage>
         <div className="flex items-center gap-3">
-          <Button
-            tone="ghost"
-            onClick={() => {
-              builder.holo = !builder.holo;
-            }}
-          >
+          <Button tone="ghost" onClick={() => builder.toggleHolo()}>
             {holo ? 'Holo: on' : 'Holo: off'}
           </Button>
           <Button

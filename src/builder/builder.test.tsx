@@ -96,7 +96,7 @@ describe('BuilderView', () => {
       expect(shell.archive.ready).toBe(true);
     });
     const saveButton = Array.from(container.querySelectorAll('button')).find(
-      (b) => b.textContent === 'Save to gallery',
+      (b) => b.textContent === 'Save',
     );
     await click(saveButton ?? null);
     await vi.waitFor(() => {
@@ -375,12 +375,105 @@ describe('document lifecycle (headless)', () => {
     const nameInput = container.querySelector('aside input[type="text"]');
     await setInput(nameInput, 'Doomed');
     const saveButton = Array.from(container.querySelectorAll('button')).find(
-      (b) => b.textContent === 'Save to gallery',
+      (b) => b.textContent === 'Save',
     );
     await click(saveButton ?? null);
     await vi.waitFor(() => {
       expect(container.textContent).toContain('disk full');
     });
+    unmount();
+  });
+});
+
+describe('document bar (mounted)', () => {
+  it('shows title, dirty status, and executes a guarded New through the confirm', async () => {
+    const { container, unmount } = await mountApp();
+    expect(container.textContent).toContain('Nyra, Ember Sage'); // title from defaults
+    expect(container.textContent).not.toContain('Unsaved changes');
+    const nameInput = container.querySelector('aside input[type="text"]');
+    await setInput(nameInput, 'Working Title');
+    expect(container.textContent).toContain('Unsaved changes');
+    const newButton = Array.from(container.querySelectorAll('button')).find(
+      (b) => b.textContent === 'New',
+    );
+    await click(newButton ?? null);
+    expect(container.textContent).toContain('Unsaved changes on \u201cWorking Title\u201d');
+    const discard = Array.from(container.querySelectorAll('button')).find(
+      (b) => b.textContent === 'Discard',
+    );
+    await click(discard ?? null);
+    expect(container.textContent).not.toContain('Working Title');
+    expect(container.textContent).toContain('Nyra, Ember Sage'); // fresh defaults
+    unmount();
+  });
+
+  it('guards a gallery open at consume time; Cancel keeps the current card', async () => {
+    const { container, shell, unmount } = await mountApp();
+    await vi.waitFor(() => expect(shell.archive.ready).toBe(true));
+    const stored = await shell.archive.saveCard({
+      name: 'From Gallery',
+      themeId: 'arcane',
+      layoutId: 'classic',
+      data: { name: 'From Gallery' },
+      holo: false,
+    });
+    const nameInput = container.querySelector('aside input[type="text"]');
+    await setInput(nameInput, 'Precious Edits');
+    shell.pendingCard = stored; // what GalleryView.openCard does
+    await tick();
+    expect(container.textContent).toContain('Unsaved changes on \u201cPrecious Edits\u201d');
+    expect(shell.pendingCard).toBeUndefined(); // held by the guard, not left dangling
+    const cancel = Array.from(container.querySelectorAll('button')).find(
+      (b) => b.textContent === 'Cancel',
+    );
+    await click(cancel ?? null);
+    expect(container.textContent).toContain('Precious Edits'); // kept
+    expect(container.textContent).not.toContain('Unsaved changes on');
+    unmount();
+  });
+
+  it('Save first persists the edits, then opens the pending card', async () => {
+    const { container, shell, unmount } = await mountApp();
+    await vi.waitFor(() => expect(shell.archive.ready).toBe(true));
+    const stored = await shell.archive.saveCard({
+      name: 'Target',
+      themeId: 'arcane',
+      layoutId: 'classic',
+      data: { name: 'Target' },
+      holo: false,
+    });
+    const nameInput = container.querySelector('aside input[type="text"]');
+    await setInput(nameInput, 'Keep Me');
+    shell.pendingCard = stored;
+    await tick();
+    const saveFirst = Array.from(container.querySelectorAll('button')).find(
+      (b) => b.textContent === 'Save first',
+    );
+    await click(saveFirst ?? null);
+    await vi.waitFor(() => {
+      expect(shell.archive.cards.some((c) => c.name === 'Keep Me')).toBe(true); // persisted
+      expect(container.textContent).toContain('Target'); // then opened
+    });
+    unmount();
+  });
+
+  it('Save as copy rebinds the document to a fresh record', async () => {
+    const { container, shell, unmount } = await mountApp();
+    await vi.waitFor(() => expect(shell.archive.ready).toBe(true));
+    const saveButton = Array.from(container.querySelectorAll('button')).find(
+      (b) => b.textContent === 'Save',
+    );
+    await click(saveButton ?? null);
+    await vi.waitFor(() => expect(shell.archive.cards).toHaveLength(1));
+    const firstId = shell.archive.cards[0]?.id;
+    const copyButton = Array.from(container.querySelectorAll('button')).find(
+      (b) => b.textContent === 'Save as copy',
+    );
+    await click(copyButton ?? null);
+    await vi.waitFor(() => expect(shell.archive.cards).toHaveLength(2));
+    const copy = shell.archive.cards.find((c) => c.id !== firstId);
+    expect(copy?.name).toBe('Nyra, Ember Sage copy');
+    expect(container.textContent).toContain('Nyra, Ember Sage copy'); // rebound title
     unmount();
   });
 });
