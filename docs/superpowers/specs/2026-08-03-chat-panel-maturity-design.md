@@ -1,0 +1,180 @@
+# Chat Panel Maturity — Design
+
+**Date:** 2026-08-03
+**Status:** Approved (brainstorm 2026-08-03)
+**Inspiration:** `~/Downloads/xulux-chatgpt-demo.zip` — a ChatGPT-clone UI built on
+`@assistant-ui/react` primitives (`components/examples/chatgpt.tsx`). We port its
+**structure and UX**, not its runtime.
+
+## Goal
+
+Mature the Builder's chat sidebar (`src/chat/ThreadPanel.tsx` + `ThreadState.ts`)
+to ChatGPT-grade UX: a pill composer with a **`+` attachment button** (images +
+text files), auto-growing input, morphing Send/Stop, empty state, real
+stick-to-bottom scrolling with a scroll-to-bottom chevron, hover icon action
+bars, markdown-rendered assistant text, and a per-message ‹ n/m › branch picker
+replacing the top branch strip.
+
+## Approach (user-locked decisions)
+
+- **A: hand-rolled port** — keep expressive `ThreadState` + our neobrutalism
+  tokens; do NOT adopt `@assistant-ui/react`. Same principle as the chat-panel
+  spec: speak assistant-ui's model, mean opencode's operations.
+- Scope: full composer + chrome, markdown assistant text, per-message ‹ n/m ›
+  branch picker. **Skipped (YAGNI):** dictation/voice, feedback thumbs, share,
+  export-markdown, thread-list rail (cartis chat is session-per-card).
+- Attachments accept **images + text files**; everything else is rejected with
+  a note.
+- New deps: `lucide-react` (icons — the set the vendored shadcn ecosystem
+  assumes) and `react-markdown` + `remark-gfm` (render-only markdown, no
+  dangerouslySetInnerHTML). No other deps.
+
+## 1. Attachments end-to-end (the `+`)
+
+### Contracts
+
+- `src/contracts/api.ts`: new `ChatAttachment` schema
+  `{ name: FileName, mime: MimeType, dataUrl: DataUrl }`;
+  `ChatTurnRequest` grows `attachments: Schema.optional(Schema.Array(ChatAttachment))`.
+- `src/contracts/thread.ts`: new part variant
+  `FilePart = Schema.TaggedStruct('File', { name: Schema.String, mime: Schema.String })`
+  added to the `ThreadPart` union — renders non-image attachments in bubbles.
+  Image attachments reuse the existing `Image` part (a data-URL is a valid
+  `img src`). Adding the variant deliberately breaks every `Match.exhaustive`
+  over `ThreadPart` (fold, ThreadPanel PartView, threadBus renderPartMessage)
+  so tsc walks us to each site.
+
+### Client gate (ThreadState)
+
+- New state: `pendingAttachments: ChatAttachmentT[]`.
+- `addAttachments(files: FileList | File[])`: async; per file —
+  - accepted mimes: `image/*`, `text/*`, `application/json`, plus `.md` by
+    extension (browsers give `.md` an empty mime);
+  - caps: **8 MB per file**, **6 attachments per message**; violations skip the
+    file and set `note` naming it (e.g. `attachment too large: ref.png (max 8 MB)`,
+    `unsupported attachment type: art.psd`);
+  - accepted files are FileReader'd to a data-URL (doubles as the thumbnail
+    `src`; no object-URL lifecycle).
+- `removeAttachment(index)` — composer × button.
+- `submitDraft` sends when **text OR attachments** exist; submit clears both.
+- `clear()` also clears `pendingAttachments`.
+- **Edit semantics (v1):** `beginEdit` seeds from text only — an edited resend
+  drops the original attachments. Stated, intentional.
+
+### Wire + opencode (bridge)
+
+- Optimistic user bubble parts: `[...images as Image, ...others as File, Text]`
+  (Text omitted when the draft was empty).
+- `runChatTurn` / `promptWithHeartbeat` generalize the existing single vision
+  part to a list of SDK `FilePartInput`s:
+  1. user attachments **with `filename` set** (the discriminator),
+  2. the existing auto-attached card-art context part (**no filename**, as today),
+  3. the text prompt part.
+- `mapSessionMessages` (user branch): opencode history returns `FilePart`s with
+  our data-URL in `url`. Map file parts **with a filename**: image mime →
+  `Image { url }`, other → `File { name, mime }`; keep skipping unnamed file
+  parts (the invisible card-art context never masquerades as a user
+  attachment). Attachments therefore survive save → restart → rehydrate.
+
+### Errors
+
+- Oversized/unsupported files never leave the client (note + skip).
+- A failed turn with attachments follows today's failure path (incomplete
+  bubble + note). Request body grows with data-URLs; the vite middleware body
+  reader already handles multi-MB bodies (image generate route precedent).
+
+## 2. Composer, chrome, markdown, branch arrows
+
+### Composer (pill)
+
+One `rounded-2xl border-2 border-border bg-background shadow-shadow` container:
+
+- **Row 1 (only when attachments pending):** thumbnail strip — 64px image
+  thumbs / file chips (name + mime), each with a floating × remove button.
+- **Row 2:** `+` icon button (opens a hidden
+  `<input type="file" multiple accept="image/*,text/*,application/json,.md">`)
+  · auto-growing textarea (`field-sizing: content`, 1 row min, max ~6 rows —
+  Chrome-only local app, no fallback needed; placeholder "Message the
+  assistant…") · **morphing circular primary action**: running → square-in-circle
+  **Stop**; otherwise **↑ Send**, disabled until text or attachments exist.
+- Enter sends, Shift+Enter newlines (unchanged). `data-testid`s preserved:
+  `composer-send`, `composer-cancel`; new `composer-attach`,
+  `composer-attachment` (per thumb), `attachment-remove`.
+
+### Empty state
+
+`messages.length === 0` → viewport replaced by a centered heading
+("What should this card become?") with the composer mid-panel; once a thread
+exists the composer moves to the sticky footer.
+
+### Viewport
+
+Real stick-to-bottom replaces the force-scroll callback ref: track
+"at bottom" via scroll position (±16px tolerance); autoscroll on new
+content only while at bottom; a floating ⌄ chevron (absolute, above the
+composer, hidden when at bottom) jumps back down. Fixes the current
+can't-scroll-up-while-streaming defect.
+
+### Messages
+
+- **User:** bubble capped at 85% width, right-aligned; attachment
+  thumbs/chips above the bubble (from `Image`/`File` parts).
+- **Assistant:** **no bubble** — markdown via `react-markdown` + `remark-gfm`
+  inside a scoped `chat-md` wrapper styled on our tokens (headings, lists,
+  code, tables). Error text keeps the danger treatment.
+- **Action bars:** hover-revealed **icon** buttons (lucide, native `title`
+  tooltips): Copy with ✓-for-1.5 s swap (both roles); Edit pencil (user);
+  Regenerate ↻ **only on the last assistant message** — today it renders on
+  every assistant message but `regenerate()` only targets the last; the
+  redesign removes that lie. `data-testid`s preserved: `action-edit`,
+  `action-regenerate`; new `action-copy`.
+- **Edit-in-place:** restyled to a soft rounded editor
+  (`bg-secondary-background`) with Cancel / Send pill buttons; behavior
+  (fork-on-edit) unchanged.
+- Permission strip unchanged.
+
+### Per-message ‹ n/m › branch picker
+
+The top branch strip is deleted. `ThreadState.loadBranches` upgrades:
+
+1. Fetch the sibling set: current session's parent + the parent's children
+   (via existing `children` endpoint; when unforked, self + own children).
+   `Session.parentID` is the link; the revert marker is NOT used (it does not
+   reliably survive a resend).
+2. Fetch each sibling's history via the existing history endpoint (sibling
+   counts are tiny — one per edit).
+3. Compute the **divergence point** with a pure function
+   `divergencePoint(current, sibling histories)` comparing (role, text-part
+   text) prefixes; result stored as
+   `branchPoint?: { messageId, index, count }` where `index`/`count` are the
+   current session's 1-based position among id-sorted siblings (opencode ids
+   are creation-ordered).
+4. Render ‹ n/m › arrows on the message named by `branchPoint.messageId`
+   (fallback when comparison is inconclusive: the last user message; hidden
+   when no siblings). Arrows call the existing `switchBranch` with the
+   prev/next sibling id.
+
+History-fetch failure for a sibling → that sibling is dropped from the
+computation; zero usable siblings → no arrows (today's silent behavior).
+
+## 3. Testing
+
+- **Unit (vitest):** attachment gate (mime/size/count caps + note wording);
+  send request shape with attachments; `File` part fold + render;
+  `divergencePoint` table-driven (identical, single-fork, multi-fork,
+  inconclusive).
+- **Bridge:** `runChatTurn` emits filename'd FilePartInputs before the unnamed
+  art part and the text part (stub agent asserts part order/shape);
+  `mapSessionMessages` maps named file parts → Image/File and skips unnamed.
+- **Mounted (happy-dom):** `+` wires the hidden input; thumbs render/remove;
+  Send morphs (disabled-empty → enabled → Stop) ; empty state appears and
+  yields to messages; markdown renders (bold → `<strong>`); ✓ copy feedback;
+  regenerate only on last assistant message; ‹ n/m › switches branches.
+- `bun run verify` green per task; **live e2e** at the end: attach a real
+  image, confirm the model references it; save → dev-server restart → reopen →
+  attachment thumb survives rehydration.
+
+## Non-goals
+
+Voice/dictation, feedback thumbs, share/export, thread-list rail, attachment
+re-send on edit, non-Chrome fallbacks for `field-sizing`.
