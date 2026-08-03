@@ -982,6 +982,22 @@ describe('mapSessionMessages', () => {
     expect(out.map((m) => m.id)).toEqual(['u1', 'm1']); // u2 + everything after dropped
   });
 
+  it('strips the turn scaffold from a rehydrated user message (shows the typed request)', () => {
+    const scaffold =
+      'You are editing a trading-card record…\n\n' +
+      'Look and feel: oil\n\n' +
+      'Fields: name (text)\n\n' +
+      'Current values (respect these; the author may have hand-edited): {"name":"Nyra"}\n\n' +
+      'Author request: rename this card to Vorak';
+    const out = mapSessionMessages([
+      {
+        info: { id: 'u1', role: 'user', time: { created: 1 } },
+        parts: [{ id: 'p0', type: 'text', text: scaffold }],
+      },
+    ]);
+    expect(out[0]?.parts).toEqual([{ _tag: 'Text', text: 'rename this card to Vorak' }]);
+  });
+
   it('skips synthetic text parts (internal) when concatenating', () => {
     const out = mapSessionMessages([
       {

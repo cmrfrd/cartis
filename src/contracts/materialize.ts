@@ -17,7 +17,7 @@
  */
 
 import { Option, Schema } from 'effect';
-import type { ThreadPartT } from './thread';
+import type { ThreadPartT } from './thread.ts';
 
 /** Tool-call ids/names for the v1 card actions, shared with the tool-UI registry. */
 export const CARD_PATCH_TOOL = 'card_patch';

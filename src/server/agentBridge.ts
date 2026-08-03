@@ -700,6 +700,14 @@ function extractJson(raw: string): Option.Option<unknown> {
   }
 }
 
+/**
+ * Marker separating the rich turn scaffold (guide + theme + fields + snapshot)
+ * from the user's actual request. History mapping strips everything up to and
+ * including it, so a rehydrated user bubble shows the typed request, not the
+ * whole system prompt (opencode stores the full text we sent).
+ */
+const USER_REQUEST_MARKER = 'Author request: ';
+
 /** The rich prompt for one chat turn (guide + theme + fields + snapshot + ask). */
 function chatPromptText(req: ChatTurnRequestT): string {
   return [
@@ -707,8 +715,14 @@ function chatPromptText(req: ChatTurnRequestT): string {
     `Look and feel: ${req.themeContext.lookAndFeel}`,
     `Fields: ${req.fields.map((f) => `${f.key} (${f.kind})`).join(', ')}`,
     `Current values (respect these; the author may have hand-edited): ${JSON.stringify(req.currentData)}`,
-    `Author request: ${req.userPrompt}`,
+    `${USER_REQUEST_MARKER}${req.userPrompt}`,
   ].join('\n\n');
+}
+
+/** Recover the user's typed request from a stored prompt (drops the scaffold). */
+function userRequestOf(text: string): string {
+  const at = text.lastIndexOf(USER_REQUEST_MARKER);
+  return at >= 0 ? text.slice(at + USER_REQUEST_MARKER.length).trim() : text;
 }
 
 /** Run one prompt under the activity watcher with a 5s console heartbeat. */
@@ -862,7 +876,8 @@ export function mapSessionMessages(
     if (id.length === 0) continue;
     const parts = message.parts ?? [];
     if (role === 'user') {
-      const text = textOfParts(parts);
+      // Strip the turn scaffold so the bubble shows the typed request, not the prompt.
+      const text = userRequestOf(textOfParts(parts));
       out.push({ id, role, status: 'complete', parts: [{ _tag: 'Text', text }] });
       continue;
     }
