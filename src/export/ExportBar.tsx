@@ -14,6 +14,8 @@ const FORMATS: readonly ExportFormat[] = ['png', 'webp', 'jpeg'];
 export class ExportBar extends Component {
   shell = get(AppShell, false);
   cardName = '';
+  /** The saved card this preview belongs to — links renders to their card. */
+  cardId?: string = undefined;
   /** The preview's ref() object — expressive data flow instead of a fetch closure. */
   target?: { current: HTMLElement | null } = undefined;
   note = '';
@@ -29,6 +31,7 @@ export class ExportBar extends Component {
         format,
         bytes: await blob.arrayBuffer(),
         type: blob.type,
+        cardId: this.cardId,
       });
     }
     this.note = `Exported ${fileName} — saved to Gallery.`;

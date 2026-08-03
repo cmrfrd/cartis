@@ -511,6 +511,7 @@ function BuilderPreview() {
     data,
     previewEl,
     showBack,
+    savedId,
   } = BuilderView.get();
   const Render = layout.Render;
   const CardBack = theme.CardBack;
@@ -537,6 +538,7 @@ function BuilderPreview() {
         </div>
         <ExportBar
           cardName={showBack ? 'cartis-card-back' : String(data.name ?? 'card')}
+          cardId={showBack ? undefined : savedId}
           target={previewEl}
         />
       </div>

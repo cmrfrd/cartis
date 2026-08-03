@@ -137,4 +137,27 @@ describe('CardArchive', () => {
     expect(archive.cards.map((c) => c.id)).toEqual(['good']);
     archive.set(null);
   });
+
+  it('saveExport persists an optional cardId (absent stays undefined)', async () => {
+    const archive = CardArchive.new();
+    await vi.waitFor(() => {
+      expect(archive.ready).toBe(true);
+    });
+    const linked = await archive.saveExport({
+      name: 'with-card.png',
+      format: 'png',
+      bytes: bytesOf('png'),
+      type: 'image/png',
+      cardId: 'card-1',
+    });
+    expect(linked.cardId).toBe('card-1');
+    const loose = await archive.saveExport({
+      name: 'loose.png',
+      format: 'png',
+      bytes: bytesOf('png'),
+      type: 'image/png',
+    });
+    expect(loose.cardId).toBeUndefined();
+    archive.set(null);
+  });
 });

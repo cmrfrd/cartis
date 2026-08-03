@@ -154,6 +154,19 @@ describe('ExportBar', () => {
     archive.set(null);
   });
 
+  it('links the render to its card when a cardId prop is set', async () => {
+    const archive = CardArchive.new();
+    await vi.waitFor(() => {
+      expect(archive.ready).toBe(true);
+    });
+    const node = document.createElement('div');
+    const bar = ExportBar.new({ cardName: 'Nyra', cardId: 'card-7', target: { current: node } });
+    await bar.exportAs('png', archive);
+    expect(archive.exports[0]?.cardId).toBe('card-7');
+    bar.set(null);
+    archive.set(null);
+  });
+
   it('suffixes file names with print options', async () => {
     const archive = CardArchive.new();
     await vi.waitFor(() => {

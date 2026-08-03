@@ -103,6 +103,7 @@ export class CardArchive extends State {
     format: ExportFormat;
     bytes: ArrayBuffer;
     type: string;
+    cardId?: string;
   }): Promise<StoredExport> {
     const { bytes, ...meta } = input;
     const record: StoredExport = { ...meta, id: crypto.randomUUID(), createdAt: Date.now() };

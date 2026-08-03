@@ -156,6 +156,19 @@ describe('ExportRecord', () => {
     expect(decoded.fileName).toBe('my-card-export-exp-1ab.png');
   });
 
+  it('decodes with a cardId linking the render to its card', () => {
+    const raw = {
+      id: 'exp-9',
+      name: 'linked.png',
+      format: 'png',
+      type: 'image/png',
+      createdAt: 1700000009,
+      cardId: 'card-1',
+    };
+    const decoded = Schema.decodeUnknownSync(ExportRecord)(raw);
+    expect(decoded.cardId).toBe('card-1');
+  });
+
   it('decodes without optional fileName', () => {
     const raw = {
       id: 'exp-2',

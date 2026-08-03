@@ -77,6 +77,8 @@ export const ExportRecord = Schema.Struct({
   type: Schema.String,
   createdAt: Schema.Number,
   fileName: Schema.optional(Schema.String),
+  /** The saved card this render was exported from (absent on legacy/back exports). */
+  cardId: Schema.optional(Schema.String),
 });
 export type ExportRecordT = typeof ExportRecord.Type;
 
