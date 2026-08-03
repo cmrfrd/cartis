@@ -13,6 +13,7 @@ import {
   Runtime,
   Schedule,
   Schema,
+  Scope,
   Stream,
 } from 'effect';
 import type { Plugin } from 'vite';
@@ -612,20 +613,34 @@ export function agentClientFromSdk(
  * `bun run dev` startup stays fast when the agent is never invoked.
  * `OPENCODE_MODEL` via Config.option.
  */
-export const agentClientLive: Layer.Layer<AgentClient, never, ThreadBus> = Layer.effect(
+export const agentClientLive: Layer.Layer<AgentClient, never, ThreadBus> = Layer.scoped(
   AgentClient,
   Effect.gen(function* () {
     const bus = yield* ThreadBus;
     const runtime = yield* Effect.runtime<never>();
     const wiring: AgentActivityWiring = { bus, runtime };
     const model = yield* envOption('OPENCODE_MODEL');
+    const scope = yield* Effect.scope;
     const acquire = Effect.promise(async () => {
       const sdk = await import('@opencode-ai/sdk');
-      const { client } = await sdk.createOpencode(
-        Option.isSome(model) ? { config: { model: model.value } } : {},
-      );
-      return opencodeClientOf(client);
-    });
+      // port 0 = OS-assigned: a stale/leaked opencode can never block the spawn
+      // (the old fixed default 4096 caused "Failed to start server. Is port
+      // 4096 in use?" after a vite restart leaked the previous child).
+      const { client, server } = await sdk.createOpencode({
+        port: 0,
+        ...(Option.isSome(model) ? { config: { model: model.value } } : {}),
+      });
+      return { client: opencodeClientOf(client), server };
+    }).pipe(
+      // The spawned child dies with the runtime (vite restart/close) — no leaks.
+      Effect.tap(({ server }) =>
+        Scope.addFinalizer(
+          scope,
+          Effect.sync(() => server.close()),
+        ),
+      ),
+      Effect.map(({ client }) => client),
+    );
     const cached = yield* Effect.cached(acquire);
     // Delegate to a per-call client resolved from the cached SDK handle.
     const svc = (client: OpencodeClient) => agentClientFromSdk(client, wiring);
