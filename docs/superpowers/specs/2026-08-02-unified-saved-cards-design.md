@@ -48,6 +48,20 @@ drops to two tabs: **Saved cards** and **Library**.
   (with renders) shows. Other renders filter by export `name`. Empty query = show all.
   Pure client-side filtering of already-loaded state — no store/bridge changes.
 
+## Amendment (2026-08-02, user feedback): tile view default
+
+The unified view has two presentation modes, toggled next to the search input:
+
+- **Tiles (default):** a responsive grid; each entry shows the FULL card — the live
+  layout `Render` at mini scale (CSS transform, ~40% of 375×525), holo-aware, art
+  resolved through the image library — followed by the SAME info block as the list
+  (name, themeId · layoutId · date, Open/Duplicate/Delete, grouped render strip).
+- **List:** the existing rows (info block only, no card visual).
+
+Both views show identical information; the card face is the only difference. A card
+whose theme/layout is no longer registered falls back to a neutral placeholder tile
+(no crash). "Other renders" appears at the bottom in both modes.
+
 ## Engineering requirements (binding)
 
 Repo standards apply (no `any`/`!`/`as`-on-external-data; `cardId` flows through the
