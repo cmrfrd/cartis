@@ -154,6 +154,83 @@ describe('ThreadState.send', () => {
   });
 });
 
+describe('ThreadState attachments', () => {
+  it('gates files: accepted lands with inferred mime + data-URL, rejected sets note', async () => {
+    const state = makeThread(threadStub());
+    await state.addAttachments([
+      new File(['# hi'], 'notes.md'), // empty mime → inferred text/markdown
+      new File(['x'], 'art.psd'), // unsupported → note, skipped
+    ]);
+    expect(state.pendingAttachments).toHaveLength(1);
+    const att = state.pendingAttachments[0];
+    expect(att?.name).toBe('notes.md');
+    expect(att?.mime).toBe('text/markdown');
+    expect(att?.dataUrl.startsWith('data:')).toBe(true);
+    expect(state.note).toBe('unsupported attachment type: art.psd');
+    state.set(null);
+  });
+
+  it('caps at 6 attachments per message', async () => {
+    const state = makeThread(threadStub());
+    const files = Array.from(
+      { length: 7 },
+      (_, i) => new File(['x'], `f${i}.txt`, { type: 'text/plain' }),
+    );
+    await state.addAttachments(files);
+    expect(state.pendingAttachments).toHaveLength(6);
+    expect(state.note).toBe('too many attachments (max 6)');
+    state.set(null);
+  });
+
+  it('removeAttachment drops by index; clear() empties', async () => {
+    const state = makeThread(threadStub());
+    await state.addAttachments([new File(['a'], 'a.txt', { type: 'text/plain' })]);
+    state.removeAttachment(0);
+    expect(state.pendingAttachments).toHaveLength(0);
+    await state.addAttachments([new File(['b'], 'b.txt', { type: 'text/plain' })]);
+    state.clear();
+    expect(state.pendingAttachments).toHaveLength(0);
+    state.set(null);
+  });
+
+  it('attachment-only submit sends: request carries attachments, bubble has parts but no empty text', async () => {
+    const seen: unknown[] = [];
+    const state = makeThread(
+      threadStub({
+        turn: (req) => {
+          seen.push(req);
+          return Effect.succeed({
+            sessionId: SessionId.make('ses-1'),
+            assistantText: '{"reply":"got it"}',
+            patch: {},
+          } satisfies ChatTurnResponseT);
+        },
+      }),
+    );
+    await state.addAttachments([new File(['png'], 'ref.png', { type: 'image/png' })]);
+    state.submitDraft(); // empty draft + one attachment → sends
+    await vi.waitFor(() => expect(state.running).toBe(false));
+    const req = seen[0] as { attachments?: readonly unknown[]; userPrompt: string };
+    expect(req.attachments).toHaveLength(1);
+    expect(req.userPrompt).toBe('');
+    const user = state.messages[0];
+    expect(user?.parts.map((p) => p._tag)).toEqual(['Image']); // thumb, no empty Text
+    expect(state.pendingAttachments).toHaveLength(0); // cleared on submit
+    state.set(null);
+  });
+
+  it('text + file attachment: File chip part precedes the text bubble part', async () => {
+    const state = makeThread(threadStub());
+    await state.addAttachments([new File(['x'], 'lore.txt', { type: 'text/plain' })]);
+    state.draft = 'use this lore';
+    state.submitDraft();
+    await vi.waitFor(() => expect(state.running).toBe(false));
+    const user = state.messages[0];
+    expect(user?.parts.map((p) => p._tag)).toEqual(['File', 'Text']);
+    state.set(null);
+  });
+});
+
 describe('ThreadState streaming (SSE fold)', () => {
   it('builds a running assistant message from streamed events', async () => {
     const pubsub = await Effect.runPromise(PS.unbounded<ThreadEventT>());

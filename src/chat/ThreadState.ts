@@ -12,10 +12,24 @@
 import State from '@expressive/react';
 import { Effect, Exit, Fiber, Match, Option, Stream } from 'effect';
 import { forkApp, runAppExit } from '@/app/runtime';
-import type { ArtActionT, CardDataT, ChatTurnRequestT, ChatTurnResponseT } from '@/contracts/api';
+import type {
+  ArtActionT,
+  CardDataT,
+  ChatAttachmentT,
+  ChatTurnRequestT,
+  ChatTurnResponseT,
+} from '@/contracts/api';
 import { noteFromCause } from '@/contracts/errors';
 import type { FieldSummaryT } from '@/contracts/fields';
-import { MessageId, type MessageIdT, type PermissionIdT, type SessionIdT } from '@/contracts/ids';
+import {
+  DataUrl,
+  FileName,
+  MessageId,
+  type MessageIdT,
+  MimeType,
+  type PermissionIdT,
+  type SessionIdT,
+} from '@/contracts/ids';
 import { materializeAssistantParts } from '@/contracts/materialize';
 import type { ThemeContextT } from '@/contracts/theme';
 import type {
@@ -25,6 +39,7 @@ import type {
   ThreadPartT,
   ThreadSummaryT,
 } from '@/contracts/thread';
+import { attachmentPolicy, fileToDataUrl, MAX_ATTACHMENTS } from './attachments';
 import { ChatEvents } from './ChatEvents';
 import { ChatThread } from './ChatThread';
 import { foldThreadEvent } from './fold';
@@ -67,6 +82,8 @@ export class ThreadState extends State {
   note?: string = undefined;
   /** The composer draft (UI state; cleared on submit). */
   draft = '';
+  /** Gated attachments awaiting the next send (thumbnails read dataUrl). */
+  pendingAttachments: ChatAttachmentT[] = [];
   /** Branch (fork) siblings of the current session (branch picker). */
   branches: ThreadSummaryT[] = [];
   /** True between cancel() and the turn settling — makes the turn finalize incomplete. */
@@ -128,14 +145,52 @@ export class ThreadState extends State {
     this.running = false;
     this.note = undefined;
     this.draft = '';
+    this.pendingAttachments = [];
     this.branches = [];
     this.canceling = false;
+  }
+
+  /**
+   * Gate + ingest picked/pasted/dropped files (spec §1: one gate, three entry
+   * points). Rejections never leave the client: each sets a naming note.
+   */
+  async addAttachments(files: Iterable<File>): Promise<void> {
+    const notes: string[] = [];
+    const accepted: ChatAttachmentT[] = [];
+    let count = this.pendingAttachments.length;
+    for (const file of files) {
+      if (count >= MAX_ATTACHMENTS) {
+        notes.push(`too many attachments (max ${String(MAX_ATTACHMENTS)})`);
+        break;
+      }
+      const verdict = attachmentPolicy(file.name, file.type, file.size);
+      if (!verdict.ok) {
+        notes.push(verdict.note);
+        continue;
+      }
+      const dataUrl = await fileToDataUrl(file);
+      accepted.push({
+        name: FileName.make(file.name),
+        mime: MimeType.make(verdict.mime),
+        dataUrl: DataUrl.make(dataUrl),
+      });
+      count += 1;
+    }
+    if (this.get(null)) return; // destroyed mid-read
+    if (accepted.length > 0) {
+      this.pendingAttachments = [...this.pendingAttachments, ...accepted];
+    }
+    if (notes.length > 0) this.note = notes.join('; ');
+  }
+
+  removeAttachment(index: number): void {
+    this.pendingAttachments = this.pendingAttachments.filter((_, i) => i !== index);
   }
 
   /** Submit the composer draft as a turn (Enter / Send button). */
   submitDraft(): void {
     const text = this.draft.trim();
-    if (text.length === 0 || this.running) return;
+    if ((text.length === 0 && this.pendingAttachments.length === 0) || this.running) return;
     this.draft = '';
     void this.send(text);
   }
@@ -287,12 +342,25 @@ export class ThreadState extends State {
   async send(text: string): Promise<void> {
     if (this.running) return; // one turn at a time (composer locks)
     const ctx = this.context?.();
-    if (ctx === undefined || text.trim().length === 0) return;
+    const attachments = this.pendingAttachments;
+    if (ctx === undefined || (text.trim().length === 0 && attachments.length === 0)) return;
+    this.pendingAttachments = [];
 
+    // Optimistic bubble: image thumbs / file chips above, then the text (only
+    // when typed — an attachment-only send shows no empty Text part).
+    const bubbleParts: ThreadPartT[] = [
+      ...attachments.map(
+        (a): ThreadPartT =>
+          a.mime.startsWith('image/')
+            ? { _tag: 'Image', url: a.dataUrl }
+            : { _tag: 'File', name: a.name, mime: a.mime },
+      ),
+      ...(text.length > 0 ? [{ _tag: 'Text', text } satisfies ThreadPartT] : []),
+    ];
     const userId = MessageId.make(crypto.randomUUID());
     this.messages = [
       ...this.messages,
-      { id: userId, role: 'user', status: 'complete', parts: [{ _tag: 'Text', text }] },
+      { id: userId, role: 'user', status: 'complete', parts: bubbleParts },
     ];
     this.running = true;
     this.note = undefined;
@@ -305,6 +373,7 @@ export class ThreadState extends State {
       currentData: ctx.currentData,
       currentArtFileName: ctx.currentArtFileName,
       userPrompt: text,
+      ...(attachments.length > 0 ? { attachments } : {}),
     };
     const exit = await runAppExit(Effect.flatMap(ChatThread, (c) => c.turn(req)));
     if (this.get(null)) return; // destroyed mid-turn
