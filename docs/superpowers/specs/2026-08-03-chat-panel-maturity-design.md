@@ -2,9 +2,24 @@
 
 **Date:** 2026-08-03
 **Status:** Approved (brainstorm 2026-08-03)
-**Inspiration:** `~/Downloads/xulux-chatgpt-demo.zip` — a ChatGPT-clone UI built on
-`@assistant-ui/react` primitives (`components/examples/chatgpt.tsx`). We port its
-**structure and UX**, not its runtime.
+**Inspiration:** the xulux ChatGPT demo (`xulux-chatgpt-demo.zip`), a
+ChatGPT-clone UI built on `@assistant-ui/react` primitives. Its key file is
+**vendored at `docs/reference/xulux-chatgpt/chatgpt.tsx`** so line references
+below stay resolvable. We port its **structure and UX**, not its runtime.
+
+### Reference mapping (demo → cartis)
+
+| Demo (`docs/reference/xulux-chatgpt/chatgpt.tsx`) | Cartis target | Notes |
+|---|---|---|
+| `Composer` (L88–125): pill Root → attachment row → `[+ button, Input, primary action]` | `ThreadPanel` Composer | Same three-slot anatomy on our tokens; `AddAttachment`+`PlusIcon` (L100–110) → hidden file input trigger |
+| `ComposerPrimaryAction` (L127–190): running→Stop square, else Send ↑, else mic/voice | Morphing Send/Stop button | Mic/voice branches (L166–187) dropped (YAGNI); disabled-until-content from the `isEmpty` condition (L147–157) |
+| `EmptyState` (L75–86): centered heading + composer | Empty state | Heading text becomes card-flavored |
+| `ThreadScrollToBottom` (L192–203): floating chevron above sticky footer | Viewport ⌄ chevron | Demo relies on primitive scroll state; we track at-bottom manually |
+| `UserMessage` (L205–254): attachments row above right-aligned dark bubble, hover ActionBar + BranchPicker | User MessageView | Bubble at `max-w-[70%]` demo / 85% ours (400px panel) |
+| `EditComposer` (L256–271): soft rounded editor, Cancel/Send pills | EditBox restyle | Behavior (fork-on-edit) already ours |
+| `AssistantMessage` (L276–381): bubble-less markdown + icon action row | Assistant MessageView | Keep Copy(✓ swap, L298–303)+Regenerate; drop thumbs/speak/share/export (L306–375) |
+| `BranchPicker` (L383–405): ‹ `Number`/`Count` › inline, hide-when-single | Per-message ‹ n/m › | Position from our computed `branchPoint`, not a runtime |
+| `useFileSrc`/`useAttachmentSrc`/`ChatGPTAttachmentUI` (L407–476): image thumb / file tile + floating × Remove | Attachment thumbs/chips | Our data-URLs ARE the src — no object-URL lifecycle (L416–421) needed |
 
 ## Goal
 
