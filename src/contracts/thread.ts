@@ -34,7 +34,7 @@ export const ToolCallPart = Schema.TaggedStruct('ToolCall', {
   argsText: Schema.optional(Schema.String),
   result: Schema.optional(Schema.String),
   isError: Schema.optional(Schema.Boolean),
-  secs: Schema.optional(Schema.Number),
+  secs: Schema.optional(Schema.Number.pipe(Schema.nonNegative())),
 });
 
 export const ImagePart = Schema.TaggedStruct('Image', {
@@ -82,7 +82,7 @@ export const TurnStarted = Schema.TaggedStruct('TurnStarted', {
 export const PartDelta = Schema.TaggedStruct('PartDelta', {
   sessionId: Schema.String,
   messageId: Schema.String,
-  partIndex: Schema.Number,
+  partIndex: Schema.Number.pipe(Schema.int(), Schema.nonNegative()),
   part: ThreadPart,
 });
 

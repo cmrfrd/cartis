@@ -149,6 +149,19 @@ describe('CardRecord', () => {
     };
     expect(() => Schema.decodeUnknownSync(CardRecord)(bad)).toThrow();
   });
+
+  it('rejects a negative or non-integer updatedAt (refined Timestamp)', () => {
+    const base = {
+      id: 'card-2',
+      name: 'Test',
+      themeId: 'arcane',
+      layoutId: 'classic',
+      holo: false,
+      data: {},
+    };
+    expect(() => Schema.decodeUnknownSync(CardRecord)({ ...base, updatedAt: -5 })).toThrow();
+    expect(() => Schema.decodeUnknownSync(CardRecord)({ ...base, updatedAt: 1.5 })).toThrow();
+  });
 });
 
 // ---------------------------------------------------------------------------

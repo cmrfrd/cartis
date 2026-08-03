@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { Timestamp } from '../contracts/ids';
 import type { StoredCard, StoredExport } from '../storage/CardArchive';
 import {
   exportMatchesQuery,
@@ -15,7 +16,7 @@ const card = (over: Partial<StoredCard> = {}): StoredCard => ({
   layoutId: 'fullart',
   data: { name: 'The Great Henge', typeLine: 'Legendary Artifact', ability: 'Gain 2 life.' },
   holo: false,
-  updatedAt: 1,
+  updatedAt: Timestamp.make(1),
   ...over,
 });
 
@@ -24,7 +25,7 @@ const exp = (over: Partial<StoredExport> = {}): StoredExport => ({
   name: 'the-great-henge.png',
   format: 'png',
   type: 'image/png',
-  createdAt: 1,
+  createdAt: Timestamp.make(1),
   ...over,
 });
 

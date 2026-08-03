@@ -2,6 +2,7 @@ import State from '@expressive/react';
 import { Effect, Exit } from 'effect';
 import { runAppExit } from '../app/runtime';
 import { noteFromCause } from '../contracts/errors';
+import { Timestamp } from '../contracts/ids';
 import { ImageRecord, type ImageRecordT } from '../contracts/records';
 import { StoreClient } from './StoreClient';
 
@@ -50,7 +51,11 @@ export class ImageLibrary extends State {
 
   async add(input: NewImage): Promise<StoredImage> {
     const { bytes, ...meta } = input;
-    const record: StoredImage = { ...meta, id: crypto.randomUUID(), createdAt: Date.now() };
+    const record: StoredImage = {
+      ...meta,
+      id: crypto.randomUUID(),
+      createdAt: Timestamp.make(Date.now()),
+    };
     const exit = await runAppExit(
       Effect.gen(function* () {
         const store = yield* StoreClient;

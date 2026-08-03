@@ -3,6 +3,7 @@ import { Effect, Exit } from 'effect';
 import { runAppExit } from '../app/runtime';
 import type { CardData } from '../cards/types';
 import { noteFromCause } from '../contracts/errors';
+import { Timestamp } from '../contracts/ids';
 import {
   CardRecord,
   type CardRecordT,
@@ -76,7 +77,7 @@ export class CardArchive extends State {
       layoutId: input.layoutId,
       data: { ...input.data },
       holo: input.holo,
-      updatedAt: Date.now(),
+      updatedAt: Timestamp.make(Date.now()),
       // Omit the key entirely when absent (copies/pre-chat cards start fresh).
       ...(input.chatSessionId !== undefined ? { chatSessionId: input.chatSessionId } : {}),
     };
@@ -110,7 +111,11 @@ export class CardArchive extends State {
     cardId?: string;
   }): Promise<StoredExport> {
     const { bytes, ...meta } = input;
-    const record: StoredExport = { ...meta, id: crypto.randomUUID(), createdAt: Date.now() };
+    const record: StoredExport = {
+      ...meta,
+      id: crypto.randomUUID(),
+      createdAt: Timestamp.make(Date.now()),
+    };
     const exit = await runAppExit(
       Effect.gen(function* () {
         const store = yield* StoreClient;

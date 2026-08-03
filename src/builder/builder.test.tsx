@@ -5,6 +5,7 @@ import { setAppLayer, testAppLayerWith } from '../app/runtime';
 import { ChatThread, type ChatThreadShape } from '../chat/ChatThread';
 import type { ChatTurnRequestT, ChatTurnResponseT } from '../contracts/api';
 import { ChatRequestError, StoreError } from '../contracts/errors';
+import { Timestamp } from '../contracts/ids';
 import { type GenerationInput, ImageProvider } from '../images/ImageProvider';
 import type { StoredCard } from '../storage/CardArchive';
 import { StoreClient } from '../storage/StoreClient';
@@ -259,7 +260,7 @@ describe('document lifecycle (headless)', () => {
     layoutId: 'classic',
     data: { name: 'Stored Hero', essence: 'tide' },
     holo: false,
-    updatedAt: 1,
+    updatedAt: Timestamp.make(1),
     ...overrides,
   });
 

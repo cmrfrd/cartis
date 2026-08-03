@@ -11,6 +11,7 @@
 
 import { Schema } from 'effect';
 import { FieldValue } from './fields.ts';
+import { Timestamp } from './ids.ts';
 
 // ---------------------------------------------------------------------------
 // StoreName
@@ -55,7 +56,7 @@ export const CardRecord = Schema.Struct({
   themeId: Schema.String,
   layoutId: Schema.String,
   holo: Schema.Boolean,
-  updatedAt: Schema.Number,
+  updatedAt: Timestamp,
   data: Schema.Record({ key: Schema.String, value: FieldValue }),
   /**
    * The opencode session backing this card's chat (card chat panel, spec
@@ -81,7 +82,7 @@ export const ExportRecord = Schema.Struct({
   name: Schema.String,
   format: ExportFormat,
   type: Schema.String,
-  createdAt: Schema.Number,
+  createdAt: Timestamp,
   fileName: Schema.optional(Schema.String),
   /** The saved card this render was exported from (absent on legacy/back exports). */
   cardId: Schema.optional(Schema.String),
@@ -104,7 +105,7 @@ export const ImageRecord = Schema.Struct({
   prompt: Schema.optional(Schema.String),
   styleId: Schema.optional(Schema.String),
   type: Schema.String,
-  createdAt: Schema.Number,
+  createdAt: Timestamp,
   fileName: Schema.optional(Schema.String),
 });
 export type ImageRecordT = typeof ImageRecord.Type;
