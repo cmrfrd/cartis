@@ -189,6 +189,35 @@ BuilderView): it folds `ChatEvents` into a message list via the pure
 `src/chat/fold.ts` reducer, runs turns through the Effect boundary, and applies
 the resulting patch/art to the document through an injected `ChatContext`.
 
+### Type discipline
+
+Beyond Schema-decoded boundaries, the codebase enforces (spec:
+`docs/superpowers/specs/2026-08-03-type-safety-and-contract-hardening-design.md`):
+
+- **Branded ids + validated strings** (`src/contracts/ids.ts`): `CardId`,
+  `SessionId`, `ThemeId`, `LayoutId`, `MessageId`, … are nominal brands — the
+  compiler rejects passing one where another is expected. `DataUrl` is a
+  refined brand: "valid non-empty base64 data URL" is part of the type (the
+  empty-`input_image` bug class is unrepresentable). `Timestamp` is a
+  non-negative integer. The Replicate token flows as `Redacted<string>` and
+  cannot stringify into a log.
+- **The Option boundary rule**: pure logic and service returns speak
+  `Option<T>` (composition); expressive reactive fields and JSX props speak
+  `T | undefined` (the DOM can't consume an Option, and boxing defeats
+  value-equality change-skips). Conversion happens exactly once, at the seam,
+  via `Option.getOrUndefined`.
+- **`Match.exhaustive`** replaces tagged-union switches — a new
+  `ThreadEvent`/`ThreadPart`/field-kind variant fails `tsc` instead of
+  silently falling through. (The bridge's raw-wire `part.type` dispatch stays
+  a tolerant switch by design.)
+- **Typed errors end-to-end**: `src/contracts/errors.ts` is the documented
+  catalog (tag → producer → HTTP status → UX → propagation). A server failure
+  crosses the wire as `ErrorBody { tag, error }` with a mapped status, and the
+  client's typed error carries the server tag as `remoteTag`.
+- **Constraint-honoring agent patches**: `schemaFromFields` enforces each
+  field's `min`/`max`/`options`, which travel on the wire `FieldSummary` — a
+  chat turn cannot set `cost: 999` or an out-of-set select value.
+
 ### Browser runtime seam — `src/app/runtime.ts`
 
 `runApp` / `runAppExit` / `forkApp` run Effects against the live layer. Tests
