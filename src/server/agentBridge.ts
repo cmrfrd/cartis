@@ -435,15 +435,26 @@ export function mapAgentEvent(
   }
 }
 
+/**
+ * One file riding a prompt as an SDK FilePartInput. `filename` present marks a
+ * USER attachment (visible in history); absent marks the auto-attached card-art
+ * context (invisible — history mapping skips unnamed file parts).
+ */
+export interface PromptFile {
+  readonly mime: string;
+  readonly url: string;
+  readonly filename?: string;
+}
+
 export class AgentClient extends Context.Tag('cartis/AgentClient')<
   AgentClient,
   {
     createSession(title: string): Effect.Effect<SessionIdT, AgentError>;
-    /** `image` attaches a vision part (SDK FilePartInput with a data-URL). */
+    /** `files` attach as SDK FilePartInputs, in order, before the text part. */
     prompt(
       sessionId: SessionIdT,
       text: string,
-      image?: { mime: string; dataUrl: string },
+      files?: readonly PromptFile[],
     ): Effect.Effect<unknown, AgentError>;
     /**
      * Run `effect` with the session's activity watcher forked in scope (live:
@@ -540,17 +551,20 @@ export function agentClientFromSdk(
         }
         return SessionId.make(id); // brand at the opencode decode boundary
       }),
-    prompt: (sessionId, text, image) =>
+    prompt: (sessionId, text, files) =>
       Effect.promise(() =>
         client.session.prompt({
           path: { id: sessionId },
           body: {
-            parts: image
-              ? [
-                  { type: 'text', text },
-                  { type: 'file', mime: image.mime, url: image.dataUrl },
-                ]
-              : [{ type: 'text', text }],
+            parts: [
+              ...(files ?? []).map((f) => ({
+                type: 'file' as const,
+                mime: f.mime,
+                url: f.url,
+                ...(f.filename !== undefined ? { filename: f.filename } : {}),
+              })),
+              { type: 'text', text },
+            ],
           },
         }),
       ),
@@ -647,8 +661,8 @@ export const agentClientLive: Layer.Layer<AgentClient, never, ThreadBus> = Layer
     return AgentClient.of({
       createSession: (title) =>
         cached.pipe(Effect.flatMap((client) => svc(client).createSession(title))),
-      prompt: (sessionId, text, image) =>
-        cached.pipe(Effect.flatMap((client) => svc(client).prompt(sessionId, text, image))),
+      prompt: (sessionId, text, files) =>
+        cached.pipe(Effect.flatMap((client) => svc(client).prompt(sessionId, text, files))),
       withActivity: (sessionId, effect) =>
         cached.pipe(Effect.flatMap((client) => svc(client).withActivity(sessionId, effect))),
       messages: (sessionId) =>
@@ -766,14 +780,19 @@ function extractJson(raw: string): Option.Option<unknown> {
  */
 const USER_REQUEST_MARKER = 'Author request: ';
 
-/** The rich prompt for one chat turn (guide + theme + fields + snapshot + ask). */
+/**
+ * The rich prompt for one chat turn (guide + theme + fields + snapshot + ask).
+ * An attachment-only turn (empty prompt) stores a stand-in request so the
+ * rehydrated user bubble is never empty (spec chat-panel-maturity §1).
+ */
 function chatPromptText(req: ChatTurnRequestT): string {
+  const request = req.userPrompt.trim().length > 0 ? req.userPrompt : '(see attached files)';
   return [
     CHAT_GUIDE,
     `Look and feel: ${req.themeContext.lookAndFeel}`,
     `Fields: ${req.fields.map((f) => `${f.key} (${f.kind})`).join(', ')}`,
     `Current values (respect these; the author may have hand-edited): ${JSON.stringify(req.currentData)}`,
-    `${USER_REQUEST_MARKER}${req.userPrompt}`,
+    `${USER_REQUEST_MARKER}${request}`,
   ].join('\n\n');
 }
 
@@ -789,7 +808,7 @@ function promptWithHeartbeat(
   bus: Context.Tag.Service<ThreadBus>,
   sessionId: SessionIdT,
   text: string,
-  image?: { mime: string; dataUrl: string },
+  files?: readonly PromptFile[],
 ): Effect.Effect<unknown, AgentError> {
   return Effect.gen(function* () {
     const startedAt = yield* Clock.currentTimeMillis;
@@ -805,7 +824,7 @@ function promptWithHeartbeat(
             Effect.forever,
           ),
         );
-        return yield* agent.withActivity(sessionId, agent.prompt(sessionId, text, image));
+        return yield* agent.withActivity(sessionId, agent.prompt(sessionId, text, files));
       }),
     );
   });
@@ -851,8 +870,20 @@ export function runChatTurn(
       req.currentArtFileName !== undefined
         ? Option.getOrUndefined(yield* readArt(req.currentArtFileName))
         : undefined;
+    // User attachments first (filename'd → visible in history), then the
+    // unnamed card-art context (invisible), then the text prompt.
+    const files: PromptFile[] = [
+      ...(req.attachments ?? []).map((a) => ({ mime: a.mime, url: a.dataUrl, filename: a.name })),
+      ...(image !== undefined ? [{ mime: image.mime, url: image.dataUrl }] : []),
+    ];
     yield* bus.log('agent', `chat: “${req.userPrompt.slice(0, 60)}”`);
-    const result = yield* promptWithHeartbeat(agent, bus, sessionId, chatPromptText(req), image);
+    const result = yield* promptWithHeartbeat(
+      agent,
+      bus,
+      sessionId,
+      chatPromptText(req),
+      files.length > 0 ? files : undefined,
+    );
     const decodePatch = (u: unknown): Effect.Effect<CardDataT, AgentError> =>
       Schema.decodeUnknown(schemaFromFields(req.fields))(u).pipe(
         Effect.mapError(() => new AgentError({ reason: 'no-fill' })),
@@ -934,9 +965,20 @@ export function mapSessionMessages(
     if (id.length === 0) continue;
     const parts = message.parts ?? [];
     if (role === 'user') {
+      // Named file parts are user attachments (thumbs/chips); unnamed file
+      // parts are the invisible auto-attached card-art context — skipped.
+      const fileParts: ThreadPartT[] = [];
+      for (const part of parts) {
+        if (part.type !== 'file' || part.filename === undefined) continue;
+        fileParts.push(
+          part.mime?.startsWith('image/') === true
+            ? { _tag: 'Image', url: part.url ?? '' }
+            : { _tag: 'File', name: part.filename, mime: part.mime ?? '' },
+        );
+      }
       // Strip the turn scaffold so the bubble shows the typed request, not the prompt.
       const text = userRequestOf(textOfParts(parts));
-      out.push({ id, role, status: 'complete', parts: [{ _tag: 'Text', text }] });
+      out.push({ id, role, status: 'complete', parts: [...fileParts, { _tag: 'Text', text }] });
       continue;
     }
     // assistant: real tool/reasoning parts in order, then materialized card actions.

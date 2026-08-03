@@ -194,6 +194,11 @@ const SessionMessagePart = Schema.Struct({
   callID: Schema.optional(Schema.String),
   tool: Schema.optional(Schema.String),
   state: Schema.optional(SessionPartState),
+  // file parts (type 'file'): user attachments carry a filename; the
+  // auto-attached card-art context does not (history mapping skips it).
+  mime: Schema.optional(Schema.String),
+  filename: Schema.optional(Schema.String),
+  url: Schema.optional(Schema.String),
 });
 export type SessionMessagePartT = typeof SessionMessagePart.Type;
 

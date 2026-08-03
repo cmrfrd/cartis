@@ -2,7 +2,14 @@ import { type Context, Effect, Fiber, Layer, Option, Redacted, Ref, TestClock } 
 import { describe, expect } from 'vitest';
 import type { ChatTurnRequestT } from '@/contracts/api.ts';
 import { AgentError } from '@/contracts/errors.ts';
-import { DataUrl, MessageId, PermissionId, SessionId } from '@/contracts/ids.ts';
+import {
+  DataUrl,
+  FileName,
+  MessageId,
+  MimeType,
+  PermissionId,
+  SessionId,
+} from '@/contracts/ids.ts';
 import type { SessionInfoT, SessionMessagesT } from '@/contracts/opencode.ts';
 import type { PredictionT } from '@/contracts/replicate.ts';
 import type { ThreadEventT } from '@/contracts/thread.ts';
@@ -17,6 +24,7 @@ import {
   mapSessionMessages,
   type OpencodeClient,
   opencodeClientOf,
+  type PromptFile,
   ReplicateClient,
   ReplicateSdk,
   replicateClientLive,
@@ -119,7 +127,7 @@ describe('composeArtPrompt', () => {
 interface PromptCall {
   sessionId: string;
   text: string;
-  image?: { mime: string; dataUrl: string };
+  files?: readonly PromptFile[];
 }
 
 /** Stub AgentClient that records prompt calls and replies with a fixed text. */
@@ -133,13 +141,18 @@ const chatStub = (
       sessions.push(title);
       return Effect.succeed(SessionId.make('fresh-session'));
     },
-    prompt: (sessionId, text, image) => {
-      calls.push({ sessionId, text, image });
+    prompt: (sessionId, text, files) => {
+      calls.push({ sessionId, text, files });
       return Effect.succeed({ data: { parts: [{ type: 'text', text: reply }] } });
     },
   });
 
 const noArt = () => Effect.succeed(Option.none<{ mime: string; dataUrl: string }>());
+
+// Terse brand minting for attachment fixtures.
+const fileName = (n: string) => FileName.make(n);
+const mime = (m: string) => MimeType.make(m);
+const dataUrl = (m: string) => DataUrl.make(`data:${m};base64,QQ==`);
 
 const chatReq = (overrides: Partial<ChatTurnRequestT> = {}): ChatTurnRequestT => ({
   sessionId: undefined,
@@ -168,7 +181,7 @@ describe('runChatTurn', () => {
       // per-turn snapshot: the prompt embeds currentData (hand edits win)
       expect(calls[0]?.text).toContain('Hand-edited.');
       expect(calls[0]?.text).toContain('rename him to Vorak');
-      expect(calls[0]?.image).toBeUndefined();
+      expect(calls[0]?.files).toBeUndefined();
       // turn-level notes go to the console-only log lane, not the event stream
       const bus = yield* ThreadBus;
       const logs = yield* bus.logs;
@@ -208,7 +221,8 @@ describe('runChatTurn', () => {
       const out = yield* runChatTurn(chatReq({ currentArtFileName: 'nyra-abc123.png' }), () =>
         Effect.succeed(Option.some({ mime: 'image/png', dataUrl: 'data:image/png;base64,QQ==' })),
       );
-      expect(calls[0]?.image?.mime).toBe('image/png');
+      // art context rides as an UNNAMED file part (no filename — invisible in history)
+      expect(calls[0]?.files).toEqual([{ mime: 'image/png', url: 'data:image/png;base64,QQ==' }]);
       expect(out.artAction).toEqual({ brief: 'angrier face', editCurrentArt: true });
     }).pipe(
       Effect.provide(
@@ -264,6 +278,57 @@ describe('runChatTurn', () => {
       ),
     ),
   );
+
+  it.effect(
+    'sends user attachments as filename’d file parts BEFORE the unnamed art context',
+    () => {
+      const calls: PromptCall[] = [];
+      return Effect.gen(function* () {
+        yield* runChatTurn(
+          chatReq({
+            currentArtFileName: 'nyra-abc123.png',
+            attachments: [
+              { name: fileName('ref.png'), mime: mime('image/png'), dataUrl: dataUrl('image/png') },
+              {
+                name: fileName('notes.md'),
+                mime: mime('text/markdown'),
+                dataUrl: dataUrl('text/markdown'),
+              },
+            ],
+          }),
+          () =>
+            Effect.succeed(
+              Option.some({ mime: 'image/png', dataUrl: 'data:image/png;base64,QQ==' }),
+            ),
+        );
+        expect(calls[0]?.files).toEqual([
+          { mime: 'image/png', url: dataUrl('image/png'), filename: 'ref.png' },
+          { mime: 'text/markdown', url: dataUrl('text/markdown'), filename: 'notes.md' },
+          { mime: 'image/png', url: 'data:image/png;base64,QQ==' }, // art context: NO filename
+        ]);
+      }).pipe(
+        Effect.provide(Layer.mergeAll(chatStub('{"reply":"ok"}', calls, []), threadBusTestLayer)),
+      );
+    },
+  );
+
+  it.effect('an attachment-only turn sends the stand-in request text', () => {
+    const calls: PromptCall[] = [];
+    return Effect.gen(function* () {
+      yield* runChatTurn(
+        chatReq({
+          userPrompt: '',
+          attachments: [
+            { name: fileName('ref.png'), mime: mime('image/png'), dataUrl: dataUrl('image/png') },
+          ],
+        }),
+        noArt,
+      );
+      expect(calls[0]?.text.endsWith('Author request: (see attached files)')).toBe(true);
+    }).pipe(
+      Effect.provide(Layer.mergeAll(chatStub('{"reply":"ok"}', calls, []), threadBusTestLayer)),
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -968,6 +1033,38 @@ describe('runChatTurn heartbeat', () => {
 // ---------------------------------------------------------------------------
 
 describe('mapSessionMessages', () => {
+  it('maps named user file parts to Image/File and skips the unnamed art context', () => {
+    const out = mapSessionMessages([
+      {
+        info: { id: MessageId.make('u1'), role: 'user', time: { created: 1 } },
+        parts: [
+          {
+            id: 'f1',
+            type: 'file',
+            mime: 'image/png',
+            filename: 'ref.png',
+            url: 'data:image/png;base64,AA==',
+          },
+          {
+            id: 'f2',
+            type: 'file',
+            mime: 'text/markdown',
+            filename: 'notes.md',
+            url: 'data:text/markdown;base64,QQ==',
+          },
+          // unnamed = the invisible auto-attached card-art context
+          { id: 'f3', type: 'file', mime: 'image/png', url: 'data:image/png;base64,BB==' },
+          { id: 'p0', type: 'text', text: 'Author request: like this reference' },
+        ],
+      },
+    ]);
+    expect(out[0]?.parts).toEqual([
+      { _tag: 'Image', url: 'data:image/png;base64,AA==' },
+      { _tag: 'File', name: 'notes.md', mime: 'text/markdown' },
+      { _tag: 'Text', text: 'like this reference' },
+    ]);
+  });
+
   it('maps a user + assistant exchange, materializing the v1 JSON reply', () => {
     const out = mapSessionMessages([
       {
