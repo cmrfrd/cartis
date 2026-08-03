@@ -11,7 +11,7 @@
 
 import { Schema } from 'effect';
 import { FieldValue } from './fields.ts';
-import { CardId, ExportId, ImageId, LayoutId, ThemeId, Timestamp } from './ids.ts';
+import { CardId, ExportId, ImageId, LayoutId, SessionId, ThemeId, Timestamp } from './ids.ts';
 
 // ---------------------------------------------------------------------------
 // StoreName
@@ -64,7 +64,7 @@ export const CardRecord = Schema.Struct({
    * fine and simply start a fresh conversation. Lives in gitignored
    * cartis-data/; opencode owns the transcript, we persist only this pointer.
    */
-  chatSessionId: Schema.optional(Schema.String),
+  chatSessionId: Schema.optional(SessionId),
 });
 export type CardRecordT = typeof CardRecord.Type;
 

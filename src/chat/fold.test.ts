@@ -5,19 +5,20 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { MessageId, PermissionId, SessionId } from '../contracts/ids';
 import { CARD_GENERATE_ART_TOOL } from '../contracts/materialize';
 import type { ThreadEventT, ThreadMessageT } from '../contracts/thread';
 import { foldThreadEvent } from './fold';
 
 const started = (messageId: string): ThreadEventT => ({
   _tag: 'TurnStarted',
-  sessionId: 's1',
-  messageId,
+  sessionId: SessionId.make('s1'),
+  messageId: MessageId.make(messageId),
 });
 const textDelta = (messageId: string, partIndex: number, text: string): ThreadEventT => ({
   _tag: 'PartDelta',
-  sessionId: 's1',
-  messageId,
+  sessionId: SessionId.make('s1'),
+  messageId: MessageId.make(messageId),
   partIndex,
   part: { _tag: 'Text', text },
 });
@@ -27,7 +28,9 @@ const fold = (events: readonly ThreadEventT[], init: ThreadMessageT[] = []): Thr
 describe('foldThreadEvent', () => {
   it('TurnStarted appends a running assistant message, idempotently', () => {
     const once = fold([started('m1')]);
-    expect(once).toEqual([{ id: 'm1', role: 'assistant', status: 'running', parts: [] }]);
+    expect(once).toEqual([
+      { id: MessageId.make('m1'), role: 'assistant', status: 'running', parts: [] },
+    ]);
     // a replayed TurnStarted (SSE reconnect) must NOT append a duplicate
     const twice = fold([started('m1'), started('m1')]);
     expect(twice).toHaveLength(1);
@@ -38,7 +41,13 @@ describe('foldThreadEvent', () => {
       started('m1'),
       textDelta('m1', 0, 'The'),
       textDelta('m1', 0, 'The card'), // same index → cumulative replace
-      { _tag: 'PartDelta', sessionId: 's1', messageId: 'm1', partIndex: 1, part: { _tag: 'Step' } },
+      {
+        _tag: 'PartDelta',
+        sessionId: SessionId.make('s1'),
+        messageId: MessageId.make('m1'),
+        partIndex: 1,
+        part: { _tag: 'Step' },
+      },
     ]);
     expect(out[0]?.parts).toEqual([{ _tag: 'Text', text: 'The card' }, { _tag: 'Step' }]);
   });
@@ -69,7 +78,12 @@ describe('foldThreadEvent', () => {
     const out = fold([
       started('m1'),
       textDelta('m1', 0, 'done'),
-      { _tag: 'TurnCompleted', sessionId: 's1', messageId: 'm1', status: 'complete' },
+      {
+        _tag: 'TurnCompleted',
+        sessionId: SessionId.make('s1'),
+        messageId: MessageId.make('m1'),
+        status: 'complete',
+      },
     ]);
     expect(out[0]?.status).toBe('complete');
   });
@@ -91,7 +105,7 @@ describe('foldThreadEvent', () => {
   it('Art updates the materialized art part in place (no duplicate)', () => {
     const seeded: ThreadMessageT[] = [
       {
-        id: 'm1',
+        id: MessageId.make('m1'),
         role: 'assistant',
         status: 'complete',
         parts: [
@@ -129,8 +143,8 @@ describe('foldThreadEvent', () => {
     const before = fold([started('m1')]);
     const after = foldThreadEvent(before, {
       _tag: 'PermissionRequested',
-      sessionId: 's1',
-      permissionId: 'p1',
+      sessionId: SessionId.make('s1'),
+      permissionId: PermissionId.make('p1'),
       title: 'Run bash?',
     });
     expect(after).toBe(before);

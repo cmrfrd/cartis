@@ -1,6 +1,7 @@
 import { Chunk, Effect, Fiber, Stream } from 'effect';
 import { describe, expect } from 'vitest';
 import { it } from '../../test/effect.ts';
+import { MessageId, PermissionId, SessionId } from '../contracts/ids';
 import type { ThreadEventT, ThreadPartT } from '../contracts/thread.ts';
 import { renderThreadEvent, ThreadBus, threadBusTestLayer } from './threadBus.ts';
 
@@ -20,7 +21,11 @@ describe('ThreadBus', () => {
       const seen = yield* Effect.fork(bus.changes.pipe(Stream.take(2), Stream.runCollect));
       yield* Effect.yieldNow();
       yield* bus.emit(art('prediction created'));
-      yield* bus.emit({ _tag: 'TurnStarted', sessionId: 's1', messageId: 'm1' });
+      yield* bus.emit({
+        _tag: 'TurnStarted',
+        sessionId: SessionId.make('s1'),
+        messageId: MessageId.make('m1'),
+      });
 
       const history = yield* bus.history;
       expect(history.map((e) => e._tag)).toEqual(['Art', 'TurnStarted']);
@@ -88,8 +93,8 @@ describe('ThreadBus', () => {
 describe('renderThreadEvent', () => {
   const delta = (part: ThreadPartT): ThreadEventT => ({
     _tag: 'PartDelta',
-    sessionId: 's1',
-    messageId: 'm1',
+    sessionId: SessionId.make('s1'),
+    messageId: MessageId.make('m1'),
     partIndex: 0,
     part,
   });
@@ -147,14 +152,18 @@ describe('renderThreadEvent', () => {
   });
 
   it('renders turn, art, error, and permission lines', () => {
-    expect(renderThreadEvent({ _tag: 'TurnStarted', sessionId: 's1', messageId: 'm1' })).toBe(
-      '[cartis:agent] turn started',
-    );
+    expect(
+      renderThreadEvent({
+        _tag: 'TurnStarted',
+        sessionId: SessionId.make('s1'),
+        messageId: MessageId.make('m1'),
+      }),
+    ).toBe('[cartis:agent] turn started');
     expect(
       renderThreadEvent({
         _tag: 'TurnCompleted',
-        sessionId: 's1',
-        messageId: 'm1',
+        sessionId: SessionId.make('s1'),
+        messageId: MessageId.make('m1'),
         status: 'complete',
       }),
     ).toBe('[cartis:agent] turn complete');
@@ -177,8 +186,8 @@ describe('renderThreadEvent', () => {
     expect(
       renderThreadEvent({
         _tag: 'PermissionRequested',
-        sessionId: 's1',
-        permissionId: 'p1',
+        sessionId: SessionId.make('s1'),
+        permissionId: PermissionId.make('p1'),
         title: 'Run bash?',
       }),
     ).toBe('[cartis:agent] permission requested: Run bash?');

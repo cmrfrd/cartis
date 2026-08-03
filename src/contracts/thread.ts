@@ -10,6 +10,7 @@
  */
 
 import { Schema } from 'effect';
+import { MessageId, PermissionId, SessionId } from './ids.ts';
 
 // ---------------------------------------------------------------------------
 // ThreadPart — the ordered content units of a message
@@ -58,7 +59,7 @@ export const MessageStatus = Schema.Literal('running', 'complete', 'incomplete')
 export type MessageStatusT = typeof MessageStatus.Type;
 
 export const ThreadMessage = Schema.Struct({
-  id: Schema.String,
+  id: MessageId,
   role: MessageRole,
   status: MessageStatus,
   parts: Schema.Array(ThreadPart),
@@ -70,8 +71,8 @@ export type ThreadMessageT = typeof ThreadMessage.Type;
 // ---------------------------------------------------------------------------
 
 export const TurnStarted = Schema.TaggedStruct('TurnStarted', {
-  sessionId: Schema.String,
-  messageId: Schema.String,
+  sessionId: SessionId,
+  messageId: MessageId,
 });
 
 /**
@@ -80,15 +81,15 @@ export const TurnStarted = Schema.TaggedStruct('TurnStarted', {
  * transitions. The fold replaces `parts[partIndex]` wholesale.
  */
 export const PartDelta = Schema.TaggedStruct('PartDelta', {
-  sessionId: Schema.String,
-  messageId: Schema.String,
+  sessionId: SessionId,
+  messageId: MessageId,
   partIndex: Schema.Number.pipe(Schema.int(), Schema.nonNegative()),
   part: ThreadPart,
 });
 
 export const TurnCompleted = Schema.TaggedStruct('TurnCompleted', {
-  sessionId: Schema.String,
-  messageId: Schema.String,
+  sessionId: SessionId,
+  messageId: MessageId,
   status: Schema.Literal('complete', 'incomplete'),
 });
 
@@ -111,8 +112,8 @@ export const SessionErrorEvent = Schema.TaggedStruct('SessionError', {
 });
 
 export const PermissionRequested = Schema.TaggedStruct('PermissionRequested', {
-  sessionId: Schema.String,
-  permissionId: Schema.String,
+  sessionId: SessionId,
+  permissionId: PermissionId,
   title: Schema.String,
 });
 
@@ -134,8 +135,8 @@ export const ThreadEventJson = Schema.parseJson(ThreadEvent);
 // ---------------------------------------------------------------------------
 
 export const ThreadSummary = Schema.Struct({
-  sessionId: Schema.String,
+  sessionId: SessionId,
   title: Schema.optional(Schema.String),
-  parentId: Schema.optional(Schema.String),
+  parentId: Schema.optional(SessionId),
 });
 export type ThreadSummaryT = typeof ThreadSummary.Type;

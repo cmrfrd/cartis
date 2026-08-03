@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { setAppLayer, testAppLayerWith } from '../app/runtime';
 import type { ChatTurnResponseT } from '../contracts/api';
 import { ChatRequestError, NetworkError } from '../contracts/errors';
+import { MessageId, PermissionId, SessionId } from '../contracts/ids';
 import type { ThreadEventT } from '../contracts/thread';
 import { type ChatEvents, chatEventsFromPubSub } from './ChatEvents';
 import { ChatThread, type ChatThreadShape } from './ChatThread';
@@ -13,7 +14,7 @@ const threadStub = (over: Partial<ChatThreadShape> = {}): Layer.Layer<ChatThread
   Layer.succeed(ChatThread, {
     turn: () =>
       Effect.succeed({
-        sessionId: 'ses-1',
+        sessionId: SessionId.make('ses-1'),
         assistantText: '{"reply":"ok"}',
         patch: {},
       } satisfies ChatTurnResponseT),
@@ -23,11 +24,11 @@ const threadStub = (over: Partial<ChatThreadShape> = {}): Layer.Layer<ChatThread
     revert: () => Effect.void,
     regenerate: () =>
       Effect.succeed({
-        sessionId: 'ses-1',
+        sessionId: SessionId.make('ses-1'),
         assistantText: '{"reply":"again"}',
         patch: {},
       } satisfies ChatTurnResponseT),
-    fork: () => Effect.succeed('fork-1'),
+    fork: () => Effect.succeed(SessionId.make('fork-1')),
     replyPermission: () => Effect.void,
     ...over,
   });
@@ -60,7 +61,7 @@ describe('ThreadState.send', () => {
       threadStub({
         turn: () =>
           Effect.succeed({
-            sessionId: 'ses-9',
+            sessionId: SessionId.make('ses-9'),
             assistantText: '{"reply":"Renamed him.","patch":{"name":"Vorak"}}',
             patch: { name: 'Vorak' },
           }),
@@ -85,7 +86,7 @@ describe('ThreadState.send', () => {
       threadStub({
         turn: () =>
           Effect.succeed({
-            sessionId: 'ses-1',
+            sessionId: SessionId.make('ses-1'),
             assistantText:
               '{"reply":"done","patch":{"name":"Q"},"artAction":{"brief":"b","editCurrentArt":true}}',
             patch: { name: 'Q' },
@@ -126,7 +127,7 @@ describe('ThreadState.send', () => {
         turn: () => {
           calls += 1;
           return Effect.succeed({
-            sessionId: 's',
+            sessionId: SessionId.make('s'),
             assistantText: '{"reply":"ok"}',
             patch: {},
           }).pipe(Effect.delay('50 millis'));
@@ -157,16 +158,20 @@ describe('ThreadState streaming (SSE fold)', () => {
   it('builds a running assistant message from streamed events', async () => {
     const pubsub = await Effect.runPromise(PS.unbounded<ThreadEventT>());
     const state = makeThread(threadStub(), chatEventsFromPubSub(pubsub));
-    state.sessionId = 's1'; // bound so the session filter passes
+    state.sessionId = SessionId.make('s1'); // bound so the session filter passes
     const publish = (e: ThreadEventT) => Effect.runPromise(PubSubPublish(pubsub, e));
     await vi.waitFor(async () => {
-      await publish({ _tag: 'TurnStarted', sessionId: 's1', messageId: 'm1' });
+      await publish({
+        _tag: 'TurnStarted',
+        sessionId: SessionId.make('s1'),
+        messageId: MessageId.make('m1'),
+      });
       expect(state.messages.some((m) => m.id === 'm1')).toBe(true);
     });
     await publish({
       _tag: 'PartDelta',
-      sessionId: 's1',
-      messageId: 'm1',
+      sessionId: SessionId.make('s1'),
+      messageId: MessageId.make('m1'),
       partIndex: 0,
       part: { _tag: 'Text', text: 'streaming…' },
     });
@@ -179,9 +184,13 @@ describe('ThreadState streaming (SSE fold)', () => {
   it('filters events from other sessions', async () => {
     const pubsub = await Effect.runPromise(PS.unbounded<ThreadEventT>());
     const state = makeThread(threadStub(), chatEventsFromPubSub(pubsub));
-    state.sessionId = 's1';
+    state.sessionId = SessionId.make('s1');
     await Effect.runPromise(
-      PubSubPublish(pubsub, { _tag: 'TurnStarted', sessionId: 'other', messageId: 'x' }),
+      PubSubPublish(pubsub, {
+        _tag: 'TurnStarted',
+        sessionId: SessionId.make('other'),
+        messageId: MessageId.make('x'),
+      }),
     );
     await new Promise((r) => setTimeout(r, 20));
     expect(state.messages).toHaveLength(0);
@@ -191,13 +200,13 @@ describe('ThreadState streaming (SSE fold)', () => {
   it('records a pending permission from the stream', async () => {
     const pubsub = await Effect.runPromise(PS.unbounded<ThreadEventT>());
     const state = makeThread(threadStub(), chatEventsFromPubSub(pubsub));
-    state.sessionId = 's1';
+    state.sessionId = SessionId.make('s1');
     await vi.waitFor(async () => {
       await Effect.runPromise(
         PubSubPublish(pubsub, {
           _tag: 'PermissionRequested',
-          sessionId: 's1',
-          permissionId: 'perm1',
+          sessionId: SessionId.make('s1'),
+          permissionId: PermissionId.make('perm1'),
           title: 'Run bash?',
         }),
       );
@@ -213,11 +222,16 @@ describe('ThreadState lifecycle', () => {
       threadStub({
         history: () =>
           Effect.succeed([
-            { id: 'u1', role: 'user', status: 'complete', parts: [{ _tag: 'Text', text: 'hi' }] },
+            {
+              id: MessageId.make('u1'),
+              role: 'user',
+              status: 'complete',
+              parts: [{ _tag: 'Text', text: 'hi' }],
+            },
           ]),
       }),
     );
-    state.bind('ses-old');
+    state.bind(SessionId.make('ses-old'));
     await vi.waitFor(() => {
       expect(state.sessionId).toBe('ses-old');
       expect(state.messages).toHaveLength(1);
@@ -234,7 +248,7 @@ describe('ThreadState lifecycle', () => {
         history: () => Effect.fail(new NetworkError({ url: '/api/chat/history', cause: 'gone' })),
       }),
     );
-    state.sessionId = 'ses-stale';
+    state.sessionId = SessionId.make('ses-stale');
     await state.rehydrate();
     expect(state.messages).toHaveLength(0); // no crash, no note
     state.set(null);
@@ -247,16 +261,18 @@ describe('ThreadState capabilities', () => {
     const state = makeThread(
       threadStub({
         turn: () =>
-          Effect.succeed({ sessionId: 's1', assistantText: '{"reply":"late"}', patch: {} }).pipe(
-            Effect.delay('30 millis'),
-          ),
+          Effect.succeed({
+            sessionId: SessionId.make('s1'),
+            assistantText: '{"reply":"late"}',
+            patch: {},
+          }).pipe(Effect.delay('30 millis')),
         cancel: (sid) => {
           aborted = sid;
           return Effect.void;
         },
       }),
     );
-    state.sessionId = 's1';
+    state.sessionId = SessionId.make('s1');
     const turn = state.send('hi'); // running becomes true synchronously
     await state.cancel();
     await turn;
@@ -272,9 +288,17 @@ describe('ThreadState capabilities', () => {
     const state = makeThread(
       threadStub({
         turn: () =>
-          Effect.succeed({ sessionId: 's1', assistantText: '{"reply":"first"}', patch: {} }),
+          Effect.succeed({
+            sessionId: SessionId.make('s1'),
+            assistantText: '{"reply":"first"}',
+            patch: {},
+          }),
         regenerate: () =>
-          Effect.succeed({ sessionId: 's1', assistantText: '{"reply":"second"}', patch: {} }),
+          Effect.succeed({
+            sessionId: SessionId.make('s1'),
+            assistantText: '{"reply":"second"}',
+            patch: {},
+          }),
       }),
     );
     await state.send('hi');
@@ -293,14 +317,14 @@ describe('ThreadState capabilities', () => {
         turn: (req) => {
           calls.turnSession = req.sessionId;
           return Effect.succeed({
-            sessionId: req.sessionId ?? 'fork-1',
+            sessionId: req.sessionId ?? SessionId.make('fork-1'),
             assistantText: '{"reply":"ok"}',
             patch: {},
           });
         },
         fork: (sid) => {
           calls.fork = sid;
-          return Effect.succeed('fork-1');
+          return Effect.succeed(SessionId.make('fork-1'));
         },
         revert: (sid, mid) => {
           calls.revert = [sid, mid];
@@ -308,10 +332,10 @@ describe('ThreadState capabilities', () => {
         },
       }),
     );
-    state.sessionId = 'orig';
+    state.sessionId = SessionId.make('orig');
     await state.send('original'); // seeds a user + assistant on 'orig'
     const userMsg = state.messages.find((m) => m.role === 'user');
-    await state.edit(userMsg?.id ?? '', 'edited text');
+    await state.edit(userMsg?.id ?? MessageId.make(''), 'edited text');
     expect(calls.fork).toBe('orig'); // forked to preserve the original branch
     expect(state.sessionId).toBe('fork-1');
     expect(calls.revert).toEqual(['fork-1', userMsg?.id]);
@@ -326,7 +350,7 @@ describe('ThreadState capabilities', () => {
         history: (sid) =>
           Effect.succeed([
             {
-              id: 'h1',
+              id: MessageId.make('h1'),
               role: 'user',
               status: 'complete',
               parts: [{ _tag: 'Text', text: `from ${sid}` }],
@@ -340,8 +364,8 @@ describe('ThreadState capabilities', () => {
         },
       }),
     );
-    state.sessionId = 'orig';
-    await state.switchBranch('branch-2');
+    state.sessionId = SessionId.make('orig');
+    await state.switchBranch(SessionId.make('branch-2'));
     expect(state.sessionId).toBe('branch-2');
     expect(dirtied).toBe(true);
     await vi.waitFor(() => {
@@ -352,9 +376,11 @@ describe('ThreadState capabilities', () => {
 
   it('loadBranches() lists the session forks', async () => {
     const state = makeThread(
-      threadStub({ children: () => Effect.succeed([{ sessionId: 'b1', title: 'branch a' }]) }),
+      threadStub({
+        children: () => Effect.succeed([{ sessionId: SessionId.make('b1'), title: 'branch a' }]),
+      }),
     );
-    state.sessionId = 'orig';
+    state.sessionId = SessionId.make('orig');
     await state.loadBranches();
     expect(state.branches.map((b) => b.sessionId)).toEqual(['b1']);
     state.set(null);
@@ -370,7 +396,11 @@ describe('ThreadState capabilities', () => {
         },
       }),
     );
-    state.pendingPermission = { sessionId: 's1', permissionId: 'perm1', title: 'Run bash?' };
+    state.pendingPermission = {
+      sessionId: SessionId.make('s1'),
+      permissionId: PermissionId.make('perm1'),
+      title: 'Run bash?',
+    };
     await state.replyPermission(true);
     expect(replied).toEqual(['s1', 'perm1', true]);
     expect(state.pendingPermission).toBeUndefined();

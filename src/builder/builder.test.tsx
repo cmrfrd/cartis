@@ -5,7 +5,7 @@ import { setAppLayer, testAppLayerWith } from '../app/runtime';
 import { ChatThread, type ChatThreadShape } from '../chat/ChatThread';
 import type { ChatTurnRequestT, ChatTurnResponseT } from '../contracts/api';
 import { ChatRequestError, StoreError } from '../contracts/errors';
-import { CardId, LayoutId, ThemeId, Timestamp } from '../contracts/ids';
+import { CardId, LayoutId, SessionId, ThemeId, Timestamp } from '../contracts/ids';
 import { type GenerationInput, ImageProvider } from '../images/ImageProvider';
 import type { StoredCard } from '../storage/CardArchive';
 import { StoreClient } from '../storage/StoreClient';
@@ -18,7 +18,7 @@ const chatStub = (over: Partial<ChatThreadShape> = {}): Layer.Layer<ChatThread> 
   Layer.succeed(ChatThread, {
     turn: () =>
       Effect.succeed({
-        sessionId: 's1',
+        sessionId: SessionId.make('s1'),
         assistantText: '{"reply":"ok"}',
         patch: {},
       } satisfies ChatTurnResponseT),
@@ -27,7 +27,7 @@ const chatStub = (over: Partial<ChatThreadShape> = {}): Layer.Layer<ChatThread> 
     cancel: () => Effect.void,
     revert: () => Effect.void,
     regenerate: () => Effect.fail(new ChatRequestError({ status: 0, detail: 'x' })),
-    fork: () => Effect.succeed('fork-1'),
+    fork: () => Effect.succeed(SessionId.make('fork-1')),
     replyPermission: () => Effect.void,
     ...over,
   });
@@ -155,7 +155,7 @@ describe('BuilderView', () => {
         thread: chatStub({
           turn: () =>
             Effect.succeed({
-              sessionId: 'ses-1',
+              sessionId: SessionId.make('ses-1'),
               assistantText: '{"reply":"Renamed him.","patch":{"name":"Vorak"}}',
               patch: { name: 'Vorak' },
             }),
@@ -179,7 +179,11 @@ describe('BuilderView', () => {
         thread: chatStub({
           turn: (req) => {
             seen.push(req);
-            return Effect.succeed({ sessionId: 's1', assistantText: '{"reply":"ok"}', patch: {} });
+            return Effect.succeed({
+              sessionId: SessionId.make('s1'),
+              assistantText: '{"reply":"ok"}',
+              patch: {},
+            });
           },
         }),
       }),
@@ -199,7 +203,11 @@ describe('BuilderView', () => {
       testAppLayerWith({
         thread: chatStub({
           turn: () =>
-            Effect.succeed({ sessionId: 's1', assistantText: '{"reply":"ok"}', patch: {} }),
+            Effect.succeed({
+              sessionId: SessionId.make('s1'),
+              assistantText: '{"reply":"ok"}',
+              patch: {},
+            }),
         }),
       }),
     );
@@ -228,7 +236,7 @@ describe('BuilderView', () => {
         thread: chatStub({
           turn: () =>
             Effect.succeed({
-              sessionId: 's1',
+              sessionId: SessionId.make('s1'),
               assistantText:
                 '{"reply":"Making art.","patch":{"name":"Vorak"},"artAction":{"brief":"a phoenix companion","editCurrentArt":true}}',
               patch: { name: 'Vorak' },
@@ -286,7 +294,7 @@ describe('document lifecycle (headless)', () => {
   it('pickTheme edits the same document: keeps savedId, preserves overlap, keeps chat session', () => {
     const builder = BuilderView.new();
     builder.loadCard(makeCard({ data: { name: 'Keeper', essence: 'tide' } }));
-    builder.thread.sessionId = 's1';
+    builder.thread.sessionId = SessionId.make('s1');
     builder.pickTheme(ThemeId.make('arcane'));
     expect(builder.savedId).toBe('card-1'); // identity kept
     expect(builder.data.name).toBe('Keeper'); // overlapping key preserved
@@ -299,7 +307,7 @@ describe('document lifecycle (headless)', () => {
     const builder = BuilderView.new();
     builder.loadCard(makeCard());
     builder.pickLayout(LayoutId.make('fullart'));
-    builder.thread.sessionId = 's1';
+    builder.thread.sessionId = SessionId.make('s1');
     builder.newCard();
     expect(builder.savedId).toBeUndefined();
     expect(builder.dirty).toBe(false);

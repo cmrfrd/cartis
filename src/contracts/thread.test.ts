@@ -9,6 +9,7 @@
 
 import { Schema } from 'effect';
 import { describe, expect, it } from 'vitest';
+import { MessageId, PermissionId, SessionId } from './ids';
 import {
   ThreadEvent,
   ThreadEventJson,
@@ -70,7 +71,7 @@ describe('ThreadPart', () => {
 describe('ThreadMessage', () => {
   it('decodes a message with ordered mixed parts', () => {
     const message = {
-      id: 'm1',
+      id: MessageId.make('m1'),
       role: 'assistant',
       status: 'running',
       parts: [
@@ -100,20 +101,35 @@ describe('ThreadMessage', () => {
 
 describe('ThreadEvent', () => {
   const events: ThreadEventT[] = [
-    { _tag: 'TurnStarted', sessionId: 's1', messageId: 'm1' },
+    { _tag: 'TurnStarted', sessionId: SessionId.make('s1'), messageId: MessageId.make('m1') },
     {
       _tag: 'PartDelta',
-      sessionId: 's1',
-      messageId: 'm1',
+      sessionId: SessionId.make('s1'),
+      messageId: MessageId.make('m1'),
       partIndex: 0,
       part: { _tag: 'Text', text: 'cumulative so far' },
     },
-    { _tag: 'TurnCompleted', sessionId: 's1', messageId: 'm1', status: 'complete' },
-    { _tag: 'TurnCompleted', sessionId: 's1', messageId: 'm1', status: 'incomplete' },
+    {
+      _tag: 'TurnCompleted',
+      sessionId: SessionId.make('s1'),
+      messageId: MessageId.make('m1'),
+      status: 'complete',
+    },
+    {
+      _tag: 'TurnCompleted',
+      sessionId: SessionId.make('s1'),
+      messageId: MessageId.make('m1'),
+      status: 'incomplete',
+    },
     { _tag: 'Art', phase: 'generating', detail: 'prediction p1 created' },
     { _tag: 'Art', phase: 'composing' },
     { _tag: 'SessionError', message: 'boom' },
-    { _tag: 'PermissionRequested', sessionId: 's1', permissionId: 'p1', title: 'Run bash?' },
+    {
+      _tag: 'PermissionRequested',
+      sessionId: SessionId.make('s1'),
+      permissionId: PermissionId.make('p1'),
+      title: 'Run bash?',
+    },
   ];
 
   it('decodes every variant', () => {
@@ -126,7 +142,12 @@ describe('ThreadEvent', () => {
     expect(() => decodeEvent({ _tag: 'Telemetry', data: 1 })).toThrow();
     expect(() => decodeEvent({ _tag: 'Art', phase: 'uploading' })).toThrow();
     expect(() =>
-      decodeEvent({ _tag: 'TurnCompleted', sessionId: 's', messageId: 'm', status: 'running' }),
+      decodeEvent({
+        _tag: 'TurnCompleted',
+        sessionId: SessionId.make('s'),
+        messageId: MessageId.make('m'),
+        status: 'running',
+      }),
     ).toThrow();
   });
 
@@ -150,10 +171,14 @@ describe('ThreadEvent', () => {
 
 describe('ThreadSummary', () => {
   it('decodes with and without optional fields', () => {
-    expect(Schema.decodeUnknownSync(ThreadSummary)({ sessionId: 's1' })).toEqual({
-      sessionId: 's1',
+    expect(Schema.decodeUnknownSync(ThreadSummary)({ sessionId: SessionId.make('s1') })).toEqual({
+      sessionId: SessionId.make('s1'),
     });
-    const full = { sessionId: 's2', title: 'branch of s1', parentId: 's1' };
+    const full = {
+      sessionId: SessionId.make('s2'),
+      title: 'branch of s1',
+      parentId: SessionId.make('s1'),
+    };
     expect(Schema.decodeUnknownSync(ThreadSummary)(full)).toEqual(full);
   });
 });

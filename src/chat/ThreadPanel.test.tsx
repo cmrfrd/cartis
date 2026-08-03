@@ -4,6 +4,7 @@ import { click, mountApp, setInput } from '../../test/util';
 import { setAppLayer, testAppLayerWith } from '../app/runtime';
 import type { ChatTurnResponseT } from '../contracts/api';
 import { ChatRequestError } from '../contracts/errors';
+import { PermissionId, SessionId } from '../contracts/ids';
 import type { ThreadEventT } from '../contracts/thread';
 import { chatEventsFromPubSub } from './ChatEvents';
 import { ChatThread, type ChatThreadShape } from './ChatThread';
@@ -12,7 +13,7 @@ const chatStub = (over: Partial<ChatThreadShape> = {}): Layer.Layer<ChatThread> 
   Layer.succeed(ChatThread, {
     turn: () =>
       Effect.succeed({
-        sessionId: 's1',
+        sessionId: SessionId.make('s1'),
         assistantText: '{"reply":"ok"}',
         patch: {},
       } satisfies ChatTurnResponseT),
@@ -21,7 +22,7 @@ const chatStub = (over: Partial<ChatThreadShape> = {}): Layer.Layer<ChatThread> 
     cancel: () => Effect.void,
     revert: () => Effect.void,
     regenerate: () => Effect.fail(new ChatRequestError({ status: 0, detail: 'x' })),
-    fork: () => Effect.succeed('fork-1'),
+    fork: () => Effect.succeed(SessionId.make('fork-1')),
     replyPermission: () => Effect.void,
     ...over,
   });
@@ -44,7 +45,7 @@ describe('ThreadPanel', () => {
         thread: chatStub({
           turn: () =>
             Effect.succeed({
-              sessionId: 's1',
+              sessionId: SessionId.make('s1'),
               assistantText: '{"reply":"Renamed him to Vorak.","patch":{"name":"Vorak"}}',
               patch: { name: 'Vorak' },
             }),
@@ -69,9 +70,11 @@ describe('ThreadPanel', () => {
         thread: chatStub({
           // a slow turn keeps `running` true long enough to observe the swap
           turn: () =>
-            Effect.succeed({ sessionId: 's1', assistantText: '{"reply":"ok"}', patch: {} }).pipe(
-              Effect.delay('400 millis'),
-            ),
+            Effect.succeed({
+              sessionId: SessionId.make('s1'),
+              assistantText: '{"reply":"ok"}',
+              patch: {},
+            }).pipe(Effect.delay('400 millis')),
         }),
       }),
     );
@@ -110,14 +113,14 @@ describe('ThreadPanel', () => {
         thread: chatStub({
           turn: () =>
             Effect.succeed({
-              sessionId: 's1',
+              sessionId: SessionId.make('s1'),
               assistantText: '{"reply":"first answer"}',
               patch: {},
             }),
           regenerate: () => {
             regen += 1;
             return Effect.succeed({
-              sessionId: 's1',
+              sessionId: SessionId.make('s1'),
               assistantText: '{"reply":"second answer"}',
               patch: {},
             });
@@ -145,19 +148,20 @@ describe('ThreadPanel', () => {
         thread: chatStub({
           turn: (req) =>
             Effect.succeed({
-              sessionId: req.sessionId ?? 'fork-1',
+              sessionId: req.sessionId ?? SessionId.make('fork-1'),
               assistantText: '{"reply":"answer"}',
               patch: {},
             }),
           fork: () => {
             calls.fork += 1;
-            return Effect.succeed('fork-1');
+            return Effect.succeed(SessionId.make('fork-1'));
           },
           revert: () => {
             calls.revert += 1;
             return Effect.void;
           },
-          children: () => Effect.succeed([{ sessionId: 'orig-a', title: 'original' }]),
+          children: () =>
+            Effect.succeed([{ sessionId: SessionId.make('orig-a'), title: 'original' }]),
         }),
       }),
     );
@@ -199,8 +203,8 @@ describe('ThreadPanel', () => {
       await Effect.runPromise(
         PS.publish(pubsub, {
           _tag: 'PermissionRequested',
-          sessionId: 's1',
-          permissionId: 'p1',
+          sessionId: SessionId.make('s1'),
+          permissionId: PermissionId.make('p1'),
           title: 'Run bash?',
         }),
       );

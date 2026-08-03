@@ -20,27 +20,30 @@ import {
   SessionRef,
 } from '../contracts/api';
 import { ChatRequestError, NetworkError } from '../contracts/errors';
+import { type MessageIdT, type PermissionIdT, SessionId, type SessionIdT } from '../contracts/ids';
 import type { ThreadMessageT, ThreadSummaryT } from '../contracts/thread';
 
 export interface ChatThreadShape {
   /** Run one conversational turn. */
   turn(req: ChatTurnRequestT): Effect.Effect<ChatTurnResponseT, ChatRequestError | NetworkError>;
   /** Rehydrate a card's conversation from opencode. */
-  history(sessionId: string): Effect.Effect<readonly ThreadMessageT[], NetworkError>;
+  history(sessionId: SessionIdT): Effect.Effect<readonly ThreadMessageT[], NetworkError>;
   /** Interrupt the running turn. */
-  cancel(sessionId: string): Effect.Effect<void, NetworkError>;
+  cancel(sessionId: SessionIdT): Effect.Effect<void, NetworkError>;
   /** Revert the session to (and undoing) `messageId`. */
-  revert(sessionId: string, messageId: string): Effect.Effect<void, NetworkError>;
+  revert(sessionId: SessionIdT, messageId: MessageIdT): Effect.Effect<void, NetworkError>;
   /** Regenerate the last assistant turn. */
-  regenerate(sessionId: string): Effect.Effect<ChatTurnResponseT, ChatRequestError | NetworkError>;
+  regenerate(
+    sessionId: SessionIdT,
+  ): Effect.Effect<ChatTurnResponseT, ChatRequestError | NetworkError>;
   /** Branch the session; resolves the new session id. */
-  fork(sessionId: string): Effect.Effect<string, NetworkError>;
+  fork(sessionId: SessionIdT): Effect.Effect<SessionIdT, NetworkError>;
   /** Branch (fork) siblings of a session — the branch picker. */
-  children(sessionId: string): Effect.Effect<readonly ThreadSummaryT[], NetworkError>;
+  children(sessionId: SessionIdT): Effect.Effect<readonly ThreadSummaryT[], NetworkError>;
   /** Reply to a pending permission request. */
   replyPermission(
-    sessionId: string,
-    permissionId: string,
+    sessionId: SessionIdT,
+    permissionId: PermissionIdT,
     granted: boolean,
   ): Effect.Effect<void, NetworkError>;
 }
@@ -129,7 +132,7 @@ export const chatThreadLive: Layer.Layer<ChatThread, never, HttpClient.HttpClien
         ChatBranchesResponse,
       ).pipe(Effect.map((r) => r.branches));
 
-    const action = (url: string, sessionId: string, messageId?: string) =>
+    const action = (url: string, sessionId: SessionIdT, messageId?: MessageIdT) =>
       Effect.gen(function* () {
         const wire = yield* Schema.encode(SessionAction)({ sessionId, messageId }).pipe(
           Effect.mapError((cause) => new NetworkError({ url, cause })),
@@ -194,7 +197,7 @@ export const chatThreadEmpty: Layer.Layer<ChatThread> = Layer.succeed(
     cancel: () => Effect.void,
     revert: () => Effect.void,
     regenerate: () => Effect.fail(new ChatRequestError({ status: 0, detail: 'no agent in tests' })),
-    fork: () => Effect.succeed('fork-stub'),
+    fork: () => Effect.succeed(SessionId.make('fork-stub')),
     replyPermission: () => Effect.void,
   }),
 );

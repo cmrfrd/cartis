@@ -8,6 +8,7 @@ import {
   type CardIdT,
   ExportId,
   type LayoutIdT,
+  type SessionIdT,
   type ThemeIdT,
   Timestamp,
 } from '../contracts/ids';
@@ -36,7 +37,7 @@ export interface SaveCardInput {
   data: CardData;
   holo: boolean;
   /** The opencode chat session backing this card (card chat panel). */
-  chatSessionId?: string;
+  chatSessionId?: SessionIdT;
 }
 
 export class CardArchive extends State {

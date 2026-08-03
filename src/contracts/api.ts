@@ -8,6 +8,7 @@
 
 import { Schema } from 'effect';
 import { CardDataSchema, FieldSummary } from './fields.ts';
+import { MessageId, PermissionId, SessionId } from './ids.ts';
 import { StoredRecord } from './records.ts';
 import { ThemeContext } from './theme.ts';
 import { ThreadMessage, ThreadSummary } from './thread.ts';
@@ -68,7 +69,7 @@ export type ArtActionT = typeof ArtAction.Type;
 // the SHARED materializer for display) plus the validated patch (applied to the
 // card) and an optional art action.
 export const ChatTurnRequest = Schema.Struct({
-  sessionId: Schema.optional(Schema.String),
+  sessionId: Schema.optional(SessionId),
   themeContext: ThemeContext,
   fields: Schema.Array(FieldSummary),
   currentData: CardDataSchema,
@@ -78,7 +79,7 @@ export const ChatTurnRequest = Schema.Struct({
 export type ChatTurnRequestT = typeof ChatTurnRequest.Type;
 
 export const ChatTurnResponse = Schema.Struct({
-  sessionId: Schema.String,
+  sessionId: SessionId,
   /** Raw model output — the client runs it through materializeAssistantParts. */
   assistantText: Schema.String,
   /** Field-schema-validated patch, safe to apply to the card. */
@@ -101,22 +102,22 @@ export type ChatBranchesResponseT = typeof ChatBranchesResponse.Type;
 
 // POST /api/chat/fork — branch a session; also the abort/revert/regenerate ack.
 export const SessionRef = Schema.Struct({
-  sessionId: Schema.String,
+  sessionId: SessionId,
 });
 export type SessionRefT = typeof SessionRef.Type;
 
 // POST /api/chat/abort|revert|regenerate — request bodies.
 export const SessionAction = Schema.Struct({
-  sessionId: Schema.String,
+  sessionId: SessionId,
   /** revert target; regenerate/abort ignore it. */
-  messageId: Schema.optional(Schema.String),
+  messageId: Schema.optional(MessageId),
 });
 export type SessionActionT = typeof SessionAction.Type;
 
 // POST /api/chat/permission — reply to a requires-action prompt (Task 5).
 export const PermissionReply = Schema.Struct({
-  sessionId: Schema.String,
-  permissionId: Schema.String,
+  sessionId: SessionId,
+  permissionId: PermissionId,
   granted: Schema.Boolean,
 });
 export type PermissionReplyT = typeof PermissionReply.Type;

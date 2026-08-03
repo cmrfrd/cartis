@@ -11,10 +11,11 @@
  * fold is total over ThreadEvent and leaves PermissionRequested untouched.
  */
 
+import { MessageId, type MessageIdT } from '../contracts/ids';
 import { CARD_GENERATE_ART_TOOL } from '../contracts/materialize';
 import type { ArtPhaseT, ThreadEventT, ThreadMessageT, ThreadPartT } from '../contracts/thread';
 
-const runningAssistant = (id: string, parts: ThreadPartT[] = []): ThreadMessageT => ({
+const runningAssistant = (id: MessageIdT, parts: ThreadPartT[] = []): ThreadMessageT => ({
   id,
   role: 'assistant',
   status: 'running',
@@ -88,7 +89,7 @@ export function foldThreadEvent(
         return [
           ...messages,
           {
-            id: 'system-art',
+            id: MessageId.make('system-art'),
             role: 'assistant',
             status: 'complete',
             parts: [artPart(event.phase, event.detail)],

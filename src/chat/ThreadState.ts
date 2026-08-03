@@ -15,6 +15,7 @@ import { forkApp, runAppExit } from '../app/runtime';
 import type { ArtActionT, CardDataT, ChatTurnRequestT, ChatTurnResponseT } from '../contracts/api';
 import { noteFromCause } from '../contracts/errors';
 import type { FieldSummaryT } from '../contracts/fields';
+import { MessageId, type MessageIdT, type PermissionIdT, type SessionIdT } from '../contracts/ids';
 import { materializeAssistantParts } from '../contracts/materialize';
 import type { ThemeContextT } from '../contracts/theme';
 import type {
@@ -43,12 +44,12 @@ export interface ChatContext {
 }
 
 export interface PendingPermission {
-  readonly sessionId: string;
-  readonly permissionId: string;
+  readonly sessionId: SessionIdT;
+  readonly permissionId: PermissionIdT;
   readonly title: string;
 }
 
-const eventSessionId = (event: ThreadEventT): string | undefined => {
+const eventSessionId = (event: ThreadEventT): SessionIdT | undefined => {
   switch (event._tag) {
     case 'TurnStarted':
     case 'PartDelta':
@@ -63,7 +64,7 @@ const eventSessionId = (event: ThreadEventT): string | undefined => {
 export class ThreadState extends State {
   messages: ThreadMessageT[] = [];
   running = false;
-  sessionId?: string = undefined;
+  sessionId?: SessionIdT = undefined;
   pendingPermission?: PendingPermission = undefined;
   note?: string = undefined;
   /** The composer draft (UI state; cleared on submit). */
@@ -73,7 +74,7 @@ export class ThreadState extends State {
   /** True between cancel() and the turn settling — makes the turn finalize incomplete. */
   canceling = false;
   /** The user message currently being inline-edited, and its working text. */
-  editingId?: string = undefined;
+  editingId?: MessageIdT = undefined;
   editDraft = '';
 
   /** Injected by BuilderView: the current card's chat context + appliers. */
@@ -111,7 +112,7 @@ export class ThreadState extends State {
   }
 
   /** Bind a saved card's session and rehydrate its conversation + branches. */
-  bind(sessionId: string): void {
+  bind(sessionId: SessionIdT): void {
     this.sessionId = sessionId;
     void this.rehydrate();
     void this.loadBranches();
@@ -183,7 +184,7 @@ export class ThreadState extends State {
     if (sid === undefined || ctx === undefined || this.running) return;
     // Replace the last assistant message with a running placeholder.
     const lastAssistant = [...this.messages].reverse().find((m) => m.role === 'assistant');
-    const placeholderId = lastAssistant?.id ?? crypto.randomUUID();
+    const placeholderId = lastAssistant?.id ?? MessageId.make(crypto.randomUUID());
     this.messages =
       lastAssistant !== undefined
         ? this.messages.map((m) =>
@@ -223,7 +224,7 @@ export class ThreadState extends State {
    * Edit an earlier user message: fork the session first (native branching, so
    * the original survives), revert to the message, then resend the new text.
    */
-  async edit(messageId: string, text: string): Promise<void> {
+  async edit(messageId: MessageIdT, text: string): Promise<void> {
     const sid = this.sessionId;
     if (sid === undefined || this.running) return;
     const forkExit = await runAppExit(Effect.flatMap(ChatThread, (c) => c.fork(sid)));
@@ -242,7 +243,7 @@ export class ThreadState extends State {
   }
 
   /** Switch to a branch (fork) session: rebind, rehydrate, mark the doc dirty. */
-  async switchBranch(sessionId: string): Promise<void> {
+  async switchBranch(sessionId: SessionIdT): Promise<void> {
     if (sessionId === this.sessionId) return;
     this.sessionId = sessionId;
     this.context?.()?.markDirty();
@@ -290,7 +291,7 @@ export class ThreadState extends State {
     const ctx = this.context?.();
     if (ctx === undefined || text.trim().length === 0) return;
 
-    const userId = crypto.randomUUID();
+    const userId = MessageId.make(crypto.randomUUID());
     this.messages = [
       ...this.messages,
       { id: userId, role: 'user', status: 'complete', parts: [{ _tag: 'Text', text }] },
@@ -357,7 +358,7 @@ export class ThreadState extends State {
     } else {
       this.messages = [
         ...this.messages,
-        { id: crypto.randomUUID(), role: 'assistant', status, parts },
+        { id: MessageId.make(crypto.randomUUID()), role: 'assistant', status, parts },
       ];
     }
   }

@@ -35,6 +35,14 @@ import {
   ReplicateError,
 } from '../contracts/errors.ts';
 import { schemaFromFields } from '../contracts/fields.ts';
+import {
+  MessageId,
+  type MessageIdT,
+  PermissionId,
+  type PermissionIdT,
+  SessionId,
+  type SessionIdT,
+} from '../contracts/ids.ts';
 import { materializeAssistantParts } from '../contracts/materialize.ts';
 import {
   AgentEvent,
@@ -180,8 +188,8 @@ function assignIndex(
 }
 
 const partDelta = (
-  sessionId: string,
-  messageId: string,
+  sessionId: SessionIdT,
+  messageId: MessageIdT,
   partIndex: number,
   part: ThreadPartT,
 ): ThreadEventT => ({ _tag: 'PartDelta', sessionId, messageId, partIndex, part });
@@ -189,8 +197,8 @@ const partDelta = (
 /** Cumulative text/reasoning delta, throttled to one emission per 2s per part. */
 function textDelta(
   state: WatchState,
-  sessionId: string,
-  messageId: string,
+  sessionId: SessionIdT,
+  messageId: MessageIdT,
   key: string,
   tag: 'Text' | 'Reasoning',
   text: string,
@@ -231,8 +239,8 @@ function textDelta(
 /** Unthrottled final deltas for every dirty text part of `messageId` (spec: final flush). */
 function flushDirtyText(
   state: WatchState,
-  sessionId: string,
-  messageId: string,
+  sessionId: SessionIdT,
+  messageId: MessageIdT,
 ): { events: readonly ThreadEventT[]; state: WatchState } {
   const events: ThreadEventT[] = [];
   let textByKey = state.textByKey;
@@ -265,7 +273,7 @@ const toolStatusOf = (raw: string | undefined): ToolStatus =>
  */
 export function mapAgentEvent(
   raw: unknown,
-  sessionId: string,
+  sessionId: SessionIdT,
   state: WatchState,
   now: number,
 ): { events: readonly ThreadEventT[]; state: WatchState } {
@@ -288,7 +296,7 @@ export function mapAgentEvent(
         {
           _tag: 'PermissionRequested',
           sessionId,
-          permissionId: props.id ?? '',
+          permissionId: PermissionId.make(props.id ?? ''),
           title: props.title ?? 'permission requested',
         },
       ],
@@ -299,7 +307,8 @@ export function mapAgentEvent(
   if (event.type === 'message.updated') {
     const info = event.properties?.info;
     if (!info || info.sessionID !== sessionId) return { events: [], state };
-    const id = info.id ?? '';
+    // Brand the external opencode id at its decode boundary.
+    const id = MessageId.make(info.id ?? '');
     const role =
       info.role === 'assistant' ? 'assistant' : info.role === 'user' ? 'user' : undefined;
     if (id.length === 0 || role === undefined) return { events: [], state };
@@ -323,7 +332,7 @@ export function mapAgentEvent(
   if (event.type !== 'message.part.updated') return { events: [], state };
   const part = event.properties?.part;
   if (!part || part.sessionID !== sessionId) return { events: [], state };
-  const messageId = part.messageID ?? '';
+  const messageId = MessageId.make(part.messageID ?? '');
   if (messageId.length === 0 || state.roles.get(messageId) !== 'assistant') {
     return { events: [], state };
   }
@@ -394,10 +403,10 @@ export function mapAgentEvent(
 export class AgentClient extends Context.Tag('cartis/AgentClient')<
   AgentClient,
   {
-    createSession(title: string): Effect.Effect<string, AgentError>;
+    createSession(title: string): Effect.Effect<SessionIdT, AgentError>;
     /** `image` attaches a vision part (SDK FilePartInput with a data-URL). */
     prompt(
-      sessionId: string,
+      sessionId: SessionIdT,
       text: string,
       image?: { mime: string; dataUrl: string },
     ): Effect.Effect<unknown, AgentError>;
@@ -405,23 +414,23 @@ export class AgentClient extends Context.Tag('cartis/AgentClient')<
      * Run `effect` with the session's activity watcher forked in scope (live:
      * SDK event stream → ThreadBus events; stubs: identity).
      */
-    withActivity<A, E>(sessionId: string, effect: Effect.Effect<A, E>): Effect.Effect<A, E>;
+    withActivity<A, E>(sessionId: SessionIdT, effect: Effect.Effect<A, E>): Effect.Effect<A, E>;
     /** Decoded message list for a session (history rehydration + regenerate). */
-    messages(sessionId: string): Effect.Effect<SessionMessagesT, AgentError>;
+    messages(sessionId: SessionIdT): Effect.Effect<SessionMessagesT, AgentError>;
     /** Session envelope — carries the revert marker + parent/title. */
-    info(sessionId: string): Effect.Effect<SessionInfoT, AgentError>;
+    info(sessionId: SessionIdT): Effect.Effect<SessionInfoT, AgentError>;
     /** Interrupt the running turn (cancel). */
-    abort(sessionId: string): Effect.Effect<void, AgentError>;
+    abort(sessionId: SessionIdT): Effect.Effect<void, AgentError>;
     /** Revert the session to (and undoing) `messageId` — edit/regenerate basis. */
-    revert(sessionId: string, messageId: string): Effect.Effect<void, AgentError>;
+    revert(sessionId: SessionIdT, messageId: MessageIdT): Effect.Effect<void, AgentError>;
     /** Branch the session; resolves the new session's id. */
-    fork(sessionId: string): Effect.Effect<string, AgentError>;
+    fork(sessionId: SessionIdT): Effect.Effect<SessionIdT, AgentError>;
     /** Child (branch) sessions of `sessionId`. */
-    children(sessionId: string): Effect.Effect<readonly SessionInfoT[], AgentError>;
+    children(sessionId: SessionIdT): Effect.Effect<readonly SessionInfoT[], AgentError>;
     /** Reply to a pending permission request (Task 5 prompts). */
     replyPermission(
-      sessionId: string,
-      permissionId: string,
+      sessionId: SessionIdT,
+      permissionId: PermissionIdT,
       granted: boolean,
     ): Effect.Effect<void, AgentError>;
   }
@@ -449,7 +458,7 @@ export function agentClientFromSdk(
   activity?: AgentActivityWiring,
 ): Context.Tag.Service<AgentClient> {
   const withActivity = <A, E>(
-    sessionId: string,
+    sessionId: SessionIdT,
     effect: Effect.Effect<A, E>,
   ): Effect.Effect<A, E> => {
     if (!activity) return effect;
@@ -494,7 +503,7 @@ export function agentClientFromSdk(
         if (typeof id !== 'string' || id.length === 0) {
           return yield* Effect.fail(new AgentError({ reason: 'no-session-id' }));
         }
-        return id;
+        return SessionId.make(id); // brand at the opencode decode boundary
       }),
     prompt: (sessionId, text, image) =>
       Effect.promise(() =>
@@ -543,7 +552,7 @@ export function agentClientFromSdk(
           const decoded = decodeSessionInfo(raw);
           const id = Option.isSome(decoded) ? decoded.value.id : undefined;
           return typeof id === 'string' && id.length > 0
-            ? Effect.succeed(id)
+            ? Effect.succeed(SessionId.make(id))
             : Effect.fail(new AgentError({ reason: 'no-session-id' }));
         }),
       ),
@@ -729,7 +738,7 @@ function userRequestOf(text: string): string {
 function promptWithHeartbeat(
   agent: Context.Tag.Service<AgentClient>,
   bus: Context.Tag.Service<ThreadBus>,
-  sessionId: string,
+  sessionId: SessionIdT,
   text: string,
   image?: { mime: string; dataUrl: string },
 ): Effect.Effect<unknown, AgentError> {
@@ -811,7 +820,7 @@ export function runChatTurn(
  * Without the field spec, the new patch is decoded leniently against CardData.
  */
 export function runRegenerate(
-  sessionId: string,
+  sessionId: SessionIdT,
 ): Effect.Effect<ChatTurnResponseT, AgentError, AgentClient | ThreadBus> {
   return Effect.gen(function* () {
     const agent = yield* AgentClient;
@@ -822,7 +831,7 @@ export function runRegenerate(
     const userText = lastUser ? textOfParts(lastUser.parts ?? []) : '';
     if (userText.length === 0) return yield* Effect.fail(new AgentError({ reason: 'no-fill' }));
     if (lastAssistant?.info?.id !== undefined) {
-      yield* agent.revert(sessionId, lastAssistant.info.id);
+      yield* agent.revert(sessionId, MessageId.make(lastAssistant.info.id));
     }
     yield* bus.log('agent', 'regenerate: replaying last turn');
     const result = yield* promptWithHeartbeat(agent, bus, sessionId, userText);
@@ -836,9 +845,9 @@ export function runRegenerate(
 /** Map a session envelope to a thread summary (branch picker). */
 export function sessionSummary(info: SessionInfoT): ThreadSummaryT {
   return {
-    sessionId: info.id ?? '',
+    sessionId: SessionId.make(info.id ?? ''),
     ...(info.title !== undefined ? { title: info.title } : {}),
-    ...(info.parentID !== undefined ? { parentId: info.parentID } : {}),
+    ...(info.parentID !== undefined ? { parentId: SessionId.make(info.parentID) } : {}),
   };
 }
 
@@ -872,7 +881,7 @@ export function mapSessionMessages(
   const out: ThreadMessageT[] = [];
   for (const message of live) {
     const role = message.info?.role === 'assistant' ? 'assistant' : 'user';
-    const id = message.info?.id ?? '';
+    const id = MessageId.make(message.info?.id ?? '');
     if (id.length === 0) continue;
     const parts = message.parts ?? [];
     if (role === 'user') {
@@ -1310,8 +1319,10 @@ export function cartisBridge(): Plugin {
           Effect.gen(function* () {
             if (sessionId.length === 0) return { messages: [] as ThreadMessageT[] };
             const agent = yield* AgentClient;
-            const messages = yield* agent.messages(sessionId);
-            const info = yield* agent.info(sessionId).pipe(Effect.orElseSucceed(() => undefined));
+            const messages = yield* agent.messages(SessionId.make(sessionId));
+            const info = yield* agent
+              .info(SessionId.make(sessionId))
+              .pipe(Effect.orElseSucceed(() => undefined));
             return { messages: mapSessionMessages(messages, info?.revert?.messageID) };
           }),
         );
@@ -1328,7 +1339,7 @@ export function cartisBridge(): Plugin {
           Effect.gen(function* () {
             if (sessionId.length === 0) return { branches: [] as ThreadSummaryT[] };
             const agent = yield* AgentClient;
-            const children = yield* agent.children(sessionId);
+            const children = yield* agent.children(SessionId.make(sessionId));
             return { branches: children.map(sessionSummary) };
           }),
         );

@@ -3,6 +3,7 @@ import { describe, expect } from 'vitest';
 import { it } from '../../test/effect.ts';
 import type { ChatTurnRequestT } from '../contracts/api.ts';
 import { AgentError } from '../contracts/errors.ts';
+import { MessageId, PermissionId, SessionId } from '../contracts/ids.ts';
 import type { SessionInfoT, SessionMessagesT } from '../contracts/opencode.ts';
 import type { PredictionT } from '../contracts/replicate.ts';
 import type { ThreadEventT } from '../contracts/thread.ts';
@@ -33,7 +34,7 @@ type AgentSvc = Context.Tag.Service<AgentClient>;
 /** Full AgentClient stub — the passthrough ops default to no-op/empty. */
 const agentLayer = (over: Partial<AgentSvc>): Layer.Layer<AgentClient> =>
   Layer.succeed(AgentClient, {
-    createSession: () => Effect.succeed('sess'),
+    createSession: () => Effect.succeed(SessionId.make('sess')),
     prompt: () => Effect.succeed({ data: { parts: [] } }),
     withActivity: (_sessionId, effect) => effect,
     messages: () => Effect.succeed([] as SessionMessagesT),
@@ -53,7 +54,7 @@ const agentLayer = (over: Partial<AgentSvc>): Layer.Layer<AgentClient> =>
 /** Stub AgentClient whose prompt() records the instruction and answers with prose. */
 const composeStub = (record: (text: string) => void): Layer.Layer<AgentClient> =>
   agentLayer({
-    createSession: () => Effect.succeed('sess-c'),
+    createSession: () => Effect.succeed(SessionId.make('sess-c')),
     prompt: (_id, text) => {
       record(text);
       return Effect.succeed({
@@ -98,7 +99,7 @@ describe('composeArtPrompt', () => {
       ).pipe(
         Effect.provide(
           agentLayer({
-            createSession: () => Effect.succeed('sess-e'),
+            createSession: () => Effect.succeed(SessionId.make('sess-e')),
             prompt: () => Effect.succeed({ data: { parts: [] } }),
           }),
         ),
@@ -129,7 +130,7 @@ const chatStub = (
   agentLayer({
     createSession: (title) => {
       sessions.push(title);
-      return Effect.succeed('fresh-session');
+      return Effect.succeed(SessionId.make('fresh-session'));
     },
     prompt: (sessionId, text, image) => {
       calls.push({ sessionId, text, image });
@@ -186,7 +187,7 @@ describe('runChatTurn', () => {
     const calls: PromptCall[] = [];
     const sessions: string[] = [];
     return Effect.gen(function* () {
-      const out = yield* runChatTurn(chatReq({ sessionId: 'card-1' }), noArt);
+      const out = yield* runChatTurn(chatReq({ sessionId: SessionId.make('card-1') }), noArt);
       expect(sessions).toEqual([]); // createSession NOT called
       expect(out.sessionId).toBe('card-1');
       expect(calls[0]?.sessionId).toBe('card-1');
@@ -518,7 +519,7 @@ describe('ReplicateClient.generate', () => {
 // ---------------------------------------------------------------------------
 
 describe('mapAgentEvent', () => {
-  const S = 'sess-1';
+  const S = SessionId.make('sess-1');
 
   const msgUpdated = (id: string, role: string, completed?: number) => ({
     type: 'message.updated',
@@ -558,7 +559,9 @@ describe('mapAgentEvent', () => {
       msgUpdated('m1', 'assistant'), // repeat update — no second TurnStarted
       msgUpdated('u1', 'user'),
     ]);
-    expect(events).toEqual([{ _tag: 'TurnStarted', sessionId: S, messageId: 'm1' }]);
+    expect(events).toEqual([
+      { _tag: 'TurnStarted', sessionId: S, messageId: MessageId.make('m1') },
+    ]);
   });
 
   it('maps assistant parts to PartDeltas at stable per-message indexes', () => {
@@ -594,14 +597,14 @@ describe('mapAgentEvent', () => {
       {
         _tag: 'PartDelta',
         sessionId: S,
-        messageId: 'm1',
+        messageId: MessageId.make('m1'),
         partIndex: 0,
         part: { _tag: 'Step' },
       },
       {
         _tag: 'PartDelta',
         sessionId: S,
-        messageId: 'm1',
+        messageId: MessageId.make('m1'),
         partIndex: 1,
         part: {
           _tag: 'ToolCall',
@@ -614,7 +617,7 @@ describe('mapAgentEvent', () => {
       {
         _tag: 'PartDelta',
         sessionId: S,
-        messageId: 'm1',
+        messageId: MessageId.make('m1'),
         partIndex: 2,
         part: { _tag: 'Text', text: 'The card' },
       },
@@ -622,7 +625,7 @@ describe('mapAgentEvent', () => {
         // the completed transition lands at the SAME index as its running state
         _tag: 'PartDelta',
         sessionId: S,
-        messageId: 'm1',
+        messageId: MessageId.make('m1'),
         partIndex: 1,
         part: {
           _tag: 'ToolCall',
@@ -697,7 +700,7 @@ describe('mapAgentEvent', () => {
     expect(texts).toEqual(['ab', 'abcdef', 'abcdefgh']); // final flush is unthrottled
     const completions = events.filter((e) => e._tag === 'TurnCompleted');
     expect(completions).toEqual([
-      { _tag: 'TurnCompleted', sessionId: S, messageId: 'm1', status: 'complete' },
+      { _tag: 'TurnCompleted', sessionId: S, messageId: MessageId.make('m1'), status: 'complete' },
     ]);
     // flush precedes completion
     expect(events[events.length - 1]?._tag).toBe('TurnCompleted');
@@ -747,7 +750,12 @@ describe('mapAgentEvent', () => {
         0,
       ).events,
     ).toEqual([
-      { _tag: 'PermissionRequested', sessionId: S, permissionId: 'perm1', title: 'Run bash?' },
+      {
+        _tag: 'PermissionRequested',
+        sessionId: S,
+        permissionId: PermissionId.make('perm1'),
+        title: 'Run bash?',
+      },
     ]);
     expect(
       mapAgentEvent(
@@ -773,7 +781,12 @@ describe('AgentClient.withActivity', () => {
     const announce = {
       type: 'message.updated',
       properties: {
-        info: { id: 'm1', role: 'assistant', sessionID: 'sess-1', time: { created: 1 } },
+        info: {
+          id: MessageId.make('m1'),
+          role: 'assistant',
+          sessionID: 'sess-1',
+          time: { created: 1 },
+        },
       },
     };
     const toolEvent = {
@@ -825,7 +838,7 @@ describe('AgentClient.withActivity', () => {
       const runtime = yield* Effect.runtime<never>();
       const service = agentClientFromSdk(fakeClient, { bus, runtime });
       const result = yield* service.withActivity(
-        'sess-1',
+        SessionId.make('sess-1'),
         // async effect so the drain loop gets microtask turns while in flight
         Effect.promise(async () => {
           await new Promise((resolve) => setTimeout(resolve, 20));
@@ -857,7 +870,7 @@ describe('AgentClient.withActivity', () => {
 describe('runChatTurn heartbeat', () => {
   it.effect('logs still-working while a slow prompt is in flight', () => {
     const slowStub = agentLayer({
-      createSession: () => Effect.succeed('s1'),
+      createSession: () => Effect.succeed(SessionId.make('s1')),
       prompt: () =>
         Effect.succeed({ data: { parts: [{ type: 'text', text: '{"reply": "ok"}' }] } }).pipe(
           Effect.delay('6 seconds'),
@@ -883,18 +896,23 @@ describe('mapSessionMessages', () => {
   it('maps a user + assistant exchange, materializing the v1 JSON reply', () => {
     const out = mapSessionMessages([
       {
-        info: { id: 'u1', role: 'user', time: { created: 1 } },
+        info: { id: MessageId.make('u1'), role: 'user', time: { created: 1 } },
         parts: [{ id: 'p0', type: 'text', text: 'rename him' }],
       },
       {
-        info: { id: 'm1', role: 'assistant', time: { created: 2, completed: 3 } },
+        info: { id: MessageId.make('m1'), role: 'assistant', time: { created: 2, completed: 3 } },
         parts: [{ id: 'p1', type: 'text', text: '{"reply": "Renamed.", "patch": {"name": "Q"}}' }],
       },
     ]);
     expect(out).toEqual([
-      { id: 'u1', role: 'user', status: 'complete', parts: [{ _tag: 'Text', text: 'rename him' }] },
       {
-        id: 'm1',
+        id: MessageId.make('u1'),
+        role: 'user',
+        status: 'complete',
+        parts: [{ _tag: 'Text', text: 'rename him' }],
+      },
+      {
+        id: MessageId.make('m1'),
         role: 'assistant',
         status: 'complete',
         parts: [
@@ -915,7 +933,7 @@ describe('mapSessionMessages', () => {
   it('maps real tool parts directly, before the materialized card actions', () => {
     const out = mapSessionMessages([
       {
-        info: { id: 'm1', role: 'assistant', time: { created: 1, completed: 2 } },
+        info: { id: MessageId.make('m1'), role: 'assistant', time: { created: 1, completed: 2 } },
         parts: [
           {
             id: 'p1',
@@ -952,7 +970,12 @@ describe('mapSessionMessages', () => {
   it('marks a message with an error as incomplete', () => {
     const out = mapSessionMessages([
       {
-        info: { id: 'm1', role: 'assistant', time: { created: 1 }, error: { name: 'aborted' } },
+        info: {
+          id: MessageId.make('m1'),
+          role: 'assistant',
+          time: { created: 1 },
+          error: { name: 'aborted' },
+        },
         parts: [{ id: 'p1', type: 'text', text: 'partial…' }],
       },
     ]);
@@ -962,19 +985,19 @@ describe('mapSessionMessages', () => {
   it('excludes messages at and after the revert point (no ghosts)', () => {
     const messages: SessionMessagesT = [
       {
-        info: { id: 'u1', role: 'user', time: { created: 1 } },
+        info: { id: MessageId.make('u1'), role: 'user', time: { created: 1 } },
         parts: [{ id: 'a', type: 'text', text: 'first' }],
       },
       {
-        info: { id: 'm1', role: 'assistant', time: { created: 2, completed: 3 } },
+        info: { id: MessageId.make('m1'), role: 'assistant', time: { created: 2, completed: 3 } },
         parts: [{ id: 'b', type: 'text', text: '{"reply": "one"}' }],
       },
       {
-        info: { id: 'u2', role: 'user', time: { created: 4 } },
+        info: { id: MessageId.make('u2'), role: 'user', time: { created: 4 } },
         parts: [{ id: 'c', type: 'text', text: 'reverted prompt' }],
       },
       {
-        info: { id: 'm2', role: 'assistant', time: { created: 5 } },
+        info: { id: MessageId.make('m2'), role: 'assistant', time: { created: 5 } },
         parts: [{ id: 'd', type: 'text', text: '{"reply": "ghost"}' }],
       },
     ];
@@ -991,7 +1014,7 @@ describe('mapSessionMessages', () => {
       'Author request: rename this card to Vorak';
     const out = mapSessionMessages([
       {
-        info: { id: 'u1', role: 'user', time: { created: 1 } },
+        info: { id: MessageId.make('u1'), role: 'user', time: { created: 1 } },
         parts: [{ id: 'p0', type: 'text', text: scaffold }],
       },
     ]);
@@ -1001,7 +1024,7 @@ describe('mapSessionMessages', () => {
   it('skips synthetic text parts (internal) when concatenating', () => {
     const out = mapSessionMessages([
       {
-        info: { id: 'u1', role: 'user', time: { created: 1 } },
+        info: { id: MessageId.make('u1'), role: 'user', time: { created: 1 } },
         parts: [
           { id: 'p0', type: 'text', text: 'system preamble', synthetic: true },
           { id: 'p1', type: 'text', text: 'the real ask' },
@@ -1015,11 +1038,11 @@ describe('mapSessionMessages', () => {
 describe('sessionSummary', () => {
   it('maps a session envelope to a thread summary (branch picker)', () => {
     expect(sessionSummary({ id: 'b1', title: 'edited branch', parentID: 'a0' })).toEqual({
-      sessionId: 'b1',
+      sessionId: SessionId.make('b1'),
       title: 'edited branch',
-      parentId: 'a0',
+      parentId: SessionId.make('a0'),
     });
     // optionals absent → omitted, id absent → empty string
-    expect(sessionSummary({})).toEqual({ sessionId: '' });
+    expect(sessionSummary({})).toEqual({ sessionId: SessionId.make('') });
   });
 });
