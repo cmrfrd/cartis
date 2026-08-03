@@ -7,7 +7,7 @@
  */
 
 import { HttpClient, HttpClientError, HttpClientResponse } from '@effect/platform';
-import { Effect, Schema } from 'effect';
+import { Effect, Option, Schema } from 'effect';
 import { describe, expect } from 'vitest';
 import { it } from '../../test/effect';
 import { AppHttpLive, httpClientFromHandler } from '../lib/http';
@@ -286,7 +286,8 @@ describe('Prediction', () => {
     };
     const decoded = Schema.decodeUnknownSync(Prediction)(raw);
     expect(decoded.status).toBe('succeeded');
-    expect(decoded.output).toBe('https://example.com/output.png');
+    // null | absent | T decodes straight into Option (spec §5)
+    expect(Option.getOrUndefined(decoded.output)).toBe('https://example.com/output.png');
   });
 
   it('decodes a succeeded prediction with array output', () => {
@@ -297,7 +298,7 @@ describe('Prediction', () => {
       output: ['https://example.com/out1.png', 'https://example.com/out2.png'],
     };
     const decoded = Schema.decodeUnknownSync(Prediction)(raw);
-    expect(Array.isArray(decoded.output)).toBe(true);
+    expect(Array.isArray(Option.getOrUndefined(decoded.output))).toBe(true);
   });
 
   it('decodes a failed prediction', () => {
@@ -309,14 +310,14 @@ describe('Prediction', () => {
     };
     const decoded = Schema.decodeUnknownSync(Prediction)(raw);
     expect(decoded.status).toBe('failed');
-    expect(decoded.error).toBe('NSFW content detected');
+    expect(Option.getOrUndefined(decoded.error)).toBe('NSFW content detected');
   });
 
   it('decodes a starting/processing prediction (minimal)', () => {
     const raw = { id: 'pred-4', status: 'starting' };
     const decoded = Schema.decodeUnknownSync(Prediction)(raw);
     expect(decoded.id).toBe('pred-4');
-    expect(decoded.output).toBeUndefined();
+    expect(Option.isNone(decoded.output)).toBe(true);
   });
 
   it('decodes a realistic fresh prediction with explicit nulls (live API shape)', () => {
@@ -341,8 +342,9 @@ describe('Prediction', () => {
     const decoded = Schema.decodeUnknownSync(Prediction)(raw);
     expect(decoded.id).toBe('gm3qorzdhgbfurvjtvhg6dckhu');
     expect(decoded.status).toBe('starting');
-    expect(decoded.output).toBeNull();
-    expect(decoded.error).toBeNull();
+    // explicit nulls decode as None — no NullOr juggling downstream (spec §5)
+    expect(Option.isNone(decoded.output)).toBe(true);
+    expect(Option.isNone(decoded.error)).toBe(true);
     expect(decoded.urls?.get).toContain('/predictions/');
   });
 });

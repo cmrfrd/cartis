@@ -1,5 +1,5 @@
 import { Component, get, ref } from '@expressive/react';
-import { Array as Arr, Effect, Exit } from 'effect';
+import { Array as Arr, Effect, Exit, Option } from 'effect';
 // Value import of AppShell is a deliberate module cycle (AppShell renders BuilderView).
 // Safe: neither module touches the other's binding during module evaluation — only
 // inside method bodies at runtime, which ESM live bindings resolve correctly.
@@ -64,7 +64,8 @@ export class BuilderView extends Component {
       },
       fields: layout.fields.map(summarizeField),
       currentData: { ...this.data },
-      currentArtFileName: this.currentArtFileName(),
+      // Option → undefined at the wire-request seam (spec: the Option boundary rule).
+      currentArtFileName: Option.getOrUndefined(this.currentArtFileName()),
       applyPatch: (patch) => {
         this.data = { ...this.data, ...patch };
         this.dirty = true;
@@ -244,18 +245,22 @@ export class BuilderView extends Component {
     }
   }
 
-  /** The layout's single image argument (the art slot), if it has one. */
-  get artKey(): string | undefined {
-    return this.layout.fields.find((f) => f.kind === 'image')?.key;
+  /** The layout's single image argument (the art slot) — pure Option helper (spec §3). */
+  private artKeyOption(): Option.Option<string> {
+    return Option.fromNullable(this.layout.fields.find((f) => f.kind === 'image')?.key);
   }
 
   /** The stored fileName of the card's current art (for vision + edit sourcing). */
-  private currentArtFileName(): string | undefined {
-    const artKey = this.artKey;
-    if (!artKey) return undefined;
-    const artId = this.data[artKey];
-    if (typeof artId !== 'string' || artId.length === 0) return undefined;
-    return this.shell?.library.images.find((i) => i.id === artId)?.fileName;
+  private currentArtFileName(): Option.Option<string> {
+    return this.artKeyOption().pipe(
+      Option.flatMap((key) => {
+        const artId = this.data[key];
+        return typeof artId === 'string' && artId.length > 0 ? Option.some(artId) : Option.none();
+      }),
+      Option.flatMap((artId) =>
+        Option.fromNullable(this.shell?.library.images.find((i) => i.id === artId)?.fileName),
+      ),
+    );
   }
 
   /**
@@ -265,8 +270,8 @@ export class BuilderView extends Component {
    */
   async runArtAction(brief: string, editCurrentArt: boolean) {
     const library = this.shell?.library;
-    const artKey = this.artKey;
-    if (!library || !artKey) return; // no art slot or library — nothing to do
+    const artKey = Option.getOrUndefined(this.artKeyOption());
+    if (!library || artKey === undefined) return; // no art slot or library — nothing to do
     // Snapshot before the effect.
     const theme = this.theme;
     const layout = this.layout;
@@ -277,7 +282,7 @@ export class BuilderView extends Component {
       const v = data[field.key];
       if (v !== undefined && v !== '') argumentValues[field.key] = String(v);
     }
-    const currentArtFileName = this.currentArtFileName();
+    const currentArtFileName = Option.getOrUndefined(this.currentArtFileName());
     const exit = await runAppExit(
       Effect.flatMap(ImageProvider, (p) =>
         p.generate({

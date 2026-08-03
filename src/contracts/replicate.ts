@@ -49,10 +49,14 @@ export const Prediction = Schema.Struct({
       get: Schema.optional(Schema.String),
     }),
   ),
-  // output is string OR array of strings (outputUrlOf), and explicitly null on
-  // fresh predictions — the live API sends "output": null before completion.
-  output: Schema.optional(Schema.NullOr(Schema.Union(Schema.String, Schema.Array(Schema.String)))),
+  // output is string OR array of strings (outputUrlOf); the live API sends
+  // "output": null before completion. `null | absent | T` decodes STRAIGHT
+  // into Option<T> (spec §5) — no manual NullOr juggling downstream.
+  output: Schema.optionalWith(Schema.Union(Schema.String, Schema.Array(Schema.String)), {
+    as: 'Option',
+    nullable: true,
+  }),
   // error is a string on failure and explicitly null otherwise.
-  error: Schema.optional(Schema.NullOr(Schema.String)),
+  error: Schema.optionalWith(Schema.String, { as: 'Option', nullable: true }),
 });
 export type PredictionT = typeof Prediction.Type;

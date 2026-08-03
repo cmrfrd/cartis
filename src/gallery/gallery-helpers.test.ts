@@ -1,3 +1,4 @@
+import { Option } from 'effect';
 import { describe, expect, it } from 'vitest';
 import { CardId, ExportId, LayoutId, ThemeId, Timestamp } from '../contracts/ids';
 import type { StoredCard, StoredExport } from '../storage/CardArchive';
@@ -69,17 +70,17 @@ describe('exportMatchesQuery', () => {
 });
 
 describe('layoutOf', () => {
-  it('resolves registered layouts and returns undefined for unknown ones', () => {
-    expect(layoutOf(card())?.id).toBe('fullart');
-    expect(layoutOf(card({ themeId: ThemeId.make('gone') }))).toBeUndefined();
-    expect(layoutOf(card({ layoutId: LayoutId.make('gone') }))).toBeUndefined();
+  it('resolves registered layouts as Some and unknown ones as None (no throw-and-catch)', () => {
+    expect(Option.getOrUndefined(layoutOf(card()))?.id).toBe('fullart');
+    expect(Option.isNone(layoutOf(card({ themeId: ThemeId.make('gone') })))).toBe(true);
+    expect(Option.isNone(layoutOf(card({ layoutId: LayoutId.make('gone') })))).toBe(true);
   });
 });
 
 describe('resolveCardData', () => {
   it('maps image field ids through the library urls', () => {
     const c = card({ data: { name: 'X', art: 'img-1' } });
-    const layout = layoutOf(c);
+    const layout = Option.getOrUndefined(layoutOf(c));
     expect(layout).toBeDefined();
     if (!layout) return;
     const resolved = resolveCardData(c, layout, { 'img-1': 'blob:art-url' });

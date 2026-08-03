@@ -11,7 +11,7 @@
  * heartbeats) that intentionally have NO event variant.
  */
 
-import { Context, Effect, Layer, PubSub, Ref, Stream } from 'effect';
+import { Context, Effect, Layer, Option, PubSub, Ref, Stream } from 'effect';
 import type { ThreadEventT } from '../contracts/thread.ts';
 
 const HISTORY_LIMIT = 200;
@@ -33,11 +33,15 @@ export class ThreadBus extends Context.Tag('cartis/ThreadBus')<
 >() {}
 
 /**
- * Terminal mirror for an event — the full `[cartis:*]` line, or undefined for
+ * Terminal mirror for an event — Some(full `[cartis:*]` line), or None for
  * variants too noisy to log (pending tools, image parts). Strings preserve
  * the old activity-log console format exactly (plan Global Constraints).
  */
-export function renderThreadEvent(event: ThreadEventT): string | undefined {
+export function renderThreadEvent(event: ThreadEventT): Option.Option<string> {
+  return Option.fromNullable(renderLine(event));
+}
+
+function renderLine(event: ThreadEventT): string | undefined {
   switch (event._tag) {
     case 'TurnStarted':
       return '[cartis:agent] turn started';
@@ -102,8 +106,10 @@ const makeBus = (silent: boolean) =>
       Effect.gen(function* () {
         yield* Ref.update(historyRef, (prev) => capped(prev, event));
         if (!silent) {
-          const line = renderThreadEvent(event);
-          if (line !== undefined) console.log(line);
+          Option.match(renderThreadEvent(event), {
+            onNone: () => undefined,
+            onSome: (line) => console.log(line),
+          });
         }
         yield* PubSub.publish(pubsub, event);
       });

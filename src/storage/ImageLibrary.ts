@@ -1,5 +1,5 @@
 import State from '@expressive/react';
-import { Effect, Exit } from 'effect';
+import { Effect, Exit, Option } from 'effect';
 import { runAppExit } from '../app/runtime';
 import { noteFromCause } from '../contracts/errors';
 import { ImageId, Timestamp } from '../contracts/ids';
@@ -84,7 +84,8 @@ export class ImageLibrary extends State {
     this.urls = rest;
   }
 
-  url(id: string): string | undefined {
-    return this.urls[id];
+  /** Displayable URL for a stored image — Option; convert at the JSX seam. */
+  url(id: string): Option.Option<string> {
+    return Option.fromNullable(this.urls[id]);
   }
 }

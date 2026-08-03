@@ -1,5 +1,5 @@
 import type { HttpClientRequest } from '@effect/platform';
-import { Layer } from 'effect';
+import { Layer, Option } from 'effect';
 import { describe, expect, it, vi } from 'vitest';
 import { setAppLayer, testAppLayerWith } from '../app/runtime';
 import { CardId, LayoutId, ThemeId } from '../contracts/ids';
@@ -36,7 +36,7 @@ describe('ImageLibrary', () => {
     });
     expect(lib.images.map((i) => i.id)).toEqual([b.id, a.id]);
     expect(lib.images[1]?.name).toBe('Ember Test');
-    expect(typeof lib.url(a.id)).toBe('string');
+    expect(typeof Option.getOrUndefined(lib.url(a.id))).toBe('string');
 
     const reloaded = ImageLibrary.new();
     await ready(reloaded);
@@ -45,7 +45,7 @@ describe('ImageLibrary', () => {
 
     await lib.remove(a.id);
     expect(lib.images.map((i) => i.id)).toEqual([b.id]);
-    expect(lib.url(a.id)).toBeUndefined();
+    expect(Option.isNone(lib.url(a.id))).toBe(true);
     lib.set(null);
   });
 });

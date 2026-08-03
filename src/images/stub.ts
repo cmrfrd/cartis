@@ -43,7 +43,7 @@ export function stubStyleFor(styleId: string): StubStyle {
 export type PaintFn = (input: GenerationInput, style: StubStyle) => Promise<GenerationOutput>;
 
 /** Browser-only: tint + vignette the source photo on a canvas as a fake "AI style". */
-function dimensionsFor(aspectRatio: string | undefined): { width: number; height: number } {
+function dimensionsFor(aspectRatio: AspectRatioT | undefined): { width: number; height: number } {
   const match = /^(\d+):(\d+)$/.exec(aspectRatio ?? '');
   if (!match) return { width: 768, height: 768 };
   const w = Number(match[1]);

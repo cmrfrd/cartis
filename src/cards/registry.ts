@@ -1,4 +1,4 @@
-import { Schema } from 'effect';
+import { Option, Schema } from 'effect';
 import { FieldSpecList } from '../contracts/fields';
 import type { LayoutIdT, ThemeIdT } from '../contracts/ids';
 import { ThemeIdentity } from '../contracts/theme';
@@ -43,6 +43,17 @@ export function getTheme(id: ThemeIdT): Theme {
   const found = themes.get(id);
   if (!found) throw new Error(`Unknown theme "${id}"`);
   return found;
+}
+
+/** Absence-typed lookups (spec §3): stored cards may reference unregistered themes. */
+export function getThemeOption(id: ThemeIdT): Option.Option<Theme> {
+  return Option.fromNullable(themes.get(id));
+}
+
+export function getLayoutOption(themeId: ThemeIdT, layoutId: LayoutIdT): Option.Option<Layout> {
+  return getThemeOption(themeId).pipe(
+    Option.flatMap((theme) => Option.fromNullable(theme.layouts.find((l) => l.id === layoutId))),
+  );
 }
 
 export function listThemes(): Theme[] {

@@ -10,7 +10,7 @@
  */
 
 import State from '@expressive/react';
-import { Effect, Exit, Fiber, Stream } from 'effect';
+import { Effect, Exit, Fiber, Option, Stream } from 'effect';
 import { forkApp, runAppExit } from '../app/runtime';
 import type { ArtActionT, CardDataT, ChatTurnRequestT, ChatTurnResponseT } from '../contracts/api';
 import { noteFromCause } from '../contracts/errors';
@@ -49,15 +49,16 @@ export interface PendingPermission {
   readonly title: string;
 }
 
-const eventSessionId = (event: ThreadEventT): SessionIdT | undefined => {
+/** The event's session, if the variant carries one — pure Option helper (spec §3). */
+const eventSessionId = (event: ThreadEventT): Option.Option<SessionIdT> => {
   switch (event._tag) {
     case 'TurnStarted':
     case 'PartDelta':
     case 'TurnCompleted':
     case 'PermissionRequested':
-      return event.sessionId;
+      return Option.some(event.sessionId);
     default:
-      return undefined;
+      return Option.none();
   }
 };
 
@@ -98,7 +99,7 @@ export class ThreadState extends State {
   /** Fold one streamed event into the message list (session-filtered). */
   applyEvent(event: ThreadEventT): void {
     if (this.get(null)) return; // destroyed
-    const sid = eventSessionId(event);
+    const sid = Option.getOrUndefined(eventSessionId(event));
     if (sid !== undefined && this.sessionId !== undefined && sid !== this.sessionId) return;
     if (event._tag === 'PermissionRequested') {
       this.pendingPermission = {

@@ -270,21 +270,38 @@ describe('runChatTurn', () => {
 // ReplicateClient — stub ReplicateSdk + httpClientFromHandler + TestClock
 // ---------------------------------------------------------------------------
 
+/** Wire-shaped fixture (nulls allowed, like the live API) mapped into the Option-decoded PredictionT. */
+interface PredFixture {
+  id?: string;
+  status?: PredictionT['status'];
+  urls?: { get?: string };
+  output?: string | readonly string[] | null;
+  error?: string | null;
+}
+
+const pred = (fixture: PredFixture): PredictionT => ({
+  id: fixture.id,
+  status: fixture.status,
+  urls: fixture.urls,
+  output: Option.fromNullable(fixture.output ?? undefined),
+  error: Option.fromNullable(fixture.error ?? undefined),
+});
+
 /**
  * A stub ReplicateSdk serving a canned prediction sequence. `create` returns
  * the first entry; each `get` advances to the next (clamped at the last).
  */
-const sdkStub = (sequence: ReadonlyArray<PredictionT>): Layer.Layer<ReplicateSdk> =>
+const sdkStub = (sequence: ReadonlyArray<PredFixture>): Layer.Layer<ReplicateSdk> =>
   Layer.effect(
     ReplicateSdk,
     Effect.gen(function* () {
       const idx = yield* Ref.make(0);
       return ReplicateSdk.of({
-        createPrediction: () => Effect.succeed(sequence[0] as PredictionT),
+        createPrediction: () => Effect.succeed(pred(sequence[0] ?? {})),
         getPrediction: () =>
           Effect.gen(function* () {
             const i = yield* Ref.updateAndGet(idx, (n) => Math.min(n + 1, sequence.length - 1));
-            return sequence[i] as PredictionT;
+            return pred(sequence[i] ?? {});
           }),
       });
     }),
@@ -292,7 +309,7 @@ const sdkStub = (sequence: ReadonlyArray<PredictionT>): Layer.Layer<ReplicateSdk
 
 /** sdkStub variant that also records every createPrediction input. */
 const recordingSdkStub = (
-  sequence: ReadonlyArray<PredictionT>,
+  sequence: ReadonlyArray<PredFixture>,
   created: object[],
 ): Layer.Layer<ReplicateSdk> =>
   Layer.effect(
@@ -302,12 +319,12 @@ const recordingSdkStub = (
       return ReplicateSdk.of({
         createPrediction: (_token, input) => {
           created.push(input);
-          return Effect.succeed(sequence[0] as PredictionT);
+          return Effect.succeed(pred(sequence[0] ?? {}));
         },
         getPrediction: () =>
           Effect.gen(function* () {
             const i = yield* Ref.updateAndGet(idx, (n) => Math.min(n + 1, sequence.length - 1));
-            return sequence[i] as PredictionT;
+            return pred(sequence[i] ?? {});
           }),
       });
     }),
@@ -316,7 +333,7 @@ const recordingSdkStub = (
 const pngHandler = () =>
   new Response(new TextEncoder().encode('img'), { headers: { 'content-type': 'image/png' } });
 
-const replicateEnv = (sequence: ReadonlyArray<PredictionT>) =>
+const replicateEnv = (sequence: ReadonlyArray<PredFixture>) =>
   replicateClientLive.pipe(
     Layer.provide(
       Layer.mergeAll(sdkStub(sequence), threadBusTestLayer, httpClientFromHandler(pngHandler)),
@@ -329,7 +346,7 @@ describe('ReplicateClient.generate', () => {
     'omits input_image for text-first generation (empty data URL) and fixes the aspect',
     () => {
       const created: object[] = [];
-      const succeeded: PredictionT = {
+      const succeeded: PredFixture = {
         id: 'p1',
         status: 'succeeded',
         output: 'https://replicate.delivery/out.png',
@@ -362,7 +379,7 @@ describe('ReplicateClient.generate', () => {
 
   it.effect('keeps input_image and the requested aspect when a source photo exists', () => {
     const created: object[] = [];
-    const succeeded: PredictionT = {
+    const succeeded: PredFixture = {
       id: 'p1',
       status: 'succeeded',
       output: 'https://replicate.delivery/out.png',

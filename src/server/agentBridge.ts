@@ -966,11 +966,16 @@ const POLL_TIMEOUT = '120 seconds';
 
 const decodePrediction = Schema.decodeUnknownEither(Prediction);
 
-function outputUrlOf(prediction: PredictionT): string | undefined {
-  const output = prediction.output;
-  if (typeof output === 'string') return output;
-  if (Array.isArray(output) && typeof output[0] === 'string') return output[0];
-  return undefined;
+/** First output URL — composes straight off the Option-decoded field (spec §3/§5). */
+function outputUrlOf(prediction: PredictionT): Option.Option<string> {
+  return prediction.output.pipe(
+    Option.flatMap((output) => {
+      if (typeof output === 'string') return Option.some(output);
+      return Array.isArray(output) && typeof output[0] === 'string'
+        ? Option.some(output[0])
+        : Option.none();
+    }),
+  );
 }
 
 /** Reason text carried on the ApiError → ReplicateError 'create' detail. */
@@ -1135,12 +1140,18 @@ export const replicateClientLive: Layer.Layer<
             const status = prediction.status;
             if (status === 'failed') {
               return Effect.fail(
-                new ReplicateError({ reason: 'failed', detail: prediction.error ?? undefined }),
+                new ReplicateError({
+                  reason: 'failed',
+                  detail: Option.getOrUndefined(prediction.error),
+                }),
               );
             }
             if (status === 'canceled') {
               return Effect.fail(
-                new ReplicateError({ reason: 'canceled', detail: prediction.error ?? undefined }),
+                new ReplicateError({
+                  reason: 'canceled',
+                  detail: Option.getOrUndefined(prediction.error),
+                }),
               );
             }
             return Effect.succeed(prediction);
@@ -1160,8 +1171,9 @@ export const replicateClientLive: Layer.Layer<
         );
 
         const settled = yield* Ref.get(latest);
-        const url = outputUrlOf(settled);
-        if (!url) return yield* Effect.fail(new ReplicateError({ reason: 'no-output' }));
+        const url = yield* outputUrlOf(settled).pipe(
+          Effect.mapError(() => new ReplicateError({ reason: 'no-output' })),
+        );
 
         const response: HttpClientResponse.HttpClientResponse = yield* http
           .get(url)

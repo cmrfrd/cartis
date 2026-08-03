@@ -3,7 +3,8 @@
  * (spec: 2026-08-02-unified-saved-cards-design).
  */
 
-import { getLayout } from '../cards/registry';
+import type { Option } from 'effect';
+import { getLayoutOption } from '../cards/registry';
 import type { CardData, Layout } from '../cards/types';
 import type { StoredCard, StoredExport } from '../storage/CardArchive';
 
@@ -52,13 +53,9 @@ export function exportMatchesQuery(item: StoredExport, query: string): boolean {
   return item.name.toLowerCase().includes(q);
 }
 
-/** The card's layout, or undefined when its theme/layout is no longer registered. */
-export function layoutOf(card: StoredCard): Layout | undefined {
-  try {
-    return getLayout(card.themeId, card.layoutId);
-  } catch {
-    return undefined;
-  }
+/** The card's layout — None when its theme/layout is no longer registered (spec §3: no throw-and-catch). */
+export function layoutOf(card: StoredCard): Option.Option<Layout> {
+  return getLayoutOption(card.themeId, card.layoutId);
 }
 
 /** Card data with image-library references resolved to displayable URLs (mirrors BuilderView.resolved). */

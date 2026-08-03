@@ -1,4 +1,5 @@
 import { Component, get } from '@expressive/react';
+import { Option } from 'effect';
 import { AppShell } from '../app/AppShell';
 import { CARD_HEIGHT, CARD_WIDTH } from '../cards/base/CardSurface';
 import { downloadUrl } from '../export/exportCard';
@@ -137,7 +138,8 @@ const TILE_SCALE = 0.55;
 /** The full card face, live-rendered at mini scale (tile view). */
 function CardTile(props: { card: StoredCard }) {
   const { shell } = GalleryView.get();
-  const layout = layoutOf(props.card);
+  // Option → undefined exactly at the JSX seam (spec: the Option boundary rule).
+  const layout = Option.getOrUndefined(layoutOf(props.card));
   if (!layout) {
     return (
       <div

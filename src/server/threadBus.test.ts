@@ -1,9 +1,12 @@
-import { Chunk, Effect, Fiber, Stream } from 'effect';
+import { Chunk, Effect, Fiber, Option, Stream } from 'effect';
 import { describe, expect } from 'vitest';
 import { it } from '../../test/effect.ts';
 import { MessageId, PermissionId, SessionId } from '../contracts/ids';
 import type { ThreadEventT, ThreadPartT } from '../contracts/thread.ts';
 import { renderThreadEvent, ThreadBus, threadBusTestLayer } from './threadBus.ts';
+
+/** Unwrap the Option for terse assertions. */
+const render = (event: ThreadEventT) => Option.getOrUndefined(renderThreadEvent(event));
 
 /**
  * ThreadBus retypes the old ActivityBus over ThreadEventT (plan Task 1): same
@@ -100,9 +103,9 @@ describe('renderThreadEvent', () => {
   });
 
   it('preserves the old [cartis:agent] action lines', () => {
-    expect(renderThreadEvent(delta({ _tag: 'Step' }))).toBe('[cartis:agent] step started');
+    expect(render(delta({ _tag: 'Step' }))).toBe('[cartis:agent] step started');
     expect(
-      renderThreadEvent(
+      render(
         delta({
           _tag: 'ToolCall',
           callId: 'c1',
@@ -113,7 +116,7 @@ describe('renderThreadEvent', () => {
       ),
     ).toBe('[cartis:agent] tool read: running — src/main.tsx');
     expect(
-      renderThreadEvent(
+      render(
         delta({
           _tag: 'ToolCall',
           callId: 'c1',
@@ -125,7 +128,7 @@ describe('renderThreadEvent', () => {
       ),
     ).toBe('[cartis:agent] tool read: done — src/main.tsx (2.1s)');
     expect(
-      renderThreadEvent(
+      render(
         delta({
           _tag: 'ToolCall',
           callId: 'c2',
@@ -136,31 +139,29 @@ describe('renderThreadEvent', () => {
         }),
       ),
     ).toBe('[cartis:agent] tool bash: FAILED — exit 1');
-    expect(renderThreadEvent(delta({ _tag: 'Reasoning', text: 'hmm' }))).toBe(
-      '[cartis:agent] thinking…',
-    );
-    expect(renderThreadEvent(delta({ _tag: 'Text', text: 'Hello wor' }))).toBe(
+    expect(render(delta({ _tag: 'Reasoning', text: 'hmm' }))).toBe('[cartis:agent] thinking…');
+    expect(render(delta({ _tag: 'Text', text: 'Hello wor' }))).toBe(
       '[cartis:agent] writing response… (9 chars)',
     );
   });
 
   it('renders quiet variants as undefined (no console line)', () => {
     expect(
-      renderThreadEvent(delta({ _tag: 'ToolCall', callId: 'c3', name: 'grep', status: 'pending' })),
+      render(delta({ _tag: 'ToolCall', callId: 'c3', name: 'grep', status: 'pending' })),
     ).toBeUndefined();
-    expect(renderThreadEvent(delta({ _tag: 'Image', url: 'blob:x' }))).toBeUndefined();
+    expect(render(delta({ _tag: 'Image', url: 'blob:x' }))).toBeUndefined();
   });
 
   it('renders turn, art, error, and permission lines', () => {
     expect(
-      renderThreadEvent({
+      render({
         _tag: 'TurnStarted',
         sessionId: SessionId.make('s1'),
         messageId: MessageId.make('m1'),
       }),
     ).toBe('[cartis:agent] turn started');
     expect(
-      renderThreadEvent({
+      render({
         _tag: 'TurnCompleted',
         sessionId: SessionId.make('s1'),
         messageId: MessageId.make('m1'),
@@ -168,23 +169,21 @@ describe('renderThreadEvent', () => {
       }),
     ).toBe('[cartis:agent] turn complete');
     expect(
-      renderThreadEvent({
+      render({
         _tag: 'Art',
         phase: 'composing',
         detail: 'composing art prompt from theme + arguments',
       }),
     ).toBe('[cartis:agent] composing art prompt from theme + arguments');
-    expect(
-      renderThreadEvent({ _tag: 'Art', phase: 'progress', detail: 'status: processing (2s)' }),
-    ).toBe('[cartis:image] status: processing (2s)');
-    expect(renderThreadEvent({ _tag: 'Art', phase: 'downloaded' })).toBe(
-      '[cartis:image] downloaded',
+    expect(render({ _tag: 'Art', phase: 'progress', detail: 'status: processing (2s)' })).toBe(
+      '[cartis:image] status: processing (2s)',
     );
-    expect(renderThreadEvent({ _tag: 'SessionError', message: 'boom' })).toBe(
+    expect(render({ _tag: 'Art', phase: 'downloaded' })).toBe('[cartis:image] downloaded');
+    expect(render({ _tag: 'SessionError', message: 'boom' })).toBe(
       '[cartis:agent] agent error: boom',
     );
     expect(
-      renderThreadEvent({
+      render({
         _tag: 'PermissionRequested',
         sessionId: SessionId.make('s1'),
         permissionId: PermissionId.make('p1'),

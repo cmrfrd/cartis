@@ -2,6 +2,7 @@ import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { Context, Effect, Layer, Option, Schema } from 'effect';
 import { FileStoreError } from '../contracts/errors.ts';
+import { Slug, type SlugT } from '../contracts/ids.ts';
 import { StoredRecord as StoredRecordSchema } from '../contracts/records.ts';
 
 /**
@@ -38,13 +39,14 @@ const TYPE_BY_EXT: Record<string, string> = {
   json: 'application/json',
 };
 
-function slugOf(name: string | undefined): string {
+/** Sanitized name slug — the Slug brand proves the character set (spec §1). */
+function slugOf(name: string | undefined): SlugT {
   const slug = (name ?? '')
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
     .slice(0, 48);
-  return slug.length > 0 ? slug : 'untitled';
+  return Slug.make(slug.length > 0 ? slug : 'untitled');
 }
 
 /** Stable, human-readable, unique on-disk name. */
