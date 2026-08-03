@@ -1,9 +1,16 @@
 import { Component, get } from '@expressive/react';
 import { AppShell } from '../app/AppShell';
+import { CARD_HEIGHT, CARD_WIDTH } from '../cards/base/CardSurface';
 import { downloadUrl } from '../export/exportCard';
 import type { StoredCard, StoredExport } from '../storage/CardArchive';
 import { Button, EmptyState, TabBar, TextInput } from '../ui';
-import { exportMatchesQuery, groupExports, matchesQuery } from './gallery-helpers';
+import {
+  exportMatchesQuery,
+  groupExports,
+  layoutOf,
+  matchesQuery,
+  resolveCardData,
+} from './gallery-helpers';
 
 const SECTIONS = [
   { id: 'cards', label: 'Saved cards' },
@@ -17,6 +24,8 @@ export class GalleryView extends Component {
   section: SectionId = 'cards';
   /** Search over the unified Saved cards view. */
   query = '';
+  /** Tiles show the full live card; list shows info rows only. */
+  cardsView: 'tiles' | 'list' = 'tiles';
 
   openCard(card: StoredCard) {
     const { shell } = this;
@@ -129,8 +138,84 @@ function GalleryImages() {
   );
 }
 
+const TILE_SCALE = 0.42;
+
+/** The full card face, live-rendered at mini scale (tile view). */
+function CardTile(props: { card: StoredCard }) {
+  const { shell } = GalleryView.get();
+  const layout = layoutOf(props.card);
+  if (!layout) {
+    return (
+      <div
+        className="flex items-center justify-center rounded-lg border border-edge bg-surface text-ink-dim"
+        style={{ width: CARD_WIDTH * TILE_SCALE, height: CARD_HEIGHT * TILE_SCALE }}
+      >
+        ?
+      </div>
+    );
+  }
+  const Render = layout.Render;
+  const resolved = resolveCardData(props.card, layout, shell?.library.urls ?? {});
+  return (
+    <div
+      className="pointer-events-none overflow-hidden"
+      style={{ width: CARD_WIDTH * TILE_SCALE, height: CARD_HEIGHT * TILE_SCALE }}
+      data-testid="card-tile"
+    >
+      <div style={{ transform: `scale(${String(TILE_SCALE)})`, transformOrigin: 'top left' }}>
+        <Render data={resolved} holo={props.card.holo} />
+      </div>
+    </div>
+  );
+}
+
+/** The shared info block: identity, actions, and the card's grouped renders. */
+function CardEntryInfo(props: { card: StoredCard; renders: readonly StoredExport[] }) {
+  const { is: gallery, shell } = GalleryView.get();
+  const { card } = props;
+  return (
+    <div className="flex min-w-0 flex-1 flex-col gap-2.5">
+      <div className="flex items-center justify-between gap-2">
+        <button
+          type="button"
+          className="min-w-0 flex-1 text-left"
+          onClick={() => gallery.openCard(card)}
+        >
+          <p className="truncate font-display text-sm">{card.name}</p>
+          <p className="text-[11px] text-ink-dim">
+            {card.themeId} · {card.layoutId} · {new Date(card.updatedAt).toLocaleString()}
+          </p>
+        </button>
+        <div className="flex shrink-0 gap-1.5">
+          <Button tone="ghost" onClick={() => gallery.openCard(card)}>
+            Open in builder
+          </Button>
+          <Button
+            tone="ghost"
+            onClick={() =>
+              void shell?.archive.saveCard({
+                name: `${card.name} copy`,
+                themeId: card.themeId,
+                layoutId: card.layoutId,
+                data: { ...card.data, name: `${card.name} copy` },
+                holo: card.holo,
+              })
+            }
+          >
+            Duplicate
+          </Button>
+          <Button tone="danger" onClick={() => void shell?.archive.deleteCard(card.id)}>
+            Delete
+          </Button>
+        </div>
+      </div>
+      {props.renders.length > 0 && <RenderStrip items={props.renders} />}
+    </div>
+  );
+}
+
 function GalleryCards() {
-  const { is: gallery, shell, query } = GalleryView.get();
+  const { is: gallery, shell, query, cardsView } = GalleryView.get();
   const cards = shell?.archive.cards ?? [];
   const exports = shell?.archive.exports ?? [];
   const { byCard, other } = groupExports(cards, exports);
@@ -141,62 +226,64 @@ function GalleryCards() {
   }
   return (
     <div className="flex flex-col gap-4">
-      <TextInput
-        value={query}
-        onValue={(v) => {
-          gallery.query = v;
-        }}
-        placeholder="Search cards and renders…"
-      />
+      <div className="flex items-center gap-2">
+        <div className="min-w-0 flex-1">
+          <TextInput
+            value={query}
+            onValue={(v) => {
+              gallery.query = v;
+            }}
+            placeholder="Search cards and renders…"
+          />
+        </div>
+        <Button
+          tone={cardsView === 'tiles' ? 'accent' : 'ghost'}
+          onClick={() => {
+            gallery.cardsView = 'tiles';
+          }}
+        >
+          Tiles
+        </Button>
+        <Button
+          tone={cardsView === 'list' ? 'accent' : 'ghost'}
+          onClick={() => {
+            gallery.cardsView = 'list';
+          }}
+        >
+          List
+        </Button>
+      </div>
       {visibleCards.length === 0 && visibleOther.length === 0 && (
         <EmptyState message="Nothing matches your search." hint="Try a different query." />
       )}
-      <ul className="flex flex-col gap-3">
-        {visibleCards.map((card) => (
-          <li
-            key={card.id}
-            className="flex flex-col gap-2.5 rounded-lg border border-edge bg-panel px-4 py-2.5"
-          >
-            <div className="flex items-center justify-between">
+      {cardsView === 'tiles' ? (
+        <ul className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+          {visibleCards.map((card) => (
+            <li
+              key={card.id}
+              className="flex gap-4 rounded-lg border border-edge bg-panel px-4 py-3"
+            >
               <button
                 type="button"
-                className="min-w-0 flex-1 text-left"
+                className="shrink-0 cursor-pointer"
                 onClick={() => gallery.openCard(card)}
+                aria-label={`Open ${card.name} in builder`}
               >
-                <p className="truncate font-display text-sm">{card.name}</p>
-                <p className="text-[11px] text-ink-dim">
-                  {card.themeId} · {card.layoutId} · {new Date(card.updatedAt).toLocaleString()}
-                </p>
+                <CardTile card={card} />
               </button>
-              <div className="flex shrink-0 gap-1.5">
-                <Button tone="ghost" onClick={() => gallery.openCard(card)}>
-                  Open in builder
-                </Button>
-                <Button
-                  tone="ghost"
-                  onClick={() =>
-                    void shell?.archive.saveCard({
-                      name: `${card.name} copy`,
-                      themeId: card.themeId,
-                      layoutId: card.layoutId,
-                      data: { ...card.data, name: `${card.name} copy` },
-                      holo: card.holo,
-                    })
-                  }
-                >
-                  Duplicate
-                </Button>
-                <Button tone="danger" onClick={() => void shell?.archive.deleteCard(card.id)}>
-                  Delete
-                </Button>
-              </div>
-            </div>
-            {(byCard.get(card.id)?.length ?? 0) > 0 && (
-              <RenderStrip items={byCard.get(card.id) ?? []} />
-            )}
-          </li>
-        ))}
-      </ul>
+              <CardEntryInfo card={card} renders={byCard.get(card.id) ?? []} />
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <ul className="flex flex-col gap-3">
+          {visibleCards.map((card) => (
+            <li key={card.id} className="rounded-lg border border-edge bg-panel px-4 py-2.5">
+              <CardEntryInfo card={card} renders={byCard.get(card.id) ?? []} />
+            </li>
+          ))}
+        </ul>
+      )}
       {visibleOther.length > 0 && (
         <section className="flex flex-col gap-2">
           <h3 className="font-base text-[11px] text-ink-dim uppercase tracking-wide">

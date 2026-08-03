@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { StoredCard, StoredExport } from '../storage/CardArchive';
-import { exportMatchesQuery, groupExports, matchesQuery } from './gallery-helpers';
+import {
+  exportMatchesQuery,
+  groupExports,
+  layoutOf,
+  matchesQuery,
+  resolveCardData,
+} from './gallery-helpers';
 
 const card = (over: Partial<StoredCard> = {}): StoredCard => ({
   id: 'c1',
@@ -58,5 +64,27 @@ describe('exportMatchesQuery', () => {
     expect(exportMatchesQuery(exp(), 'HENGE')).toBe(true);
     expect(exportMatchesQuery(exp(), 'dragon')).toBe(false);
     expect(exportMatchesQuery(exp(), '')).toBe(true);
+  });
+});
+
+describe('layoutOf', () => {
+  it('resolves registered layouts and returns undefined for unknown ones', () => {
+    expect(layoutOf(card())?.id).toBe('fullart');
+    expect(layoutOf(card({ themeId: 'gone' }))).toBeUndefined();
+    expect(layoutOf(card({ layoutId: 'gone' }))).toBeUndefined();
+  });
+});
+
+describe('resolveCardData', () => {
+  it('maps image field ids through the library urls', () => {
+    const c = card({ data: { name: 'X', art: 'img-1' } });
+    const layout = layoutOf(c);
+    expect(layout).toBeDefined();
+    if (!layout) return;
+    const resolved = resolveCardData(c, layout, { 'img-1': 'blob:art-url' });
+    expect(resolved.art).toBe('blob:art-url');
+    expect(resolved.name).toBe('X');
+    const unresolved = resolveCardData(c, layout, {});
+    expect(unresolved.art).toBeUndefined();
   });
 });

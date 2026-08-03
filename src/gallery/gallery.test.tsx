@@ -180,4 +180,40 @@ describe('GalleryView', () => {
     expect(text()).toContain('ancient-render.png');
     unmount();
   });
+
+  it('defaults to tile view with a live mini card face and toggles to list', async () => {
+    const { container, shell, unmount } = await mountApp();
+    await vi.waitFor(() => expect(shell.archive.ready).toBe(true));
+    await shell.archive.saveCard({
+      name: 'Tile Hero',
+      themeId: 'arcane',
+      layoutId: 'classic',
+      data: { name: 'Tile Hero', typeLine: 'Hero — Tiler', ability: 'Tessellate.' },
+      holo: false,
+    });
+    shell.view = 'gallery';
+    await tick();
+    // Tile view is the default: the mini card face renders the card's own text.
+    const tile = container.querySelector('[data-testid="card-tile"]');
+    expect(tile).not.toBeNull();
+    expect(tile?.textContent).toContain('Tile Hero');
+    expect(tile?.textContent).toContain('Tessellate.');
+    // Info block appears alongside (name appears in both face and info).
+    expect(container.textContent).toContain('Open in builder');
+    // Toggle to list: tiles disappear, info rows remain.
+    await click(
+      Array.from(container.querySelectorAll('button')).find((b) => b.textContent === 'List') ??
+        null,
+    );
+    expect(container.querySelector('[data-testid="card-tile"]')).toBeNull();
+    expect(container.textContent).toContain('Tile Hero');
+    expect(container.textContent).toContain('Open in builder');
+    // Back to tiles.
+    await click(
+      Array.from(container.querySelectorAll('button')).find((b) => b.textContent === 'Tiles') ??
+        null,
+    );
+    expect(container.querySelector('[data-testid="card-tile"]')).not.toBeNull();
+    unmount();
+  });
 });

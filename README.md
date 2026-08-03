@@ -88,9 +88,11 @@ with **New**, **Save**, and **Save as copy** actions. New and opening another
 card while you have unsaved changes ask first — **Save first / Discard /
 Cancel**. Switching theme or layout edits the open document (values for shared
 argument keys carry over); New is the only fresh start. The Gallery has two
-tabs: a unified, searchable **Saved cards** view — each card with its renders
+tabs: a unified, searchable **Saved cards** view — tile view by default (each
+entry shows the full live card face, mini-rendered) with a list toggle; both
+show the same info: name, theme · layout, actions, and the card's renders
 grouped beneath it (renders exported before card-linking existed appear under
-**Other renders**), click to reopen in the Builder (saving again updates the
+**Other renders**). Click to reopen in the Builder (saving again updates the
 **same** record), **Duplicate** for a fresh copy — and the image **Library**.
 Every agent action (steps, tool calls, thinking, writing progress) streams
 into the AI activity log while fill or art generation runs.
