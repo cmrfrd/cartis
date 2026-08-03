@@ -18,6 +18,7 @@ const threadStub = (over: Partial<ChatThreadShape> = {}): Layer.Layer<ChatThread
         patch: {},
       } satisfies ChatTurnResponseT),
     history: () => Effect.succeed([]),
+    children: () => Effect.succeed([]),
     cancel: () => Effect.void,
     revert: () => Effect.void,
     regenerate: () =>
@@ -37,6 +38,7 @@ const contextOf = (over: Partial<ChatContext> = {}): ChatContext => ({
   currentData: { name: 'Nyra' },
   applyPatch: () => {},
   runArt: () => {},
+  markDirty: () => {},
   ...over,
 });
 
@@ -235,6 +237,143 @@ describe('ThreadState lifecycle', () => {
     state.sessionId = 'ses-stale';
     await state.rehydrate();
     expect(state.messages).toHaveLength(0); // no crash, no note
+    state.set(null);
+  });
+});
+
+describe('ThreadState capabilities', () => {
+  it('cancel() aborts the session and finalizes the turn incomplete', async () => {
+    let aborted = '';
+    const state = makeThread(
+      threadStub({
+        turn: () =>
+          Effect.succeed({ sessionId: 's1', assistantText: '{"reply":"late"}', patch: {} }).pipe(
+            Effect.delay('30 millis'),
+          ),
+        cancel: (sid) => {
+          aborted = sid;
+          return Effect.void;
+        },
+      }),
+    );
+    state.sessionId = 's1';
+    const turn = state.send('hi'); // running becomes true synchronously
+    await state.cancel();
+    await turn;
+    expect(aborted).toBe('s1');
+    const assistant = state.messages.find((m) => m.role === 'assistant');
+    expect(assistant?.status).toBe('incomplete');
+    expect(assistant?.parts.at(-1)).toEqual({ _tag: 'Text', text: 'Canceled.' });
+    expect(state.running).toBe(false);
+    state.set(null);
+  });
+
+  it('regenerate() replaces the last assistant reply in place', async () => {
+    const state = makeThread(
+      threadStub({
+        turn: () =>
+          Effect.succeed({ sessionId: 's1', assistantText: '{"reply":"first"}', patch: {} }),
+        regenerate: () =>
+          Effect.succeed({ sessionId: 's1', assistantText: '{"reply":"second"}', patch: {} }),
+      }),
+    );
+    await state.send('hi');
+    expect(state.messages.at(-1)?.parts[0]).toEqual({ _tag: 'Text', text: 'first' });
+    await state.regenerate();
+    const assistants = state.messages.filter((m) => m.role === 'assistant');
+    expect(assistants).toHaveLength(1); // replaced, not appended
+    expect(assistants[0]?.parts[0]).toEqual({ _tag: 'Text', text: 'second' });
+    state.set(null);
+  });
+
+  it('edit() forks the session, reverts to the message, and resends on the branch', async () => {
+    const calls: { fork?: string; revert?: [string, string]; turnSession?: string } = {};
+    const state = makeThread(
+      threadStub({
+        turn: (req) => {
+          calls.turnSession = req.sessionId;
+          return Effect.succeed({
+            sessionId: req.sessionId ?? 'fork-1',
+            assistantText: '{"reply":"ok"}',
+            patch: {},
+          });
+        },
+        fork: (sid) => {
+          calls.fork = sid;
+          return Effect.succeed('fork-1');
+        },
+        revert: (sid, mid) => {
+          calls.revert = [sid, mid];
+          return Effect.void;
+        },
+      }),
+    );
+    state.sessionId = 'orig';
+    await state.send('original'); // seeds a user + assistant on 'orig'
+    const userMsg = state.messages.find((m) => m.role === 'user');
+    await state.edit(userMsg?.id ?? '', 'edited text');
+    expect(calls.fork).toBe('orig'); // forked to preserve the original branch
+    expect(state.sessionId).toBe('fork-1');
+    expect(calls.revert).toEqual(['fork-1', userMsg?.id]);
+    expect(calls.turnSession).toBe('fork-1'); // resend happened on the fork
+    state.set(null);
+  });
+
+  it('switchBranch() rebinds, rehydrates, and marks the document dirty', async () => {
+    let dirtied = false;
+    const state = makeThread(
+      threadStub({
+        history: (sid) =>
+          Effect.succeed([
+            {
+              id: 'h1',
+              role: 'user',
+              status: 'complete',
+              parts: [{ _tag: 'Text', text: `from ${sid}` }],
+            },
+          ]),
+      }),
+      undefined,
+      contextOf({
+        markDirty: () => {
+          dirtied = true;
+        },
+      }),
+    );
+    state.sessionId = 'orig';
+    await state.switchBranch('branch-2');
+    expect(state.sessionId).toBe('branch-2');
+    expect(dirtied).toBe(true);
+    await vi.waitFor(() => {
+      expect(state.messages[0]?.parts[0]).toEqual({ _tag: 'Text', text: 'from branch-2' });
+    });
+    state.set(null);
+  });
+
+  it('loadBranches() lists the session forks', async () => {
+    const state = makeThread(
+      threadStub({ children: () => Effect.succeed([{ sessionId: 'b1', title: 'branch a' }]) }),
+    );
+    state.sessionId = 'orig';
+    await state.loadBranches();
+    expect(state.branches.map((b) => b.sessionId)).toEqual(['b1']);
+    state.set(null);
+  });
+
+  it('replyPermission() answers the prompt and clears it', async () => {
+    let replied: [string, string, boolean] | undefined;
+    const state = makeThread(
+      threadStub({
+        replyPermission: (s, p, g) => {
+          replied = [s, p, g];
+          return Effect.void;
+        },
+      }),
+    );
+    state.pendingPermission = { sessionId: 's1', permissionId: 'perm1', title: 'Run bash?' };
+    await state.replyPermission(true);
+    expect(replied).toEqual(['s1', 'perm1', true]);
+    expect(state.pendingPermission).toBeUndefined();
     state.set(null);
   });
 });

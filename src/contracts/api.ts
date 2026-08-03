@@ -9,7 +9,7 @@
 import { Schema } from 'effect';
 import { StoredRecord } from './records.ts';
 import { ThemeContext } from './theme.ts';
-import { ThreadMessage } from './thread.ts';
+import { ThreadMessage, ThreadSummary } from './thread.ts';
 
 // ---------------------------------------------------------------------------
 // Shared error body
@@ -101,6 +101,12 @@ export const ChatHistoryResponse = Schema.Struct({
   messages: Schema.Array(ThreadMessage),
 });
 export type ChatHistoryResponseT = typeof ChatHistoryResponse.Type;
+
+// GET /api/chat/children?sessionId=… — branch (fork) siblings for the picker.
+export const ChatBranchesResponse = Schema.Struct({
+  branches: Schema.Array(ThreadSummary),
+});
+export type ChatBranchesResponseT = typeof ChatBranchesResponse.Type;
 
 // POST /api/chat/fork — branch a session; also the abort/revert/regenerate ack.
 export const SessionRef = Schema.Struct({

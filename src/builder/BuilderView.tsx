@@ -69,6 +69,9 @@ export class BuilderView extends Component {
       runArt: (action) => {
         void this.runArtAction(action.brief, action.editCurrentArt);
       },
+      markDirty: () => {
+        this.dirty = true;
+      },
     };
   }
 

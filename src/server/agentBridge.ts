@@ -54,6 +54,7 @@ import {
   type ThreadEventT,
   type ThreadMessageT,
   type ThreadPartT,
+  type ThreadSummaryT,
 } from '../contracts/thread.ts';
 import { bytesToDataUrl } from '../images/codec.ts';
 import { makeBridgeRuntime, readBody, respond, sendJson } from './BridgeRuntime.ts';
@@ -818,6 +819,15 @@ export function runRegenerate(
   });
 }
 
+/** Map a session envelope to a thread summary (branch picker). */
+export function sessionSummary(info: SessionInfoT): ThreadSummaryT {
+  return {
+    sessionId: info.id ?? '',
+    ...(info.title !== undefined ? { title: info.title } : {}),
+    ...(info.parentID !== undefined ? { parentId: info.parentID } : {}),
+  };
+}
+
 // ---------- history mapping (opencode messages → thread messages) ----------
 
 /** Concatenate the non-synthetic text parts of a message. */
@@ -1288,6 +1298,23 @@ export function cartisBridge(): Plugin {
             const messages = yield* agent.messages(sessionId);
             const info = yield* agent.info(sessionId).pipe(Effect.orElseSucceed(() => undefined));
             return { messages: mapSessionMessages(messages, info?.revert?.messageID) };
+          }),
+        );
+      });
+
+      // ----- /api/chat/children?sessionId=… — branch siblings for the picker -----
+      server.middlewares.use('/api/chat/children', (req, res) => {
+        const sres = res as ServerResponse;
+        const [, query = ''] = (req.url ?? '').split('?');
+        const sessionId = new URLSearchParams(query).get('sessionId') ?? '';
+        respond(
+          runtime,
+          sres,
+          Effect.gen(function* () {
+            if (sessionId.length === 0) return { branches: [] as ThreadSummaryT[] };
+            const agent = yield* AgentClient;
+            const children = yield* agent.children(sessionId);
+            return { branches: children.map(sessionSummary) };
           }),
         );
       });

@@ -19,6 +19,7 @@ import {
   ReplicateSdk,
   replicateClientLive,
   runChatTurn,
+  sessionSummary,
   type WatchState,
 } from './agentBridge.ts';
 import { ThreadBus, threadBusTestLayer } from './threadBus.ts';
@@ -992,5 +993,17 @@ describe('mapSessionMessages', () => {
       },
     ]);
     expect(out[0]?.parts).toEqual([{ _tag: 'Text', text: 'the real ask' }]);
+  });
+});
+
+describe('sessionSummary', () => {
+  it('maps a session envelope to a thread summary (branch picker)', () => {
+    expect(sessionSummary({ id: 'b1', title: 'edited branch', parentID: 'a0' })).toEqual({
+      sessionId: 'b1',
+      title: 'edited branch',
+      parentId: 'a0',
+    });
+    // optionals absent → omitted, id absent → empty string
+    expect(sessionSummary({})).toEqual({ sessionId: '' });
   });
 });

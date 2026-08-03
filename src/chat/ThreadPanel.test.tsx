@@ -1,9 +1,11 @@
-import { Effect, Layer } from 'effect';
+import { Effect, Layer, PubSub as PS } from 'effect';
 import { describe, expect, it, vi } from 'vitest';
 import { click, mountApp, setInput } from '../../test/util';
 import { setAppLayer, testAppLayerWith } from '../app/runtime';
 import type { ChatTurnResponseT } from '../contracts/api';
 import { AgentFillError } from '../contracts/errors';
+import type { ThreadEventT } from '../contracts/thread';
+import { chatEventsFromPubSub } from './ChatEvents';
 import { ChatThread, type ChatThreadShape } from './ChatThread';
 
 const chatStub = (over: Partial<ChatThreadShape> = {}): Layer.Layer<ChatThread> =>
@@ -15,6 +17,7 @@ const chatStub = (over: Partial<ChatThreadShape> = {}): Layer.Layer<ChatThread> 
         patch: {},
       } satisfies ChatTurnResponseT),
     history: () => Effect.succeed([]),
+    children: () => Effect.succeed([]),
     cancel: () => Effect.void,
     revert: () => Effect.void,
     regenerate: () => Effect.fail(new AgentFillError({ status: 0, detail: 'x' })),
@@ -96,6 +99,117 @@ describe('ThreadPanel', () => {
     await click(document.querySelector('[data-testid="composer-send"]'));
     await vi.waitFor(() => {
       expect(document.body.textContent).toContain('opencode down');
+    });
+    unmount();
+  });
+
+  it('regenerate replaces the assistant reply through the action bar', async () => {
+    let regen = 0;
+    setAppLayer(
+      testAppLayerWith({
+        thread: chatStub({
+          turn: () =>
+            Effect.succeed({
+              sessionId: 's1',
+              assistantText: '{"reply":"first answer"}',
+              patch: {},
+            }),
+          regenerate: () => {
+            regen += 1;
+            return Effect.succeed({
+              sessionId: 's1',
+              assistantText: '{"reply":"second answer"}',
+              patch: {},
+            });
+          },
+        }),
+      }),
+    );
+    const { unmount } = await mountApp();
+    await setInput(composer(), 'hi');
+    await click(document.querySelector('[data-testid="composer-send"]'));
+    await vi.waitFor(() => expect(document.body.textContent).toContain('first answer'));
+    await click(document.querySelector('[data-testid="action-regenerate"]'));
+    await vi.waitFor(() => {
+      expect(regen).toBe(1);
+      expect(document.body.textContent).toContain('second answer');
+      expect(document.body.textContent).not.toContain('first answer'); // replaced in place
+    });
+    unmount();
+  });
+
+  it('edit forks + resends and reveals the branch picker', async () => {
+    const calls = { fork: 0, revert: 0 };
+    setAppLayer(
+      testAppLayerWith({
+        thread: chatStub({
+          turn: (req) =>
+            Effect.succeed({
+              sessionId: req.sessionId ?? 'fork-1',
+              assistantText: '{"reply":"answer"}',
+              patch: {},
+            }),
+          fork: () => {
+            calls.fork += 1;
+            return Effect.succeed('fork-1');
+          },
+          revert: () => {
+            calls.revert += 1;
+            return Effect.void;
+          },
+          children: () => Effect.succeed([{ sessionId: 'orig-a', title: 'original' }]),
+        }),
+      }),
+    );
+    const { unmount } = await mountApp();
+    await setInput(composer(), 'first message');
+    await click(document.querySelector('[data-testid="composer-send"]'));
+    await vi.waitFor(() => expect(document.body.textContent).toContain('answer'));
+    await click(document.querySelector('[data-testid="action-edit"]'));
+    await vi.waitFor(() =>
+      expect(document.querySelector('[data-testid="edit-box"]')).not.toBeNull(),
+    );
+    await setInput(document.querySelector('[data-testid="edit-box"] textarea'), 'edited message');
+    await click(document.querySelector('[data-testid="edit-submit"]'));
+    await vi.waitFor(() => {
+      expect(calls.fork).toBe(1);
+      expect(calls.revert).toBe(1);
+      expect(document.body.textContent).toContain('edited message'); // resent user text
+      expect(document.querySelector('[data-testid="branch-picker"]')).not.toBeNull();
+    });
+    unmount();
+  });
+
+  it('surfaces a permission request and answers Allow', async () => {
+    const pubsub = await Effect.runPromise(PS.unbounded<ThreadEventT>());
+    let replied = false;
+    setAppLayer(
+      testAppLayerWith({
+        thread: chatStub({
+          replyPermission: () => {
+            replied = true;
+            return Effect.void;
+          },
+        }),
+        threadEvents: chatEventsFromPubSub(pubsub),
+      }),
+    );
+    const { unmount } = await mountApp();
+    await vi.waitFor(async () => {
+      await Effect.runPromise(
+        PS.publish(pubsub, {
+          _tag: 'PermissionRequested',
+          sessionId: 's1',
+          permissionId: 'p1',
+          title: 'Run bash?',
+        }),
+      );
+      expect(document.querySelector('[data-testid="permission-strip"]')).not.toBeNull();
+    });
+    await click(document.querySelector('[data-testid="permission-allow"]'));
+    await vi.waitFor(() => {
+      expect(replied).toBe(true);
+      expect(document.querySelector('[data-testid="permission-strip"]')).toBeNull();
     });
     unmount();
   });

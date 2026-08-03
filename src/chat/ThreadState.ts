@@ -12,7 +12,7 @@
 import State from '@expressive/react';
 import { Effect, Exit, Fiber, Stream } from 'effect';
 import { forkApp, runAppExit } from '../app/runtime';
-import type { ArtActionT, CardDataT, ChatTurnRequestT } from '../contracts/api';
+import type { ArtActionT, CardDataT, ChatTurnRequestT, ChatTurnResponseT } from '../contracts/api';
 import { noteFromCause } from '../contracts/errors';
 import { materializeAssistantParts } from '../contracts/materialize';
 import type { ThemeContextT } from '../contracts/theme';
@@ -21,6 +21,7 @@ import type {
   ThreadEventT,
   ThreadMessageT,
   ThreadPartT,
+  ThreadSummaryT,
 } from '../contracts/thread';
 import { ChatEvents } from './ChatEvents';
 import { ChatThread } from './ChatThread';
@@ -43,6 +44,8 @@ export interface ChatContext {
   applyPatch(patch: CardDataT): void;
   /** Delegate an art action to the builder's art run (phases arrive as Art events). */
   runArt(action: ArtActionT): void;
+  /** Mark the document dirty (e.g. switching to a branch is a saved-state change). */
+  markDirty(): void;
 }
 
 export interface PendingPermission {
@@ -71,6 +74,13 @@ export class ThreadState extends State {
   note?: string = undefined;
   /** The composer draft (UI state; cleared on submit). */
   draft = '';
+  /** Branch (fork) siblings of the current session (branch picker). */
+  branches: ThreadSummaryT[] = [];
+  /** True between cancel() and the turn settling — makes the turn finalize incomplete. */
+  canceling = false;
+  /** The user message currently being inline-edited, and its working text. */
+  editingId?: string = undefined;
+  editDraft = '';
 
   /** Injected by BuilderView: the current card's chat context + appliers. */
   context?: () => ChatContext | undefined = undefined;
@@ -106,10 +116,11 @@ export class ThreadState extends State {
     this.messages = foldThreadEvent(this.messages, event);
   }
 
-  /** Bind a saved card's session and rehydrate its conversation. */
+  /** Bind a saved card's session and rehydrate its conversation + branches. */
   bind(sessionId: string): void {
     this.sessionId = sessionId;
     void this.rehydrate();
+    void this.loadBranches();
   }
 
   /** Reset for a new/unbound card, aborting any in-flight turn first. */
@@ -124,6 +135,8 @@ export class ThreadState extends State {
     this.running = false;
     this.note = undefined;
     this.draft = '';
+    this.branches = [];
+    this.canceling = false;
   }
 
   /** Submit the composer draft as a turn (Enter / Send button). */
@@ -134,11 +147,137 @@ export class ThreadState extends State {
     void this.send(text);
   }
 
-  /** Interrupt the running turn (abort the opencode session). */
+  /** Begin inline-editing a user message (its text seeds the edit draft). */
+  beginEdit(message: ThreadMessageT): void {
+    this.editingId = message.id;
+    this.editDraft = message.parts
+      .map((p) => (p._tag === 'Text' ? p.text : ''))
+      .join('')
+      .trim();
+  }
+
+  cancelEdit(): void {
+    this.editingId = undefined;
+    this.editDraft = '';
+  }
+
+  /** Commit the inline edit → fork-on-edit + resend. */
+  async submitEdit(): Promise<void> {
+    const id = this.editingId;
+    const text = this.editDraft.trim();
+    this.editingId = undefined;
+    this.editDraft = '';
+    if (id !== undefined && text.length > 0) await this.edit(id, text);
+  }
+
+  /** Interrupt the running turn: abort the session and finalize it incomplete. */
   async cancel(): Promise<void> {
     const sid = this.sessionId;
     if (!this.running || sid === undefined) return;
+    this.canceling = true; // send()'s finalize sees this and marks the turn incomplete
     await runAppExit(Effect.flatMap(ChatThread, (c) => c.cancel(sid)));
+  }
+
+  /**
+   * Regenerate the last assistant turn (revert + replay). The bridge derives the
+   * stored user text; the result re-materializes onto a running placeholder that
+   * replaces the previous reply in place.
+   */
+  async regenerate(): Promise<void> {
+    const sid = this.sessionId;
+    const ctx = this.context?.();
+    if (sid === undefined || ctx === undefined || this.running) return;
+    // Replace the last assistant message with a running placeholder.
+    const lastAssistant = [...this.messages].reverse().find((m) => m.role === 'assistant');
+    const placeholderId = lastAssistant?.id ?? crypto.randomUUID();
+    this.messages =
+      lastAssistant !== undefined
+        ? this.messages.map((m) =>
+            m.id === placeholderId ? { ...m, status: 'running', parts: [] } : m,
+          )
+        : [
+            ...this.messages,
+            { id: placeholderId, role: 'assistant', status: 'running', parts: [] },
+          ];
+    this.running = true;
+    this.note = undefined;
+    const exit = await runAppExit(Effect.flatMap(ChatThread, (c) => c.regenerate(sid)));
+    if (this.get(null)) return;
+    if (Exit.isSuccess(exit) && !this.canceling) {
+      const res = exit.value;
+      this.sessionId = res.sessionId;
+      this.replaceMessage(placeholderId, materializeAssistantParts(res.assistantText), 'complete');
+      if (Object.keys(res.patch).length > 0) ctx.applyPatch(res.patch);
+      if (res.artAction !== undefined) ctx.runArt(res.artAction);
+    } else {
+      const message = this.canceling
+        ? 'Canceled.'
+        : noteFromCause((exit as Exit.Failure<unknown, unknown>).cause);
+      if (!this.canceling) this.note = message;
+      this.replaceMessage(placeholderId, [{ _tag: 'Text', text: message }], 'incomplete');
+    }
+    this.canceling = false;
+    this.running = false;
+  }
+
+  /** Replace one message's parts + status by id (immutably). */
+  private replaceMessage(id: string, parts: ThreadPartT[], status: MessageStatusT): void {
+    this.messages = this.messages.map((m) => (m.id === id ? { ...m, parts, status } : m));
+  }
+
+  /**
+   * Edit an earlier user message: fork the session first (native branching, so
+   * the original survives), revert to the message, then resend the new text.
+   */
+  async edit(messageId: string, text: string): Promise<void> {
+    const sid = this.sessionId;
+    if (sid === undefined || this.running) return;
+    const forkExit = await runAppExit(Effect.flatMap(ChatThread, (c) => c.fork(sid)));
+    if (this.get(null)) return;
+    if (Exit.isSuccess(forkExit)) {
+      this.sessionId = forkExit.value;
+      this.context?.()?.markDirty(); // a branch is saved state
+      await runAppExit(Effect.flatMap(ChatThread, (c) => c.revert(forkExit.value, messageId)));
+      if (this.get(null)) return;
+      void this.loadBranches();
+    }
+    // Trim local history back to before the edited message, then resend.
+    const idx = this.messages.findIndex((m) => m.id === messageId);
+    if (idx >= 0) this.messages = this.messages.slice(0, idx);
+    await this.send(text);
+  }
+
+  /** Switch to a branch (fork) session: rebind, rehydrate, mark the doc dirty. */
+  async switchBranch(sessionId: string): Promise<void> {
+    if (sessionId === this.sessionId) return;
+    this.sessionId = sessionId;
+    this.context?.()?.markDirty();
+    await this.rehydrate();
+    void this.loadBranches();
+  }
+
+  /** Load the current session's branch siblings into `branches`. */
+  async loadBranches(): Promise<void> {
+    const sid = this.sessionId;
+    if (sid === undefined) {
+      this.branches = [];
+      return;
+    }
+    const exit = await runAppExit(Effect.flatMap(ChatThread, (c) => c.children(sid)));
+    if (this.get(null)) return;
+    if (Exit.isSuccess(exit)) this.branches = [...exit.value];
+  }
+
+  /** Reply to the pending permission request (allow/deny), then clear it. */
+  async replyPermission(granted: boolean): Promise<void> {
+    const pending = this.pendingPermission;
+    if (pending === undefined) return;
+    this.pendingPermission = undefined;
+    await runAppExit(
+      Effect.flatMap(ChatThread, (c) =>
+        c.replyPermission(pending.sessionId, pending.permissionId, granted),
+      ),
+    );
   }
 
   /** Reload the conversation from opencode (stale session → fresh/empty). */
@@ -176,18 +315,29 @@ export class ThreadState extends State {
     };
     const exit = await runAppExit(Effect.flatMap(ChatThread, (c) => c.turn(req)));
     if (this.get(null)) return; // destroyed mid-turn
+    this.applyTurnExit(userId, exit, ctx);
+  }
 
-    if (Exit.isSuccess(exit)) {
+  /** Materialize a settled turn onto this turn's assistant message (shared by send/regenerate). */
+  private applyTurnExit(
+    userId: string,
+    exit: Exit.Exit<ChatTurnResponseT, unknown>,
+    ctx: ChatContext,
+  ): void {
+    if (Exit.isSuccess(exit) && !this.canceling) {
       const res = exit.value;
       this.sessionId = res.sessionId; // lazy-created session captured
       this.finalizeAssistant(userId, materializeAssistantParts(res.assistantText), 'complete');
       if (Object.keys(res.patch).length > 0) ctx.applyPatch(res.patch);
       if (res.artAction !== undefined) ctx.runArt(res.artAction);
+    } else if (this.canceling) {
+      this.finalizeAssistant(userId, [{ _tag: 'Text', text: 'Canceled.' }], 'incomplete');
     } else {
-      const message = noteFromCause(exit.cause);
+      const message = noteFromCause((exit as Exit.Failure<unknown, unknown>).cause);
       this.note = message;
       this.finalizeAssistant(userId, [{ _tag: 'Text', text: message }], 'incomplete');
     }
+    this.canceling = false;
     this.running = false;
   }
 

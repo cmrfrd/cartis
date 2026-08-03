@@ -8,6 +8,7 @@
 import { HttpClient, HttpClientRequest, type HttpClientResponse } from '@effect/platform';
 import { Context, Effect, Layer, Option, Schema } from 'effect';
 import {
+  ChatBranchesResponse,
   ChatHistoryResponse,
   ChatTurnRequest,
   type ChatTurnRequestT,
@@ -19,7 +20,7 @@ import {
   SessionRef,
 } from '../contracts/api';
 import { AgentFillError, NetworkError } from '../contracts/errors';
-import type { ThreadMessageT } from '../contracts/thread';
+import type { ThreadMessageT, ThreadSummaryT } from '../contracts/thread';
 
 export interface ChatThreadShape {
   /** Run one conversational turn. */
@@ -34,6 +35,8 @@ export interface ChatThreadShape {
   regenerate(sessionId: string): Effect.Effect<ChatTurnResponseT, AgentFillError | NetworkError>;
   /** Branch the session; resolves the new session id. */
   fork(sessionId: string): Effect.Effect<string, NetworkError>;
+  /** Branch (fork) siblings of a session — the branch picker. */
+  children(sessionId: string): Effect.Effect<readonly ThreadSummaryT[], NetworkError>;
   /** Reply to a pending permission request. */
   replyPermission(
     sessionId: string,
@@ -97,20 +100,34 @@ export const chatThreadLive: Layer.Layer<ChatThread, never, HttpClient.HttpClien
         return yield* post('/api/chat/turn', wire, ChatTurnResponse);
       });
 
-    const history = (sessionId: string): Effect.Effect<readonly ThreadMessageT[], NetworkError> =>
+    /** Shared GET → decode-with-schema helper (history + children). */
+    const getDecoded = <A, I>(
+      url: string,
+      schema: Schema.Schema<A, I>,
+    ): Effect.Effect<A, NetworkError> =>
       Effect.gen(function* () {
-        const url = `/api/chat/history?sessionId=${encodeURIComponent(sessionId)}`;
         const response = yield* http
           .get(url)
           .pipe(Effect.mapError((cause) => new NetworkError({ url, cause })));
         const json = yield* response.json.pipe(
           Effect.mapError((cause) => new NetworkError({ url, cause })),
         );
-        const decoded = yield* Schema.decodeUnknown(ChatHistoryResponse)(json).pipe(
+        return yield* Schema.decodeUnknown(schema)(json).pipe(
           Effect.mapError((cause) => new NetworkError({ url, cause })),
         );
-        return decoded.messages;
       });
+
+    const history = (sessionId: string): Effect.Effect<readonly ThreadMessageT[], NetworkError> =>
+      getDecoded(
+        `/api/chat/history?sessionId=${encodeURIComponent(sessionId)}`,
+        ChatHistoryResponse,
+      ).pipe(Effect.map((r) => r.messages));
+
+    const children = (sessionId: string): Effect.Effect<readonly ThreadSummaryT[], NetworkError> =>
+      getDecoded(
+        `/api/chat/children?sessionId=${encodeURIComponent(sessionId)}`,
+        ChatBranchesResponse,
+      ).pipe(Effect.map((r) => r.branches));
 
     const action = (url: string, sessionId: string, messageId?: string) =>
       Effect.gen(function* () {
@@ -127,6 +144,7 @@ export const chatThreadLive: Layer.Layer<ChatThread, never, HttpClient.HttpClien
     return ChatThread.of({
       turn,
       history,
+      children,
       cancel: (sessionId) => action('/api/chat/abort', sessionId),
       revert: (sessionId, messageId) => action('/api/chat/revert', sessionId, messageId),
       regenerate: (sessionId) =>
@@ -172,6 +190,7 @@ export const chatThreadEmpty: Layer.Layer<ChatThread> = Layer.succeed(
   ChatThread.of({
     turn: () => Effect.fail(new AgentFillError({ status: 0, detail: 'no agent in tests' })),
     history: () => Effect.succeed([]),
+    children: () => Effect.succeed([]),
     cancel: () => Effect.void,
     revert: () => Effect.void,
     regenerate: () => Effect.fail(new AgentFillError({ status: 0, detail: 'no agent in tests' })),
