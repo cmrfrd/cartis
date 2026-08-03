@@ -103,6 +103,40 @@ specified here is **"speak assistant-ui's model, mean opencode's operations."**
    - **P4** MCP tool inversion (fallback: JSON transport stays; presentation already
      identical).
 
+## Edge semantics (locked at spec review)
+
+Gap-analysis resolutions — binding, same weight as Decisions:
+
+- **Chat on an unsaved card.** The session is created lazily on the first turn and
+  held in ThreadState; it is persisted to `CardRecord.chatSessionId` only when the
+  card is saved. A never-saved card leaves a dangling opencode session — harmless,
+  consistent with never deleting sessions.
+- **Copies start fresh.** Save-as-copy and gallery Duplicate omit `chatSessionId`;
+  the conversation belongs to the original document.
+- **Branch switch is an edit.** `chatSessionId` always points at the ACTIVE branch;
+  switching branches updates it in ThreadState and marks the document dirty so the
+  choice rides the normal save path.
+- **One turn at a time.** The composer locks while `running`. Unbinding a card with
+  a turn in flight (New/Open) aborts it — no orphaned stream may mutate the next
+  card.
+- **Failure rendering.** A failed turn finalizes its assistant message as
+  `incomplete` with an inline error strip carrying the `noteFromCause` text — no
+  toasts. No preflight status probe: opencode down or unauthenticated surfaces the
+  same way on the first turn.
+- **Final flush.** Text deltas are cumulative and throttled (2s), but part
+  completion and `TurnCompleted` always emit an unthrottled final delta — the tail
+  of a reply is never lost.
+- **Idempotent fold.** `TurnStarted` appends only when its `messageId` is unseen;
+  `PartDelta` upserts are naturally replay-safe. On SSE reconnect the client
+  rehydrates from history rather than trusting PubSub replay.
+- **Post-turn art attribution.** `artAction` runs after `TurnCompleted`
+  (client-initiated), so `Art` events upsert onto the LAST assistant message's
+  `card_generate_art` tool part; the system strip is the fallback only when no
+  assistant message exists.
+- **Step parts.** Kept in the schema (opencode emits them) but not rendered in v1.
+- **Reverted messages.** History mapping excludes reverted messages —
+  edit/regenerate leaves no ghosts after rehydrate.
+
 ## Engineering requirements (binding)
 
 Repo standards: no `any`/`!`/`as`-on-external-data; every wire shape Schema-decoded;
