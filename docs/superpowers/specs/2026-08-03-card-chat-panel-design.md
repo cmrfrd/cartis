@@ -18,6 +18,28 @@ research stands: zod/zustand/radix dep tree, happy-dom risk, 0.x churn); its *mo
 is ported, its runtime plumbing is replaced by our stack, and our `ThreadState` store
 stays near-isomorphic to `ThreadMessageLike` so their UI remains a bolt-on option.
 
+## Guiding principle: assistant-ui is the vocabulary, opencode is the semantics
+
+Three roles, strictly separated — this is the design's spine:
+
+- **assistant-ui → the presentation & interaction MODEL.** What a chat *is* to the
+  user: threads of messages made of ordered parts, tool calls with visible status,
+  branching, edit/regenerate, a composer. We adopt its shapes because they are the
+  most battle-tested public vocabulary for chat UX, and staying isomorphic to
+  `ThreadMessageLike` keeps its ecosystem available as a bolt-on.
+- **opencode → the runtime SEMANTICS.** Sessions that persist, an agent that actually
+  runs, fork/revert/abort as real state operations, a delta event stream of what is
+  truly happening. Nothing in the UI layer simulates conversation state — every
+  affordance is backed by a native session operation.
+- **effect + expressive → the BINDING.** Schema validates every boundary between the
+  two; Effect services are the runtime interface; expressive is the reactive store.
+
+Each layer is independently replaceable: another agent backend could stand in for
+opencode behind the same thread contracts; assistant-ui's actual components could
+render the same store; the visual style can change without touching semantics. The
+weak version of this design would be "make our chat look like ChatGPT"; the version
+specified here is **"speak assistant-ui's model, mean opencode's operations."**
+
 ## Decisions
 
 1. **Canonical thread contracts** (`src/contracts/thread.ts`) — the load-bearing
