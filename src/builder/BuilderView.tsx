@@ -16,6 +16,10 @@ import { AgentFill } from './AgentFill';
 import { FormRenderer } from './FormRenderer';
 import { PortraitSection } from './PortraitSection';
 
+/** A guarded destructive intent awaiting Save-first / Discard / Cancel. */
+export type PendingIntent = { kind: 'new' } | { kind: 'open'; card: StoredCard };
+export type GuardResolution = 'save-first' | 'discard' | 'cancel';
+
 export class BuilderView extends Component {
   shell = get(AppShell, false);
   themeId = '';
@@ -34,10 +38,17 @@ export class BuilderView extends Component {
   aiPrompt = '';
   aiBusy = false;
   aiNote = '';
+  /** Modified-flag: any edit sets it; save/load/new clear it. */
+  dirty = false;
+  /** A guarded destructive intent awaiting the user's choice (document guard). */
+  pendingIntent?: PendingIntent = undefined;
 
   protected new() {
     const first = listThemes()[0];
-    if (first) this.pickTheme(first.id);
+    if (first) {
+      this.pickTheme(first.id);
+      this.dirty = false; // initialization is not an edit
+    }
   }
 
   mount() {
@@ -78,16 +89,27 @@ export class BuilderView extends Component {
 
   setField(key: string, value: FieldValue) {
     this.data = { ...this.data, [key]: value };
+    this.dirty = true;
   }
 
-  /** Selecting a theme starts a fresh card: first layout, its defaults. */
+  toggleHolo() {
+    this.holo = !this.holo;
+    this.dirty = true;
+  }
+
+  /** Switching theme EDITS the open document (lifecycle spec decision 4):
+   *  identity kept, overlapping argument values preserved, dirty marked. */
   pickTheme(id: string) {
-    this.themeId = id;
     const first = getTheme(id).layouts[0];
+    const keptKeys = new Set((first?.fields ?? []).map((f) => f.key));
+    const preserved: CardData = {};
+    for (const [key, value] of Object.entries(this.data)) {
+      if (keptKeys.has(key)) preserved[key] = value;
+    }
+    this.themeId = id;
     this.layoutId = first?.id ?? '';
-    this.data = first ? { ...first.defaults } : {};
-    this.savedId = undefined;
-    this.savedNote = '';
+    this.data = { ...(first ? first.defaults : {}), ...preserved };
+    this.dirty = true;
     this.fillSessionId = undefined; // new episode (spec decision 6)
   }
 
@@ -102,6 +124,7 @@ export class BuilderView extends Component {
     // Seed defaults only for keys the user has no value for (keeps user data).
     this.data = { ...next.defaults, ...preserved };
     this.layoutId = id;
+    this.dirty = true;
     this.fillSessionId = undefined; // new episode (spec decision 6)
   }
 
@@ -112,7 +135,85 @@ export class BuilderView extends Component {
     this.holo = card.holo;
     this.savedId = card.id;
     this.savedNote = '';
+    this.dirty = false;
     this.fillSessionId = undefined; // new episode (spec decision 6)
+  }
+
+  /** Unguarded executor: blank card in the CURRENT theme + layout. */
+  newCard() {
+    const layout = this.layout;
+    this.data = { ...layout.defaults };
+    this.holo = false;
+    this.savedId = undefined;
+    this.savedNote = '';
+    this.dirty = false;
+    this.fillSessionId = undefined;
+    this.aiNote = '';
+    this.portraitKey = undefined;
+  }
+
+  requestNew() {
+    if (!this.dirty) {
+      this.newCard();
+      return;
+    }
+    this.pendingIntent = { kind: 'new' };
+  }
+
+  requestOpen(card: StoredCard) {
+    if (!this.dirty) {
+      this.loadCard(card);
+      return;
+    }
+    this.pendingIntent = { kind: 'open', card };
+  }
+
+  private executeIntent(intent: PendingIntent) {
+    switch (intent.kind) {
+      case 'new':
+        this.newCard();
+        return;
+      case 'open':
+        this.loadCard(intent.card);
+        return;
+    }
+  }
+
+  async resolveIntent(resolution: GuardResolution) {
+    const intent = this.pendingIntent;
+    this.pendingIntent = undefined;
+    if (!intent || resolution === 'cancel') return;
+    if (resolution === 'save-first') {
+      await this.saveCard();
+      // A failed save cancels the intent and shows the error (spec: dirty guard).
+      if (this.dirty || this.savedId === undefined) return;
+    }
+    this.executeIntent(intent);
+  }
+
+  /** Fork the open card into a fresh record and rebind the document to it. */
+  async saveAsCopy() {
+    const { shell } = this;
+    if (!shell) {
+      this.savedNote = 'Storage unavailable.';
+      return;
+    }
+    const name = `${String(this.data.name ?? 'Untitled')} copy`;
+    try {
+      const saved = await shell.archive.saveCard({
+        name,
+        themeId: this.themeId,
+        layoutId: this.layoutId,
+        data: { ...this.data, name },
+        holo: this.holo,
+      });
+      this.data = { ...this.data, name };
+      this.savedId = saved.id;
+      this.savedNote = `Saved “${saved.name}” to the gallery.`;
+      this.dirty = false;
+    } catch (cause) {
+      this.savedNote = cause instanceof Error ? cause.message : String(cause);
+    }
   }
 
   /** The layout's single image argument (the art slot), if it has one. */
@@ -163,6 +264,7 @@ export class BuilderView extends Component {
       this.fillSessionId = out.sessionId;
       // Targeted merge — only the returned keys change (spec decision 10).
       this.data = { ...this.data, ...out.patch };
+      this.dirty = true;
       this.aiPrompt = '';
       if (out.artAction) {
         this.aiNote = 'Applied — generating art…';
@@ -240,16 +342,21 @@ export class BuilderView extends Component {
       this.savedNote = 'Storage unavailable.';
       return;
     }
-    const saved = await shell.archive.saveCard({
-      id: this.savedId,
-      name: String(this.data.name ?? 'Untitled'),
-      themeId: this.themeId,
-      layoutId: this.layoutId,
-      data: this.data,
-      holo: this.holo,
-    });
-    this.savedId = saved.id;
-    this.savedNote = `Saved “${saved.name}” to the gallery.`;
+    try {
+      const saved = await shell.archive.saveCard({
+        id: this.savedId,
+        name: String(this.data.name ?? 'Untitled'),
+        themeId: this.themeId,
+        layoutId: this.layoutId,
+        data: this.data,
+        holo: this.holo,
+      });
+      this.savedId = saved.id;
+      this.savedNote = `Saved “${saved.name}” to the gallery.`;
+      this.dirty = false;
+    } catch (cause) {
+      this.savedNote = cause instanceof Error ? cause.message : String(cause);
+    }
   }
 
   render() {

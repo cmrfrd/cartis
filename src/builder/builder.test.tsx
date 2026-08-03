@@ -3,7 +3,10 @@ import { describe, expect, it, vi } from 'vitest';
 import { click, mountApp, setInput, tick } from '../../test/util';
 import { setAppLayer, testAppLayerWith } from '../app/runtime';
 import type { AgentFillRequestT } from '../contracts/api';
+import { StoreError } from '../contracts/errors';
 import { type GenerationInput, ImageProvider } from '../images/ImageProvider';
+import type { StoredCard } from '../storage/CardArchive';
+import { StoreClient } from '../storage/StoreClient';
 import { AgentFill } from './AgentFill';
 import { BuilderView } from './BuilderView';
 
@@ -255,6 +258,128 @@ describe('BuilderView', () => {
     await vi.waitFor(() => {
       expect(generate).toHaveBeenCalledOnce();
       expect(shell.library.images).toHaveLength(1);
+    });
+    unmount();
+  });
+});
+
+describe('document lifecycle (headless)', () => {
+  const makeCard = (overrides: Partial<StoredCard> = {}): StoredCard => ({
+    id: 'card-1',
+    name: 'Stored Hero',
+    themeId: 'arcane',
+    layoutId: 'classic',
+    data: { name: 'Stored Hero', essence: 'tide' },
+    holo: false,
+    updatedAt: 1,
+    ...overrides,
+  });
+
+  it('tracks dirty across every mutating action and clears it on load/new', () => {
+    const builder = BuilderView.new();
+    expect(builder.dirty).toBe(false);
+    builder.setField('name', 'X');
+    expect(builder.dirty).toBe(true);
+    builder.loadCard(makeCard());
+    expect(builder.dirty).toBe(false);
+    builder.pickLayout('fullart');
+    expect(builder.dirty).toBe(true);
+    builder.newCard();
+    expect(builder.dirty).toBe(false);
+    builder.toggleHolo();
+    expect(builder.dirty).toBe(true);
+    builder.newCard();
+    builder.pickTheme('arcane');
+    expect(builder.dirty).toBe(true);
+    builder.set(null);
+  });
+
+  it('pickTheme edits the same document: keeps savedId, preserves overlap, drops fill session', () => {
+    const builder = BuilderView.new();
+    builder.loadCard(makeCard({ data: { name: 'Keeper', essence: 'tide' } }));
+    builder.fillSessionId = 's1';
+    builder.pickTheme('arcane');
+    expect(builder.savedId).toBe('card-1'); // identity kept
+    expect(builder.data.name).toBe('Keeper'); // overlapping key preserved
+    expect(builder.dirty).toBe(true);
+    expect(builder.fillSessionId).toBeUndefined();
+    builder.set(null);
+  });
+
+  it('newCard seeds current theme+layout defaults and clears the document', () => {
+    const builder = BuilderView.new();
+    builder.loadCard(makeCard());
+    builder.pickLayout('fullart');
+    builder.fillSessionId = 's1';
+    builder.newCard();
+    expect(builder.savedId).toBeUndefined();
+    expect(builder.dirty).toBe(false);
+    expect(builder.fillSessionId).toBeUndefined();
+    expect(builder.layoutId).toBe('fullart'); // stays in the current context
+    expect(builder.data.name).toBe('Nyra, Unbound'); // fullart defaults
+    builder.set(null);
+  });
+
+  it('requestNew executes immediately when clean, guards when dirty', () => {
+    const builder = BuilderView.new();
+    builder.requestNew();
+    expect(builder.pendingIntent).toBeUndefined(); // clean -> executed
+    builder.setField('name', 'Dirty');
+    builder.requestNew();
+    expect(builder.pendingIntent).toEqual({ kind: 'new' });
+    expect(builder.data.name).toBe('Dirty'); // nothing executed yet
+    builder.set(null);
+  });
+
+  it('resolveIntent: cancel keeps the document; discard executes without saving', async () => {
+    const builder = BuilderView.new();
+    builder.setField('name', 'Dirty');
+    builder.requestOpen(makeCard());
+    await builder.resolveIntent('cancel');
+    expect(builder.pendingIntent).toBeUndefined();
+    expect(builder.data.name).toBe('Dirty');
+    builder.requestOpen(makeCard());
+    await builder.resolveIntent('discard');
+    expect(builder.data.name).toBe('Stored Hero'); // opened
+    expect(builder.dirty).toBe(false);
+    builder.set(null);
+  });
+
+  it('resolveIntent save-first with a failed save cancels the intent and keeps the document', async () => {
+    // Headless BuilderView has no shell -> saveCard fails with 'Storage unavailable.'
+    const b = BuilderView.new();
+    b.setField('name', 'To Persist');
+    b.requestNew();
+    await b.resolveIntent('save-first');
+    expect(b.savedNote).toBe('Storage unavailable.');
+    expect(b.pendingIntent).toBeUndefined(); // intent cancelled, not left dangling
+    expect(b.data.name).toBe('To Persist'); // document kept on failed save
+    expect(b.dirty).toBe(true);
+    b.set(null);
+  });
+  // (The success path of save-first is a mounted test in the document-bar describe.)
+
+  it('saveCard catches a failing store into savedNote (no unhandled rejection)', async () => {
+    const failingStore: Layer.Layer<StoreClient> = Layer.succeed(
+      StoreClient,
+      StoreClient.of({
+        list: () => Effect.succeed([]),
+        put: () => Effect.fail(new StoreError({ op: 'put', status: 500, detail: 'disk full' })),
+        remove: () => Effect.void,
+        fileUrl: () => undefined,
+      }),
+    );
+    setAppLayer(testAppLayerWith({ store: failingStore }));
+    const { shell, container, unmount } = await mountApp();
+    await vi.waitFor(() => expect(shell.archive.ready).toBe(true));
+    const nameInput = container.querySelector('aside input[type="text"]');
+    await setInput(nameInput, 'Doomed');
+    const saveButton = Array.from(container.querySelectorAll('button')).find(
+      (b) => b.textContent === 'Save to gallery',
+    );
+    await click(saveButton ?? null);
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('disk full');
     });
     unmount();
   });
