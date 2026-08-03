@@ -1,7 +1,9 @@
-import { Effect, Fiber, Layer, Option, Ref, TestClock } from 'effect';
+import { type Context, Effect, Fiber, Layer, Option, Ref, TestClock } from 'effect';
 import { describe, expect } from 'vitest';
 import { it } from '../../test/effect.ts';
-import type { AgentFillRequestT } from '../contracts/api.ts';
+import type { ChatTurnRequestT } from '../contracts/api.ts';
+import { AgentError } from '../contracts/errors.ts';
+import type { SessionInfoT, SessionMessagesT } from '../contracts/opencode.ts';
 import type { PredictionT } from '../contracts/replicate.ts';
 import type { ThreadEventT } from '../contracts/thread.ts';
 import { httpClientFromHandler } from '../lib/http.ts';
@@ -11,11 +13,12 @@ import {
   composeArtPrompt,
   initialWatchState,
   mapAgentEvent,
+  mapSessionMessages,
   type OpencodeClient,
   ReplicateClient,
   ReplicateSdk,
   replicateClientLive,
-  runFillAgent,
+  runChatTurn,
   type WatchState,
 } from './agentBridge.ts';
 import { ThreadBus, threadBusTestLayer } from './threadBus.ts';
@@ -24,13 +27,31 @@ import { ThreadBus, threadBusTestLayer } from './threadBus.ts';
 const artDetails = (history: ReadonlyArray<ThreadEventT>): string[] =>
   history.flatMap((e) => (e._tag === 'Art' && e.detail !== undefined ? [e.detail] : []));
 
+type AgentSvc = Context.Tag.Service<AgentClient>;
+
+/** Full AgentClient stub — the passthrough ops default to no-op/empty. */
+const agentLayer = (over: Partial<AgentSvc>): Layer.Layer<AgentClient> =>
+  Layer.succeed(AgentClient, {
+    createSession: () => Effect.succeed('sess'),
+    prompt: () => Effect.succeed({ data: { parts: [] } }),
+    withActivity: (_sessionId, effect) => effect,
+    messages: () => Effect.succeed([] as SessionMessagesT),
+    info: () => Effect.fail(new AgentError({ reason: 'no-session-id' })),
+    abort: () => Effect.void,
+    revert: () => Effect.void,
+    fork: () => Effect.fail(new AgentError({ reason: 'no-session-id' })),
+    children: () => Effect.succeed([] as SessionInfoT[]),
+    replyPermission: () => Effect.void,
+    ...over,
+  });
+
 // ---------------------------------------------------------------------------
 // composeArtPrompt — stub AgentClient + test ThreadBus
 // ---------------------------------------------------------------------------
 
 /** Stub AgentClient whose prompt() records the instruction and answers with prose. */
 const composeStub = (record: (text: string) => void): Layer.Layer<AgentClient> =>
-  Layer.succeed(AgentClient, {
+  agentLayer({
     createSession: () => Effect.succeed('sess-c'),
     prompt: (_id, text) => {
       record(text);
@@ -38,7 +59,6 @@ const composeStub = (record: (text: string) => void): Layer.Layer<AgentClient> =
         data: { parts: [{ type: 'text', text: 'a mythic ember mage, oil painting' }] },
       });
     },
-    withActivity: (_sessionId, effect) => effect,
   });
 
 describe('composeArtPrompt', () => {
@@ -76,10 +96,9 @@ describe('composeArtPrompt', () => {
         {},
       ).pipe(
         Effect.provide(
-          Layer.succeed(AgentClient, {
+          agentLayer({
             createSession: () => Effect.succeed('sess-e'),
             prompt: () => Effect.succeed({ data: { parts: [] } }),
-            withActivity: (_sessionId, effect) => effect,
           }),
         ),
       );
@@ -91,7 +110,7 @@ describe('composeArtPrompt', () => {
 });
 
 // ---------------------------------------------------------------------------
-// runFillAgent — session reuse, targeted patch, vision attach, Schema-reject
+// runChatTurn — session reuse, reply + patch, vision attach, conversational
 // ---------------------------------------------------------------------------
 
 interface PromptCall {
@@ -100,13 +119,13 @@ interface PromptCall {
   image?: { mime: string; dataUrl: string };
 }
 
-/** Stub AgentClient that records calls and replies with a fixed text. */
-const fillStub = (
+/** Stub AgentClient that records prompt calls and replies with a fixed text. */
+const chatStub = (
   reply: string,
   calls: PromptCall[],
   sessions: string[],
 ): Layer.Layer<AgentClient> =>
-  Layer.succeed(AgentClient, {
+  agentLayer({
     createSession: (title) => {
       sessions.push(title);
       return Effect.succeed('fresh-session');
@@ -115,12 +134,11 @@ const fillStub = (
       calls.push({ sessionId, text, image });
       return Effect.succeed({ data: { parts: [{ type: 'text', text: reply }] } });
     },
-    withActivity: (_sessionId, effect) => effect,
   });
 
 const noArt = () => Effect.succeed(Option.none<{ mime: string; dataUrl: string }>());
 
-const fillReq = (overrides: Partial<AgentFillRequestT> = {}): AgentFillRequestT => ({
+const chatReq = (overrides: Partial<ChatTurnRequestT> = {}): ChatTurnRequestT => ({
   sessionId: undefined,
   themeContext: { lookAndFeel: 'painterly oil', palette: 'ember', argumentSummary: 'name, cost' },
   fields: [
@@ -133,15 +151,17 @@ const fillReq = (overrides: Partial<AgentFillRequestT> = {}): AgentFillRequestT 
   ...overrides,
 });
 
-describe('runFillAgent', () => {
-  it.effect('creates a session on the first turn and returns a targeted patch', () => {
+describe('runChatTurn', () => {
+  it.effect('creates a session on the first turn and returns reply text + patch', () => {
     const calls: PromptCall[] = [];
     const sessions: string[] = [];
     return Effect.gen(function* () {
-      const out = yield* runFillAgent(fillReq(), noArt);
-      expect(sessions).toEqual(['cartis card fill']);
+      const out = yield* runChatTurn(chatReq(), noArt);
+      expect(sessions).toEqual(['cartis card chat']);
       expect(out.sessionId).toBe('fresh-session');
       expect(out.patch).toEqual({ name: 'Vorak' });
+      // assistantText is the RAW model output (the client materializes it)
+      expect(out.assistantText).toContain('Renamed him');
       // per-turn snapshot: the prompt embeds currentData (hand edits win)
       expect(calls[0]?.text).toContain('Hand-edited.');
       expect(calls[0]?.text).toContain('rename him to Vorak');
@@ -149,12 +169,12 @@ describe('runFillAgent', () => {
       // turn-level notes go to the console-only log lane, not the event stream
       const bus = yield* ThreadBus;
       const logs = yield* bus.logs;
-      expect(logs.some((l) => l.includes('fill:'))).toBe(true);
-      expect(logs.some((l) => l.includes('fill patch ready'))).toBe(true);
+      expect(logs.some((l) => l.includes('chat:'))).toBe(true);
+      expect(logs.some((l) => l.includes('chat turn ready'))).toBe(true);
     }).pipe(
       Effect.provide(
         Layer.mergeAll(
-          fillStub('{"patch": {"name": "Vorak"}}', calls, sessions),
+          chatStub('{"reply": "Renamed him.", "patch": {"name": "Vorak"}}', calls, sessions),
           threadBusTestLayer,
         ),
       ),
@@ -165,13 +185,16 @@ describe('runFillAgent', () => {
     const calls: PromptCall[] = [];
     const sessions: string[] = [];
     return Effect.gen(function* () {
-      const out = yield* runFillAgent(fillReq({ sessionId: 'episode-1' }), noArt);
+      const out = yield* runChatTurn(chatReq({ sessionId: 'card-1' }), noArt);
       expect(sessions).toEqual([]); // createSession NOT called
-      expect(out.sessionId).toBe('episode-1');
-      expect(calls[0]?.sessionId).toBe('episode-1');
+      expect(out.sessionId).toBe('card-1');
+      expect(calls[0]?.sessionId).toBe('card-1');
     }).pipe(
       Effect.provide(
-        Layer.mergeAll(fillStub('{"patch": {}}', calls, sessions), threadBusTestLayer),
+        Layer.mergeAll(
+          chatStub('{"reply": "ok", "patch": {}}', calls, sessions),
+          threadBusTestLayer,
+        ),
       ),
     );
   });
@@ -179,7 +202,7 @@ describe('runFillAgent', () => {
   it.effect('attaches the current art for vision and decodes an artAction', () => {
     const calls: PromptCall[] = [];
     return Effect.gen(function* () {
-      const out = yield* runFillAgent(fillReq({ currentArtFileName: 'nyra-abc123.png' }), () =>
+      const out = yield* runChatTurn(chatReq({ currentArtFileName: 'nyra-abc123.png' }), () =>
         Effect.succeed(Option.some({ mime: 'image/png', dataUrl: 'data:image/png;base64,QQ==' })),
       );
       expect(calls[0]?.image?.mime).toBe('image/png');
@@ -187,8 +210,8 @@ describe('runFillAgent', () => {
     }).pipe(
       Effect.provide(
         Layer.mergeAll(
-          fillStub(
-            '{"patch": {}, "artAction": {"brief": "angrier face", "editCurrentArt": true}}',
+          chatStub(
+            '{"reply": "Making him fiercer.", "patch": {}, "artAction": {"brief": "angrier face", "editCurrentArt": true}}',
             calls,
             [],
           ),
@@ -202,37 +225,39 @@ describe('runFillAgent', () => {
     const calls: PromptCall[] = [];
     return Effect.gen(function* () {
       // extra key silently dropped by the derived schema
-      const ok = yield* runFillAgent(fillReq(), noArt).pipe(
+      const ok = yield* runChatTurn(chatReq(), noArt).pipe(
         Effect.provide(
           Layer.mergeAll(
-            fillStub('{"patch": {"name": "Vorak", "hacker": "x"}}', calls, []),
+            chatStub('{"reply": "done", "patch": {"name": "Vorak", "hacker": "x"}}', calls, []),
             threadBusTestLayer,
           ),
         ),
       );
       expect(ok.patch).toEqual({ name: 'Vorak' });
-      // wrong-typed value → typed AgentError
-      const err = yield* runFillAgent(fillReq(), noArt).pipe(
+      // wrong-typed value → typed AgentError (the model tried to patch but mistyped)
+      const err = yield* runChatTurn(chatReq(), noArt).pipe(
         Effect.flip,
         Effect.provide(
-          Layer.mergeAll(fillStub('{"patch": {"cost": "expensive"}}', [], []), threadBusTestLayer),
+          Layer.mergeAll(
+            chatStub('{"reply": "done", "patch": {"cost": "expensive"}}', [], []),
+            threadBusTestLayer,
+          ),
         ),
       );
       expect(err._tag).toBe('AgentError');
-      expect(err.message).toBe('agent returned no fill patch');
     });
   });
 
-  it.effect('fails with a typed AgentError on a non-JSON reply', () =>
-    runFillAgent(fillReq(), noArt).pipe(
-      Effect.flip,
-      Effect.tap((error) => {
-        expect(error._tag).toBe('AgentError');
-        expect(error.message).toBe('agent returned no fill patch');
-        return Effect.void;
-      }),
+  it.effect('treats a plain-text reply (no JSON) as a conversational turn, not an error', () =>
+    Effect.gen(function* () {
+      const out = yield* runChatTurn(chatReq(), noArt);
+      // conversational: no patch, but the prose is preserved for materialization
+      expect(out.patch).toEqual({});
+      expect(out.artAction).toBeUndefined();
+      expect(out.assistantText).toBe('Which essence should Vorak have?');
+    }).pipe(
       Effect.provide(
-        Layer.mergeAll(fillStub('sorry, I cannot help with that', [], []), threadBusTestLayer),
+        Layer.mergeAll(chatStub('Which essence should Vorak have?', [], []), threadBusTestLayer),
       ),
     ),
   );
@@ -764,11 +789,19 @@ describe('AgentClient.withActivity', () => {
         },
       },
     };
+    const notImplemented = () => Promise.resolve({});
     const fakeClient: OpencodeClient = {
       session: {
         create: () => Promise.resolve({ id: 'sess-1' }),
         prompt: () => Promise.resolve({ data: { parts: [] } }),
+        messages: notImplemented,
+        get: notImplemented,
+        abort: notImplemented,
+        revert: notImplemented,
+        fork: notImplemented,
+        children: notImplemented,
       },
+      permission: notImplemented,
       event: {
         subscribe: (opts) => {
           captured.signal = opts.signal;
@@ -817,27 +850,147 @@ describe('AgentClient.withActivity', () => {
 });
 
 // ---------------------------------------------------------------------------
-// runFillAgent heartbeat
+// runChatTurn heartbeat
 // ---------------------------------------------------------------------------
 
-describe('runFillAgent heartbeat', () => {
+describe('runChatTurn heartbeat', () => {
   it.effect('logs still-working while a slow prompt is in flight', () => {
-    const slowStub: Layer.Layer<AgentClient> = Layer.succeed(AgentClient, {
+    const slowStub = agentLayer({
       createSession: () => Effect.succeed('s1'),
       prompt: () =>
-        Effect.succeed({ data: { parts: [{ type: 'text', text: '{"patch": {}}' }] } }).pipe(
+        Effect.succeed({ data: { parts: [{ type: 'text', text: '{"reply": "ok"}' }] } }).pipe(
           Effect.delay('6 seconds'),
         ),
-      withActivity: (_sessionId, effect) => effect,
     });
     return Effect.gen(function* () {
       const bus = yield* ThreadBus;
-      const fiber = yield* Effect.fork(runFillAgent(fillReq(), noArt));
+      const fiber = yield* Effect.fork(runChatTurn(chatReq(), noArt));
       yield* TestClock.adjust('5 seconds');
       const during = yield* bus.logs;
       expect(during.some((l) => l.includes('still working…'))).toBe(true);
       yield* TestClock.adjust('2 seconds');
       yield* Fiber.join(fiber);
     }).pipe(Effect.provide(Layer.mergeAll(slowStub, threadBusTestLayer)));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// mapSessionMessages — opencode history → thread messages (revert-excluded)
+// ---------------------------------------------------------------------------
+
+describe('mapSessionMessages', () => {
+  it('maps a user + assistant exchange, materializing the v1 JSON reply', () => {
+    const out = mapSessionMessages([
+      {
+        info: { id: 'u1', role: 'user', time: { created: 1 } },
+        parts: [{ id: 'p0', type: 'text', text: 'rename him' }],
+      },
+      {
+        info: { id: 'm1', role: 'assistant', time: { created: 2, completed: 3 } },
+        parts: [{ id: 'p1', type: 'text', text: '{"reply": "Renamed.", "patch": {"name": "Q"}}' }],
+      },
+    ]);
+    expect(out).toEqual([
+      { id: 'u1', role: 'user', status: 'complete', parts: [{ _tag: 'Text', text: 'rename him' }] },
+      {
+        id: 'm1',
+        role: 'assistant',
+        status: 'complete',
+        parts: [
+          { _tag: 'Text', text: 'Renamed.' },
+          {
+            _tag: 'ToolCall',
+            callId: 'card_patch',
+            name: 'card_patch',
+            title: 'Edit card fields',
+            status: 'completed',
+            argsText: '{"name":"Q"}',
+          },
+        ],
+      },
+    ]);
+  });
+
+  it('maps real tool parts directly, before the materialized card actions', () => {
+    const out = mapSessionMessages([
+      {
+        info: { id: 'm1', role: 'assistant', time: { created: 1, completed: 2 } },
+        parts: [
+          {
+            id: 'p1',
+            type: 'tool',
+            callID: 'c1',
+            tool: 'read',
+            state: {
+              status: 'completed',
+              title: 'card.json',
+              input: { path: 'card.json' },
+              output: 'contents',
+              time: { start: 0, end: 1500 },
+            },
+          },
+          { id: 'p2', type: 'text', text: '{"reply": "Read it.", "patch": {}}' },
+        ],
+      },
+    ]);
+    expect(out[0]?.parts).toEqual([
+      {
+        _tag: 'ToolCall',
+        callId: 'c1',
+        name: 'read',
+        title: 'card.json',
+        status: 'completed',
+        argsText: '{"path":"card.json"}',
+        result: 'contents',
+        secs: 1.5,
+      },
+      { _tag: 'Text', text: 'Read it.' },
+    ]);
+  });
+
+  it('marks a message with an error as incomplete', () => {
+    const out = mapSessionMessages([
+      {
+        info: { id: 'm1', role: 'assistant', time: { created: 1 }, error: { name: 'aborted' } },
+        parts: [{ id: 'p1', type: 'text', text: 'partial…' }],
+      },
+    ]);
+    expect(out[0]?.status).toBe('incomplete');
+  });
+
+  it('excludes messages at and after the revert point (no ghosts)', () => {
+    const messages: SessionMessagesT = [
+      {
+        info: { id: 'u1', role: 'user', time: { created: 1 } },
+        parts: [{ id: 'a', type: 'text', text: 'first' }],
+      },
+      {
+        info: { id: 'm1', role: 'assistant', time: { created: 2, completed: 3 } },
+        parts: [{ id: 'b', type: 'text', text: '{"reply": "one"}' }],
+      },
+      {
+        info: { id: 'u2', role: 'user', time: { created: 4 } },
+        parts: [{ id: 'c', type: 'text', text: 'reverted prompt' }],
+      },
+      {
+        info: { id: 'm2', role: 'assistant', time: { created: 5 } },
+        parts: [{ id: 'd', type: 'text', text: '{"reply": "ghost"}' }],
+      },
+    ];
+    const out = mapSessionMessages(messages, 'u2');
+    expect(out.map((m) => m.id)).toEqual(['u1', 'm1']); // u2 + everything after dropped
+  });
+
+  it('skips synthetic text parts (internal) when concatenating', () => {
+    const out = mapSessionMessages([
+      {
+        info: { id: 'u1', role: 'user', time: { created: 1 } },
+        parts: [
+          { id: 'p0', type: 'text', text: 'system preamble', synthetic: true },
+          { id: 'p1', type: 'text', text: 'the real ask' },
+        ],
+      },
+    ]);
+    expect(out[0]?.parts).toEqual([{ _tag: 'Text', text: 'the real ask' }]);
   });
 });

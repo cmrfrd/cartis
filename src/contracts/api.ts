@@ -9,6 +9,7 @@
 import { Schema } from 'effect';
 import { StoredRecord } from './records.ts';
 import { ThemeContext } from './theme.ts';
+import { ThreadMessage } from './thread.ts';
 
 // ---------------------------------------------------------------------------
 // Shared error body
@@ -57,6 +58,10 @@ export type StatusResponseT = typeof StatusResponse.Type;
 const FieldValue = Schema.Union(Schema.String, Schema.Number, Schema.Boolean, Schema.Undefined);
 const CardDataSchema = Schema.Record({ key: Schema.String, value: FieldValue });
 
+/** Lenient card-data record (patch shape when no field schema is available). */
+export const CardData = CardDataSchema;
+export type CardDataT = typeof CardData.Type;
+
 /** FieldSpec-shaped summary the LLM sees (kind + key + label). */
 const FieldSummary = Schema.Struct({
   kind: Schema.String,
@@ -86,6 +91,63 @@ export const AgentFillResponse = Schema.Struct({
   artAction: Schema.optional(ArtAction),
 });
 export type AgentFillResponseT = typeof AgentFillResponse.Type;
+
+// ---------------------------------------------------------------------------
+// Card chat panel (spec 2026-08-03) — session passthrough over opencode.
+// ---------------------------------------------------------------------------
+
+// POST /api/chat/turn — one conversational card-editing turn.
+// Request mirrors the fill request (session-per-card, currentData snapshot,
+// optional vision attach); the response carries the raw assistant text (fed to
+// the SHARED materializer for display) plus the validated patch (applied to the
+// card) and an optional art action.
+export const ChatTurnRequest = Schema.Struct({
+  sessionId: Schema.optional(Schema.String),
+  themeContext: ThemeContext,
+  fields: Schema.Array(FieldSummary),
+  currentData: CardDataSchema,
+  currentArtFileName: Schema.optional(Schema.String),
+  userPrompt: Schema.String,
+});
+export type ChatTurnRequestT = typeof ChatTurnRequest.Type;
+
+export const ChatTurnResponse = Schema.Struct({
+  sessionId: Schema.String,
+  /** Raw model output — the client runs it through materializeAssistantParts. */
+  assistantText: Schema.String,
+  /** Field-schema-validated patch, safe to apply to the card. */
+  patch: CardDataSchema,
+  artAction: Schema.optional(ArtAction),
+});
+export type ChatTurnResponseT = typeof ChatTurnResponse.Type;
+
+// GET /api/chat/history?sessionId=… — rehydrate a card's conversation.
+export const ChatHistoryResponse = Schema.Struct({
+  messages: Schema.Array(ThreadMessage),
+});
+export type ChatHistoryResponseT = typeof ChatHistoryResponse.Type;
+
+// POST /api/chat/fork — branch a session; also the abort/revert/regenerate ack.
+export const SessionRef = Schema.Struct({
+  sessionId: Schema.String,
+});
+export type SessionRefT = typeof SessionRef.Type;
+
+// POST /api/chat/abort|revert|regenerate — request bodies.
+export const SessionAction = Schema.Struct({
+  sessionId: Schema.String,
+  /** revert target; regenerate/abort ignore it. */
+  messageId: Schema.optional(Schema.String),
+});
+export type SessionActionT = typeof SessionAction.Type;
+
+// POST /api/chat/permission — reply to a requires-action prompt (Task 5).
+export const PermissionReply = Schema.Struct({
+  sessionId: Schema.String,
+  permissionId: Schema.String,
+  granted: Schema.Boolean,
+});
+export type PermissionReplyT = typeof PermissionReply.Type;
 
 /**
  * Derive a Schema for a targeted patch from field specs: every key optional,

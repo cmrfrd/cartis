@@ -162,3 +162,79 @@ export const AgentEvent = Schema.Struct({
   ),
 });
 export type AgentEventT = typeof AgentEvent.Type;
+
+// ---------------------------------------------------------------------------
+// SessionMessages — lenient read of `session.messages()` (card chat panel).
+//
+// SDK shape: Array<{ info: Message, parts: Array<Part> }>. We model only the
+// fields history mapping reads: message id/role/completion/error, and each
+// part's type + text + tool identity/state. Every field optional so partial or
+// drifted rows still decode (tolerant boundaries).
+// ---------------------------------------------------------------------------
+
+const SessionPartState = Schema.Struct({
+  status: Schema.optional(Schema.String),
+  title: Schema.optional(Schema.String),
+  input: Schema.optional(Schema.Unknown),
+  output: Schema.optional(Schema.String),
+  error: Schema.optional(Schema.String),
+  time: Schema.optional(
+    Schema.Struct({
+      start: Schema.optional(Schema.Number),
+      end: Schema.optional(Schema.Number),
+    }),
+  ),
+});
+
+const SessionMessagePart = Schema.Struct({
+  id: Schema.optional(Schema.String),
+  type: Schema.optional(Schema.String),
+  text: Schema.optional(Schema.String),
+  synthetic: Schema.optional(Schema.Boolean),
+  callID: Schema.optional(Schema.String),
+  tool: Schema.optional(Schema.String),
+  state: Schema.optional(SessionPartState),
+});
+export type SessionMessagePartT = typeof SessionMessagePart.Type;
+
+const SessionMessageInfo = Schema.Struct({
+  id: Schema.optional(Schema.String),
+  role: Schema.optional(Schema.String),
+  time: Schema.optional(
+    Schema.Struct({
+      created: Schema.optional(Schema.Number),
+      completed: Schema.optional(Schema.Number),
+    }),
+  ),
+  error: Schema.optional(Schema.Unknown),
+});
+
+export const SessionMessage = Schema.Struct({
+  info: Schema.optional(SessionMessageInfo),
+  parts: Schema.optional(Schema.Array(SessionMessagePart)),
+});
+export type SessionMessageT = typeof SessionMessage.Type;
+
+export const SessionMessages = Schema.Array(SessionMessage);
+export type SessionMessagesT = typeof SessionMessages.Type;
+
+// ---------------------------------------------------------------------------
+// SessionInfo — lenient read of a Session (fork/children/get). Carries id +
+// parentID + title (→ ThreadSummary) and the revert marker (history excludes
+// messages at/after revert.messageID — no ghosts after edit/regenerate).
+// ---------------------------------------------------------------------------
+
+export const SessionInfo = Schema.Struct({
+  id: Schema.optional(Schema.String),
+  parentID: Schema.optional(Schema.String),
+  title: Schema.optional(Schema.String),
+  revert: Schema.optional(
+    Schema.Struct({
+      messageID: Schema.optional(Schema.String),
+    }),
+  ),
+});
+export type SessionInfoT = typeof SessionInfo.Type;
+
+export const SessionInfoList = Schema.Array(SessionInfo);
+export type SessionInfoListT = typeof SessionInfoList.Type;

@@ -16,11 +16,16 @@ import {
 } from 'effect';
 import type { Plugin } from 'vite';
 import {
-  AgentFillRequest,
-  type AgentFillRequestT,
-  type AgentFillResponseT,
   ArtAction,
+  type ArtActionT,
+  CardData,
+  type CardDataT,
+  ChatTurnRequest,
+  type ChatTurnRequestT,
+  type ChatTurnResponseT,
   ImageGenerateRequest,
+  PermissionReply,
+  SessionAction,
   StorePutRequest,
   schemaFromFields,
 } from '../contracts/api.ts';
@@ -30,13 +35,24 @@ import {
   NetworkError,
   ReplicateError,
 } from '../contracts/errors.ts';
-import { AgentEvent, PromptResult, SessionCreated } from '../contracts/opencode.ts';
+import { materializeAssistantParts } from '../contracts/materialize.ts';
+import {
+  AgentEvent,
+  PromptResult,
+  SessionCreated,
+  SessionInfo,
+  type SessionInfoT,
+  type SessionMessagePartT,
+  SessionMessages,
+  type SessionMessagesT,
+} from '../contracts/opencode.ts';
 import { Prediction, type PredictionT } from '../contracts/replicate.ts';
 import type { ThemeContextT } from '../contracts/theme.ts';
 import {
   type ArtPhaseT,
   ThreadEventJson,
   type ThreadEventT,
+  type ThreadMessageT,
   type ThreadPartT,
 } from '../contracts/thread.ts';
 import { bytesToDataUrl } from '../images/codec.ts';
@@ -51,11 +67,27 @@ export interface OpencodeClient {
   session: {
     create(input: { body: { title: string } }): Promise<unknown>;
     prompt(input: unknown): Promise<unknown>;
+    messages(input: unknown): Promise<unknown>;
+    get(input: unknown): Promise<unknown>;
+    abort(input: unknown): Promise<unknown>;
+    revert(input: unknown): Promise<unknown>;
+    fork(input: unknown): Promise<unknown>;
+    children(input: unknown): Promise<unknown>;
   };
+  /** Top-level on the SDK client: postSessionIdPermissionsPermissionId. */
+  permission(input: unknown): Promise<unknown>;
   event: {
     /** Returns a lazy { stream } async iterable — events flow only while drained. */
     subscribe(options: { signal?: AbortSignal }): Promise<unknown>;
   };
+}
+
+/** Unwrap the hey-api `{ data, error }` envelope (SDK calls) → the inner value. */
+function unwrapData(result: unknown): unknown {
+  if (typeof result === 'object' && result !== null && 'data' in result) {
+    return (result as { data: unknown }).data;
+  }
+  return result;
 }
 
 /**
@@ -71,6 +103,9 @@ function envOption(name: string): Effect.Effect<Option.Option<string>> {
 }
 
 const decodeSessionOption = Schema.decodeUnknownOption(SessionCreated);
+const decodeSessionMessages = Schema.decodeUnknownOption(SessionMessages);
+const decodeSessionInfo = Schema.decodeUnknownOption(SessionInfo);
+const decodeSessionInfoList = Schema.decodeUnknownOption(Schema.Array(SessionInfo));
 
 // ---------- session thread watcher ----------
 
@@ -367,9 +402,27 @@ export class AgentClient extends Context.Tag('cartis/AgentClient')<
     ): Effect.Effect<unknown, AgentError>;
     /**
      * Run `effect` with the session's activity watcher forked in scope (live:
-     * SDK event stream → ActivityBus lines; stubs: identity).
+     * SDK event stream → ThreadBus events; stubs: identity).
      */
     withActivity<A, E>(sessionId: string, effect: Effect.Effect<A, E>): Effect.Effect<A, E>;
+    /** Decoded message list for a session (history rehydration + regenerate). */
+    messages(sessionId: string): Effect.Effect<SessionMessagesT, AgentError>;
+    /** Session envelope — carries the revert marker + parent/title. */
+    info(sessionId: string): Effect.Effect<SessionInfoT, AgentError>;
+    /** Interrupt the running turn (cancel). */
+    abort(sessionId: string): Effect.Effect<void, AgentError>;
+    /** Revert the session to (and undoing) `messageId` — edit/regenerate basis. */
+    revert(sessionId: string, messageId: string): Effect.Effect<void, AgentError>;
+    /** Branch the session; resolves the new session's id. */
+    fork(sessionId: string): Effect.Effect<string, AgentError>;
+    /** Child (branch) sessions of `sessionId`. */
+    children(sessionId: string): Effect.Effect<readonly SessionInfoT[], AgentError>;
+    /** Reply to a pending permission request (Task 5 prompts). */
+    replyPermission(
+      sessionId: string,
+      permissionId: string,
+      granted: boolean,
+    ): Effect.Effect<void, AgentError>;
   }
 >() {}
 
@@ -456,6 +509,57 @@ export function agentClientFromSdk(
           },
         }),
       ),
+    messages: (sessionId) =>
+      Effect.promise(() => client.session.messages({ path: { id: sessionId } })).pipe(
+        Effect.map(unwrapData),
+        Effect.flatMap((raw) =>
+          Option.match(decodeSessionMessages(raw), {
+            onNone: () => Effect.succeed([] as SessionMessagesT),
+            onSome: (msgs) => Effect.succeed(msgs),
+          }),
+        ),
+      ),
+    info: (sessionId) =>
+      Effect.promise(() => client.session.get({ path: { id: sessionId } })).pipe(
+        Effect.map(unwrapData),
+        Effect.flatMap((raw) =>
+          Option.match(decodeSessionInfo(raw), {
+            onNone: () => Effect.fail(new AgentError({ reason: 'no-session-id' })),
+            onSome: (info) => Effect.succeed(info),
+          }),
+        ),
+      ),
+    abort: (sessionId) =>
+      Effect.promise(() => client.session.abort({ path: { id: sessionId } })).pipe(Effect.asVoid),
+    revert: (sessionId, messageId) =>
+      Effect.promise(() =>
+        client.session.revert({ path: { id: sessionId }, body: { messageID: messageId } }),
+      ).pipe(Effect.asVoid),
+    fork: (sessionId) =>
+      Effect.promise(() => client.session.fork({ path: { id: sessionId } })).pipe(
+        Effect.map(unwrapData),
+        Effect.flatMap((raw) => {
+          const decoded = decodeSessionInfo(raw);
+          const id = Option.isSome(decoded) ? decoded.value.id : undefined;
+          return typeof id === 'string' && id.length > 0
+            ? Effect.succeed(id)
+            : Effect.fail(new AgentError({ reason: 'no-session-id' }));
+        }),
+      ),
+    children: (sessionId) =>
+      Effect.promise(() => client.session.children({ path: { id: sessionId } })).pipe(
+        Effect.map(unwrapData),
+        Effect.map((raw) =>
+          Option.getOrElse(decodeSessionInfoList(raw), () => [] as SessionInfoT[]),
+        ),
+      ),
+    replyPermission: (sessionId, permissionId, granted) =>
+      Effect.promise(() =>
+        client.permission({
+          path: { id: sessionId, permissionID: permissionId },
+          body: { response: granted ? 'once' : 'reject' },
+        }),
+      ).pipe(Effect.asVoid),
   };
 }
 
@@ -480,22 +584,26 @@ export const agentClientLive: Layer.Layer<AgentClient, never, ThreadBus> = Layer
     });
     const cached = yield* Effect.cached(acquire);
     // Delegate to a per-call client resolved from the cached SDK handle.
+    const svc = (client: OpencodeClient) => agentClientFromSdk(client, wiring);
     return AgentClient.of({
       createSession: (title) =>
-        cached.pipe(
-          Effect.flatMap((client) => agentClientFromSdk(client, wiring).createSession(title)),
-        ),
+        cached.pipe(Effect.flatMap((client) => svc(client).createSession(title))),
       prompt: (sessionId, text, image) =>
-        cached.pipe(
-          Effect.flatMap((client) =>
-            agentClientFromSdk(client, wiring).prompt(sessionId, text, image),
-          ),
-        ),
+        cached.pipe(Effect.flatMap((client) => svc(client).prompt(sessionId, text, image))),
       withActivity: (sessionId, effect) =>
+        cached.pipe(Effect.flatMap((client) => svc(client).withActivity(sessionId, effect))),
+      messages: (sessionId) =>
+        cached.pipe(Effect.flatMap((client) => svc(client).messages(sessionId))),
+      info: (sessionId) => cached.pipe(Effect.flatMap((client) => svc(client).info(sessionId))),
+      abort: (sessionId) => cached.pipe(Effect.flatMap((client) => svc(client).abort(sessionId))),
+      revert: (sessionId, messageId) =>
+        cached.pipe(Effect.flatMap((client) => svc(client).revert(sessionId, messageId))),
+      fork: (sessionId) => cached.pipe(Effect.flatMap((client) => svc(client).fork(sessionId))),
+      children: (sessionId) =>
+        cached.pipe(Effect.flatMap((client) => svc(client).children(sessionId))),
+      replyPermission: (sessionId, permissionId, granted) =>
         cached.pipe(
-          Effect.flatMap((client) =>
-            agentClientFromSdk(client, wiring).withActivity(sessionId, effect),
-          ),
+          Effect.flatMap((client) => svc(client).replyPermission(sessionId, permissionId, granted)),
         ),
     });
   }),
@@ -566,15 +674,18 @@ export function composeArtPrompt(
   });
 }
 
-// ---------- conversational fill ----------
+// ---------- conversational chat turn ----------
 
-const FILL_GUIDE =
-  'You are editing a trading-card record. Reply with ONLY a JSON object ' +
-  '{ "patch": { ...only changed fields... }, "artAction"?: { "brief": string, "editCurrentArt": boolean } }. ' +
-  'patch must contain only the fields you intend to change. Include artAction ' +
-  'ONLY when the request calls for generating or editing the card art.';
+const CHAT_GUIDE =
+  'You are editing a trading-card record through a conversation with its author. ' +
+  'Reply with ONLY a JSON object ' +
+  '{ "reply": string, "patch"?: { ...only changed fields... }, "artAction"?: { "brief": string, "editCurrentArt": boolean } }. ' +
+  '"reply" is a short natural-language message to the author (what you changed, or a clarifying question). ' +
+  'Include "patch" only when you are changing fields, containing only those fields. ' +
+  'Include "artAction" ONLY when the request calls for generating or editing the card art.';
 
 const decodeArtActionOption = Schema.decodeUnknownOption(ArtAction);
+const decodeCardData = Schema.decodeUnknownOption(CardData);
 
 /** Parse the first {...} block out of a model reply (fences tolerated). */
 function extractJson(raw: string): Option.Option<unknown> {
@@ -588,39 +699,31 @@ function extractJson(raw: string): Option.Option<unknown> {
   }
 }
 
-/**
- * One conversational fill turn (spec §AI pipelines): reuse the episode's
- * session (create on the first turn), snapshot currentData into the prompt so
- * hand edits win over session memory, attach the current art for vision when
- * present, and Schema-decode the targeted patch.
- */
-export function runFillAgent(
-  req: AgentFillRequestT,
-  readArt: (
-    fileName: string,
-  ) => Effect.Effect<Option.Option<{ mime: string; dataUrl: string }>, FileStoreError>,
-): Effect.Effect<AgentFillResponseT, AgentError | FileStoreError, AgentClient | ThreadBus> {
+/** The rich prompt for one chat turn (guide + theme + fields + snapshot + ask). */
+function chatPromptText(req: ChatTurnRequestT): string {
+  return [
+    CHAT_GUIDE,
+    `Look and feel: ${req.themeContext.lookAndFeel}`,
+    `Fields: ${req.fields.map((f) => `${f.key} (${f.kind})`).join(', ')}`,
+    `Current values (respect these; the author may have hand-edited): ${JSON.stringify(req.currentData)}`,
+    `Author request: ${req.userPrompt}`,
+  ].join('\n\n');
+}
+
+/** Run one prompt under the activity watcher with a 5s console heartbeat. */
+function promptWithHeartbeat(
+  agent: Context.Tag.Service<AgentClient>,
+  bus: Context.Tag.Service<ThreadBus>,
+  sessionId: string,
+  text: string,
+  image?: { mime: string; dataUrl: string },
+): Effect.Effect<unknown, AgentError> {
   return Effect.gen(function* () {
-    const agent = yield* AgentClient;
-    const bus = yield* ThreadBus;
-    const sessionId = req.sessionId ?? (yield* agent.createSession('cartis card fill'));
-    const image =
-      req.currentArtFileName !== undefined
-        ? Option.getOrUndefined(yield* readArt(req.currentArtFileName))
-        : undefined;
-    const text = [
-      FILL_GUIDE,
-      `Look and feel: ${req.themeContext.lookAndFeel}`,
-      `Fields: ${req.fields.map((f) => `${f.key} (${f.kind})`).join(', ')}`,
-      `Current values (respect these; the user may have hand-edited): ${JSON.stringify(req.currentData)}`,
-      `User request: ${req.userPrompt}`,
-    ].join('\n\n');
-    yield* bus.log('agent', `fill: “${req.userPrompt.slice(0, 60)}”`);
     const startedAt = yield* Clock.currentTimeMillis;
     const elapsed = Clock.currentTimeMillis.pipe(
       Effect.map((now) => Math.round((now - startedAt) / 1000)),
     );
-    const promptWithLiveness = Effect.scoped(
+    return yield* Effect.scoped(
       Effect.gen(function* () {
         yield* Effect.forkScoped(
           elapsed.pipe(
@@ -632,19 +735,159 @@ export function runFillAgent(
         return yield* agent.withActivity(sessionId, agent.prompt(sessionId, text, image));
       }),
     );
-    const result = yield* promptWithLiveness;
-    const json = extractJson(promptText(result));
-    if (Option.isNone(json)) {
-      return yield* Effect.fail(new AgentError({ reason: 'no-fill' }));
-    }
-    const body = json.value as { patch?: unknown; artAction?: unknown };
-    const patch = yield* Schema.decodeUnknown(schemaFromFields(req.fields))(body.patch ?? {}).pipe(
-      Effect.mapError(() => new AgentError({ reason: 'no-fill' })),
-    );
-    const artAction = Option.getOrUndefined(decodeArtActionOption(body.artAction));
-    yield* bus.log('agent', 'fill patch ready');
-    return { sessionId, patch, artAction };
   });
+}
+
+/**
+ * Parse a chat reply into { assistantText, patch, artAction }. Conversational:
+ * a reply with NO JSON is valid (a question/acknowledgement) → empty patch.
+ * A JSON reply whose patch mistypes a field is a genuine error (AgentError).
+ */
+function parseChatReply(
+  raw: string,
+  decodePatch: (u: unknown) => Effect.Effect<CardDataT, AgentError>,
+): Effect.Effect<{ assistantText: string; patch: CardDataT; artAction?: ArtActionT }, AgentError> {
+  return Effect.gen(function* () {
+    const json = extractJson(raw);
+    if (Option.isNone(json)) return { assistantText: raw, patch: {} };
+    const body = json.value as { patch?: unknown; artAction?: unknown };
+    const patch = yield* decodePatch(body.patch ?? {});
+    const artAction = Option.getOrUndefined(decodeArtActionOption(body.artAction));
+    return { assistantText: raw, patch, artAction };
+  });
+}
+
+/**
+ * One conversational chat turn (card chat panel, spec 2026-08-03): reuse the
+ * card's session (create on the first turn), snapshot currentData so hand edits
+ * win, attach the current art for vision when present. TurnStarted/PartDelta/
+ * TurnCompleted stream live from the watcher; this returns the structured
+ * result the client applies + materializes for display.
+ */
+export function runChatTurn(
+  req: ChatTurnRequestT,
+  readArt: (
+    fileName: string,
+  ) => Effect.Effect<Option.Option<{ mime: string; dataUrl: string }>, FileStoreError>,
+): Effect.Effect<ChatTurnResponseT, AgentError | FileStoreError, AgentClient | ThreadBus> {
+  return Effect.gen(function* () {
+    const agent = yield* AgentClient;
+    const bus = yield* ThreadBus;
+    const sessionId = req.sessionId ?? (yield* agent.createSession('cartis card chat'));
+    const image =
+      req.currentArtFileName !== undefined
+        ? Option.getOrUndefined(yield* readArt(req.currentArtFileName))
+        : undefined;
+    yield* bus.log('agent', `chat: “${req.userPrompt.slice(0, 60)}”`);
+    const result = yield* promptWithHeartbeat(agent, bus, sessionId, chatPromptText(req), image);
+    const decodePatch = (u: unknown): Effect.Effect<CardDataT, AgentError> =>
+      Schema.decodeUnknown(schemaFromFields(req.fields))(u).pipe(
+        Effect.mapError(() => new AgentError({ reason: 'no-fill' })),
+      );
+    const parsed = yield* parseChatReply(promptText(result), decodePatch);
+    yield* bus.log('agent', 'chat turn ready');
+    return { sessionId, ...parsed };
+  });
+}
+
+/**
+ * Regenerate the last assistant turn (Task 5): revert it, then re-send the
+ * stored last user text (the full rich prompt) so the reproduction is faithful.
+ * Without the field spec, the new patch is decoded leniently against CardData.
+ */
+export function runRegenerate(
+  sessionId: string,
+): Effect.Effect<ChatTurnResponseT, AgentError, AgentClient | ThreadBus> {
+  return Effect.gen(function* () {
+    const agent = yield* AgentClient;
+    const bus = yield* ThreadBus;
+    const messages = yield* agent.messages(sessionId);
+    const lastUser = [...messages].reverse().find((m) => m.info?.role === 'user');
+    const lastAssistant = [...messages].reverse().find((m) => m.info?.role === 'assistant');
+    const userText = lastUser ? textOfParts(lastUser.parts ?? []) : '';
+    if (userText.length === 0) return yield* Effect.fail(new AgentError({ reason: 'no-fill' }));
+    if (lastAssistant?.info?.id !== undefined) {
+      yield* agent.revert(sessionId, lastAssistant.info.id);
+    }
+    yield* bus.log('agent', 'regenerate: replaying last turn');
+    const result = yield* promptWithHeartbeat(agent, bus, sessionId, userText);
+    const decodePatch = (u: unknown): Effect.Effect<CardDataT, AgentError> =>
+      Effect.succeed(Option.getOrElse(decodeCardData(u), () => ({}) as CardDataT));
+    const parsed = yield* parseChatReply(promptText(result), decodePatch);
+    return { sessionId, ...parsed };
+  });
+}
+
+// ---------- history mapping (opencode messages → thread messages) ----------
+
+/** Concatenate the non-synthetic text parts of a message. */
+function textOfParts(parts: readonly SessionMessagePartT[]): string {
+  let text = '';
+  for (const part of parts) {
+    if (part.type === 'text' && part.synthetic !== true && typeof part.text === 'string') {
+      text += part.text;
+    }
+  }
+  return text.trim();
+}
+
+/**
+ * Map an opencode message list to thread messages (history route). Real tool
+ * parts map directly; the assistant's text runs through the SHARED
+ * materializer so the v1 JSON contract renders as reply + card chips (never raw
+ * JSON) — both transports handled indefinitely. Messages at/after
+ * `revertMessageId` are excluded (no ghosts after edit/regenerate).
+ */
+export function mapSessionMessages(
+  messages: SessionMessagesT,
+  revertMessageId?: string,
+): ThreadMessageT[] {
+  const cut =
+    revertMessageId !== undefined ? messages.findIndex((m) => m.info?.id === revertMessageId) : -1;
+  const live = cut >= 0 ? messages.slice(0, cut) : messages;
+  const out: ThreadMessageT[] = [];
+  for (const message of live) {
+    const role = message.info?.role === 'assistant' ? 'assistant' : 'user';
+    const id = message.info?.id ?? '';
+    if (id.length === 0) continue;
+    const parts = message.parts ?? [];
+    if (role === 'user') {
+      const text = textOfParts(parts);
+      out.push({ id, role, status: 'complete', parts: [{ _tag: 'Text', text }] });
+      continue;
+    }
+    // assistant: real tool/reasoning parts in order, then materialized card actions.
+    const threadParts: ThreadPartT[] = [];
+    for (const part of parts) {
+      if (part.type === 'tool') {
+        const st = part.state;
+        const status = toolStatusOf(st?.status);
+        const secs =
+          st?.time?.start !== undefined && st?.time?.end !== undefined
+            ? (st.time.end - st.time.start) / 1000
+            : undefined;
+        const result = status === 'error' ? (st?.error ?? 'unknown') : st?.output;
+        threadParts.push({
+          _tag: 'ToolCall',
+          callId: part.callID ?? part.id ?? 'tool',
+          name: part.tool ?? 'tool',
+          ...(st?.title !== undefined ? { title: st.title } : {}),
+          status,
+          ...(st?.input !== undefined ? { argsText: JSON.stringify(st.input) } : {}),
+          ...(result !== undefined ? { result } : {}),
+          ...(status === 'error' ? { isError: true } : {}),
+          ...(secs !== undefined ? { secs } : {}),
+        });
+      } else if (part.type === 'reasoning' && typeof part.text === 'string') {
+        threadParts.push({ _tag: 'Reasoning', text: part.text });
+      }
+    }
+    const answer = textOfParts(parts);
+    if (answer.length > 0) threadParts.push(...materializeAssistantParts(answer));
+    const status = message.info?.error !== undefined ? 'incomplete' : 'complete';
+    out.push({ id, role, status, parts: threadParts });
+  }
+  return out;
 }
 
 // ---------- replicate ----------
@@ -878,9 +1121,26 @@ function parseStorePath(url: string): { store: StoreName; rest: string } | undef
 }
 
 const decodeStorePut = Schema.decodeUnknown(StorePutRequest);
-const decodeFill = Schema.decodeUnknown(AgentFillRequest);
+const decodeChatTurn = Schema.decodeUnknown(ChatTurnRequest);
+const decodeSessionAction = Schema.decodeUnknown(SessionAction);
+const decodePermissionReply = Schema.decodeUnknown(PermissionReply);
 const decodeImageGenerate = Schema.decodeUnknown(ImageGenerateRequest);
 const encodeThreadEvent = Schema.encode(ThreadEventJson);
+
+/** Read the FileStore art-vision reader used by chat turns (copy Buffer → fresh ArrayBuffer). */
+function artReader(fs: Context.Tag.Service<FileStore>) {
+  return (fileName: string) =>
+    fs.readFile('images', fileName).pipe(
+      Effect.map(
+        Option.map((file) => {
+          const raw = file.bytes;
+          const copy = new ArrayBuffer(raw.byteLength);
+          new Uint8Array(copy).set(new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength));
+          return { mime: file.type, dataUrl: bytesToDataUrl(copy, file.type) };
+        }),
+      ),
+    );
+}
 
 export function cartisBridge(): Plugin {
   return {
@@ -995,8 +1255,8 @@ export function cartisBridge(): Plugin {
         });
       });
 
-      // ----- /api/agent/fill -----
-      server.middlewares.use('/api/agent/fill', (req, res) => {
+      // ----- /api/chat/turn — one conversational card-editing turn -----
+      server.middlewares.use('/api/chat/turn', (req, res) => {
         const sres = res as ServerResponse;
         if (req.method !== 'POST') {
           sendJson(sres, 405, { error: 'POST only' });
@@ -1007,22 +1267,103 @@ export function cartisBridge(): Plugin {
           sres,
           Effect.gen(function* () {
             const body = yield* readBody(req);
-            const parsed = yield* decodeFill(body);
+            const parsed = yield* decodeChatTurn(body);
             const fs = yield* FileStore;
-            const readArt = (fileName: string) =>
-              fs.readFile('images', fileName).pipe(
-                Effect.map(
-                  Option.map((file) => {
-                    const raw = file.bytes;
-                    const copy = new ArrayBuffer(raw.byteLength);
-                    new Uint8Array(copy).set(
-                      new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength),
-                    );
-                    return { mime: file.type, dataUrl: bytesToDataUrl(copy, file.type) };
-                  }),
-                ),
-              );
-            return yield* runFillAgent(parsed, readArt);
+            return yield* runChatTurn(parsed, artReader(fs));
+          }),
+        );
+      });
+
+      // ----- /api/chat/history?sessionId=… — rehydrate a card's conversation -----
+      server.middlewares.use('/api/chat/history', (req, res) => {
+        const sres = res as ServerResponse;
+        const [, query = ''] = (req.url ?? '').split('?');
+        const sessionId = new URLSearchParams(query).get('sessionId') ?? '';
+        respond(
+          runtime,
+          sres,
+          Effect.gen(function* () {
+            if (sessionId.length === 0) return { messages: [] as ThreadMessageT[] };
+            const agent = yield* AgentClient;
+            const messages = yield* agent.messages(sessionId);
+            const info = yield* agent.info(sessionId).pipe(Effect.orElseSucceed(() => undefined));
+            return { messages: mapSessionMessages(messages, info?.revert?.messageID) };
+          }),
+        );
+      });
+
+      // ----- /api/chat/abort|revert|regenerate|fork|permission -----
+      server.middlewares.use('/api/chat/abort', (req, res) => {
+        const sres = res as ServerResponse;
+        if (req.method !== 'POST') return sendJson(sres, 405, { error: 'POST only' });
+        respond(
+          runtime,
+          sres,
+          Effect.gen(function* () {
+            const { sessionId } = yield* decodeSessionAction(yield* readBody(req));
+            const agent = yield* AgentClient;
+            yield* agent.abort(sessionId);
+            return { sessionId };
+          }),
+        );
+      });
+
+      server.middlewares.use('/api/chat/revert', (req, res) => {
+        const sres = res as ServerResponse;
+        if (req.method !== 'POST') return sendJson(sres, 405, { error: 'POST only' });
+        respond(
+          runtime,
+          sres,
+          Effect.gen(function* () {
+            const { sessionId, messageId } = yield* decodeSessionAction(yield* readBody(req));
+            const agent = yield* AgentClient;
+            if (messageId !== undefined) yield* agent.revert(sessionId, messageId);
+            return { sessionId };
+          }),
+        );
+      });
+
+      server.middlewares.use('/api/chat/regenerate', (req, res) => {
+        const sres = res as ServerResponse;
+        if (req.method !== 'POST') return sendJson(sres, 405, { error: 'POST only' });
+        respond(
+          runtime,
+          sres,
+          Effect.gen(function* () {
+            const { sessionId } = yield* decodeSessionAction(yield* readBody(req));
+            return yield* runRegenerate(sessionId);
+          }),
+        );
+      });
+
+      server.middlewares.use('/api/chat/fork', (req, res) => {
+        const sres = res as ServerResponse;
+        if (req.method !== 'POST') return sendJson(sres, 405, { error: 'POST only' });
+        respond(
+          runtime,
+          sres,
+          Effect.gen(function* () {
+            const { sessionId } = yield* decodeSessionAction(yield* readBody(req));
+            const agent = yield* AgentClient;
+            const forkedId = yield* agent.fork(sessionId);
+            return { sessionId: forkedId };
+          }),
+        );
+      });
+
+      server.middlewares.use('/api/chat/permission', (req, res) => {
+        const sres = res as ServerResponse;
+        if (req.method !== 'POST') return sendJson(sres, 405, { error: 'POST only' });
+        respond(
+          runtime,
+          sres,
+          Effect.gen(function* () {
+            const { sessionId, permissionId, granted } = yield* decodePermissionReply(
+              yield* readBody(req),
+            );
+            const agent = yield* AgentClient;
+            yield* agent.replyPermission(sessionId, permissionId, granted);
+            return { sessionId };
           }),
         );
       });

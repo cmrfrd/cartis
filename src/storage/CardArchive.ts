@@ -27,6 +27,8 @@ export interface SaveCardInput {
   layoutId: string;
   data: CardData;
   holo: boolean;
+  /** The opencode chat session backing this card (card chat panel). */
+  chatSessionId?: string;
 }
 
 export class CardArchive extends State {
@@ -75,6 +77,8 @@ export class CardArchive extends State {
       data: { ...input.data },
       holo: input.holo,
       updatedAt: Date.now(),
+      // Omit the key entirely when absent (copies/pre-chat cards start fresh).
+      ...(input.chatSessionId !== undefined ? { chatSessionId: input.chatSessionId } : {}),
     };
     const exit = await runAppExit(
       Effect.gen(function* () {

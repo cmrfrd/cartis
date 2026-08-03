@@ -16,9 +16,13 @@ import { ActivityEvent, ActivityEventJson } from './activity';
 import {
   AgentFillRequest,
   AgentFillResponse,
+  ChatHistoryResponse,
+  ChatTurnRequest,
+  ChatTurnResponse,
   ErrorBody,
   ImageGenerateRequest,
   ImageGenerateResponse,
+  SessionRef,
   StatusResponse,
   StorePutRequest,
   schemaFromFields,
@@ -109,6 +113,21 @@ describe('CardRecord', () => {
     expect(decoded.layoutId).toBe('classic');
     expect(decoded.data.cost).toBe(3);
     expect(decoded.data.flavor).toBeUndefined();
+    expect(decoded.chatSessionId).toBeUndefined(); // absent-tolerant (pre-chat cards)
+  });
+
+  it('carries an optional chatSessionId when present (card chat panel)', () => {
+    const decoded = Schema.decodeUnknownSync(CardRecord)({
+      id: 'card-3',
+      name: 'Chatted',
+      themeId: 'arcane',
+      layoutId: 'classic',
+      holo: false,
+      updatedAt: 1700000000,
+      data: {},
+      chatSessionId: 'ses_abc123',
+    });
+    expect(decoded.chatSessionId).toBe('ses_abc123');
   });
 
   it('rejects an old templateId-only row (clean break, decision 2)', () => {
@@ -479,6 +498,47 @@ describe('AgentFillRequest / Response', () => {
     });
     expect(res.patch.name).toBe('Vorak');
     expect(res.artAction?.editCurrentArt).toBe(true);
+  });
+});
+
+describe('ChatTurnRequest / Response + history + session refs', () => {
+  it('decodes a chat turn request and its structured response', () => {
+    const req = Schema.decodeUnknownSync(ChatTurnRequest)({
+      sessionId: 'card-1',
+      themeContext: { lookAndFeel: 'oil', palette: 'ember', argumentSummary: 'name' },
+      fields: [{ kind: 'text', key: 'name', label: 'Name' }],
+      currentData: { name: 'Nyra' },
+      userPrompt: 'rename him',
+    });
+    expect(req.sessionId).toBe('card-1');
+    const res = Schema.decodeUnknownSync(ChatTurnResponse)({
+      sessionId: 'card-1',
+      assistantText: '{"reply":"done","patch":{"name":"Vorak"}}',
+      patch: { name: 'Vorak' },
+    });
+    expect(res.assistantText).toContain('reply');
+    expect(res.patch.name).toBe('Vorak');
+  });
+
+  it('decodes a history response of thread messages', () => {
+    const hist = Schema.decodeUnknownSync(ChatHistoryResponse)({
+      messages: [
+        { id: 'u1', role: 'user', status: 'complete', parts: [{ _tag: 'Text', text: 'hi' }] },
+        {
+          id: 'm1',
+          role: 'assistant',
+          status: 'complete',
+          parts: [{ _tag: 'ToolCall', callId: 'c', name: 'card_patch', status: 'completed' }],
+        },
+      ],
+    });
+    expect(hist.messages).toHaveLength(2);
+  });
+
+  it('decodes a session ref (fork/abort/revert ack)', () => {
+    expect(Schema.decodeUnknownSync(SessionRef)({ sessionId: 'branch-2' }).sessionId).toBe(
+      'branch-2',
+    );
   });
 });
 

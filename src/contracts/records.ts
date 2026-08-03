@@ -58,6 +58,13 @@ export const CardRecord = Schema.Struct({
   holo: Schema.Boolean,
   updatedAt: Schema.Number,
   data: Schema.Record({ key: Schema.String, value: FieldValue }),
+  /**
+   * The opencode session backing this card's chat (card chat panel, spec
+   * 2026-08-03). Optional + absent-tolerant: pre-chat cards and copies decode
+   * fine and simply start a fresh conversation. Lives in gitignored
+   * cartis-data/; opencode owns the transcript, we persist only this pointer.
+   */
+  chatSessionId: Schema.optional(Schema.String),
 });
 export type CardRecordT = typeof CardRecord.Type;
 
