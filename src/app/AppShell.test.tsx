@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { click, mountApp, tick } from '../../test/util';
+import { click, mountApp } from '../../test/util';
 
 describe('AppShell', () => {
   it('shows two view tabs and switches the visible pane', async () => {
@@ -15,18 +15,9 @@ describe('AppShell', () => {
     const panes = Array.from(container.querySelectorAll('main > div'));
     expect(panes).toHaveLength(2);
     expect(panes.filter((p) => p.className.includes('hidden'))).toHaveLength(1);
-    // activity bar: idle by default, drawer opens with pushed events
-    expect(container.textContent).toContain('AI activity');
-    shell.activity.push({ at: Date.now(), source: 'image', message: 'prediction created' });
-    await tick();
-    expect(container.querySelector('[data-testid="activity-latest"]')?.textContent).toContain(
-      'prediction created',
-    );
-    const logButton = Array.from(container.querySelectorAll('footer button')).find((b) =>
-      b.textContent?.startsWith('Log'),
-    );
-    await click(logButton ?? null);
-    expect(container.querySelector('[data-testid="activity-drawer"]')).not.toBeNull();
+    // the footer activity bar is gone — all AI activity now lives in the chat panel
+    expect(container.textContent).not.toContain('AI activity');
+    expect(container.querySelector('footer')).toBeNull();
     unmount();
   });
 });

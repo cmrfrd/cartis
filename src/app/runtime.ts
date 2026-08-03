@@ -2,7 +2,7 @@
  * The browser-side Effect runtime and the test seam.
  *
  * `appLive` merges the app's live services (StoreClient, ImageProvider,
- * ActivityClient) over the live HTTP client. A single ManagedRuntime
+ * ChatThread, ChatEvents) over the live HTTP client. A single ManagedRuntime
  * backs `runApp`/`runAppExit`/`forkApp`; `setAppLayer` swaps in a different
  * layer (the tests install in-memory/stub services via `test/setup.ts`).
  *
@@ -14,6 +14,8 @@
 import type { Effect } from 'effect';
 import { Layer, ManagedRuntime } from 'effect';
 import { type AgentFill, agentFillEmpty, agentFillLive } from '../builder/AgentFill';
+import { type ChatEvents, chatEventsEmpty, chatEventsLive } from '../chat/ChatEvents';
+import { type ChatThread, chatThreadEmpty, chatThreadLive } from '../chat/ChatThread';
 import {
   type ImageProvider,
   imageProviderLive,
@@ -21,17 +23,17 @@ import {
 } from '../images/ImageProvider';
 import { AppHttpLive } from '../lib/http';
 import { type StoreClient, storeClientLive, storeClientMemory } from '../storage/StoreClient';
-import { type ActivityClient, activityClientEmpty, activityClientLive } from './ActivityClient';
 
 /** The service surface the app's effects may require. */
-export type AppServices = StoreClient | ImageProvider | AgentFill | ActivityClient;
+export type AppServices = StoreClient | ImageProvider | AgentFill | ChatThread | ChatEvents;
 
 /** Live app layer: real services over the live (fetch) HTTP client. */
 export const appLive: Layer.Layer<AppServices> = Layer.mergeAll(
   storeClientLive,
   imageProviderLive,
   agentFillLive,
-  activityClientLive,
+  chatThreadLive,
+  chatEventsLive,
 ).pipe(Layer.provide(AppHttpLive));
 
 /** Per-service test-layer overrides; each defaults to the standard test fake. */
@@ -39,20 +41,22 @@ export interface TestAppOverrides {
   readonly store?: Layer.Layer<StoreClient>;
   readonly image?: Layer.Layer<ImageProvider>;
   readonly fill?: Layer.Layer<AgentFill>;
-  readonly activity?: Layer.Layer<ActivityClient>;
+  readonly thread?: Layer.Layer<ChatThread>;
+  readonly threadEvents?: Layer.Layer<ChatEvents>;
 }
 
 /**
  * Build a full test app layer from per-service overrides (each independent, so
- * no duplicate-tag merges). Store tests script the bridge via `store`; view
- * tests install recording fakes via `image`/`activity`.
+ * no duplicate-tag merges). Store tests script the bridge via `store`; chat
+ * tests install fakes via `thread`/`threadEvents`.
  */
 export function testAppLayerWith(overrides: TestAppOverrides = {}): Layer.Layer<AppServices> {
   return Layer.mergeAll(
     overrides.store ?? storeClientMemory,
     overrides.image ?? imageProviderStubLayer(),
     overrides.fill ?? agentFillEmpty,
-    overrides.activity ?? activityClientEmpty,
+    overrides.thread ?? chatThreadEmpty,
+    overrides.threadEvents ?? chatEventsEmpty,
   );
 }
 

@@ -12,7 +12,6 @@ import { describe, expect } from 'vitest';
 import { it } from '../../test/effect';
 import type { FieldSpec } from '../cards/types';
 import { AppHttpLive, httpClientFromHandler } from '../lib/http';
-import { ActivityEvent, ActivityEventJson } from './activity';
 import {
   AgentFillRequest,
   AgentFillResponse,
@@ -261,42 +260,6 @@ describe('ImageRecord', () => {
       createdAt: 1700000030,
     };
     expect(() => Schema.decodeUnknownSync(ImageRecord)(bad)).toThrow();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// ActivityEvent + ActivityEventJson
-// ---------------------------------------------------------------------------
-
-describe('ActivityEvent', () => {
-  it('decodes a valid event', () => {
-    const raw = { at: 1700000000, source: 'agent', message: 'generating card...' };
-    const decoded = Schema.decodeUnknownSync(ActivityEvent)(raw);
-    expect(decoded.source).toBe('agent');
-  });
-});
-
-describe('ActivityEventJson', () => {
-  const sampleEvent = { at: 1700000000, source: 'image' as const, message: 'done' };
-  const sampleJson = JSON.stringify(sampleEvent);
-
-  it('decodes a JSON string → event', () => {
-    const decoded = Schema.decodeUnknownSync(ActivityEventJson)(sampleJson);
-    expect(decoded.at).toBe(1700000000);
-    expect(decoded.source).toBe('image');
-    expect(decoded.message).toBe('done');
-  });
-
-  it('encodes event → JSON string round-trip', () => {
-    const encoded = Schema.encodeSync(ActivityEventJson)(sampleEvent);
-    expect(typeof encoded).toBe('string');
-    const reparsed: unknown = JSON.parse(encoded);
-    expect(reparsed).toEqual(sampleEvent);
-  });
-
-  it('rejects invalid source', () => {
-    const bad = JSON.stringify({ at: 1, source: 'unknown', message: 'x' });
-    expect(() => Schema.decodeUnknownSync(ActivityEventJson)(bad)).toThrow();
   });
 });
 
