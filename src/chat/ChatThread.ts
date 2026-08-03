@@ -38,8 +38,8 @@ export interface ChatThreadShape {
   ): Effect.Effect<ChatTurnResponseT, ChatRequestError | NetworkError>;
   /** Branch the session; resolves the new session id. */
   fork(sessionId: SessionIdT): Effect.Effect<SessionIdT, NetworkError>;
-  /** Branch (fork) siblings of a session — the branch picker. */
-  children(sessionId: SessionIdT): Effect.Effect<readonly ThreadSummaryT[], NetworkError>;
+  /** Parent-first branch set of a session — the ‹ n/m › picker. */
+  siblings(sessionId: SessionIdT): Effect.Effect<readonly ThreadSummaryT[], NetworkError>;
   /** Reply to a pending permission request. */
   replyPermission(
     sessionId: SessionIdT,
@@ -134,9 +134,9 @@ export const chatThreadLive: Layer.Layer<ChatThread, never, HttpClient.HttpClien
         ChatHistoryResponse,
       ).pipe(Effect.map((r) => r.messages));
 
-    const children = (sessionId: string): Effect.Effect<readonly ThreadSummaryT[], NetworkError> =>
+    const siblings = (sessionId: string): Effect.Effect<readonly ThreadSummaryT[], NetworkError> =>
       getDecoded(
-        `/api/chat/children?sessionId=${encodeURIComponent(sessionId)}`,
+        `/api/chat/siblings?sessionId=${encodeURIComponent(sessionId)}`,
         ChatBranchesResponse,
       ).pipe(Effect.map((r) => r.branches));
 
@@ -155,7 +155,7 @@ export const chatThreadLive: Layer.Layer<ChatThread, never, HttpClient.HttpClien
     return ChatThread.of({
       turn,
       history,
-      children,
+      siblings,
       cancel: (sessionId) => action('/api/chat/abort', sessionId),
       revert: (sessionId, messageId) => action('/api/chat/revert', sessionId, messageId),
       regenerate: (sessionId) =>
@@ -201,7 +201,7 @@ export const chatThreadEmpty: Layer.Layer<ChatThread> = Layer.succeed(
   ChatThread.of({
     turn: () => Effect.fail(new ChatRequestError({ status: 0, detail: 'no agent in tests' })),
     history: () => Effect.succeed([]),
-    children: () => Effect.succeed([]),
+    siblings: () => Effect.succeed([]),
     cancel: () => Effect.void,
     revert: () => Effect.void,
     regenerate: () => Effect.fail(new ChatRequestError({ status: 0, detail: 'no agent in tests' })),

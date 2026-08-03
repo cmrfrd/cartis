@@ -30,6 +30,7 @@ import {
   replicateClientLive,
   runChatTurn,
   sessionSummary,
+  siblingSet,
   type WatchState,
 } from './agentBridge.ts';
 import { ThreadBus, threadBusTestLayer } from './threadBus.ts';
@@ -1217,4 +1218,65 @@ describe('sessionSummary', () => {
     // optionals absent → omitted, id absent → empty string
     expect(sessionSummary({})).toEqual({ sessionId: SessionId.make('') });
   });
+});
+
+// ---------------------------------------------------------------------------
+// siblingSet — parent-first branch set for the ‹ n/m › picker
+// ---------------------------------------------------------------------------
+
+describe('siblingSet', () => {
+  const infoStub = (
+    infos: Record<string, SessionInfoT>,
+    childrenOf: Record<string, SessionInfoT[]>,
+  ): Layer.Layer<AgentClient> =>
+    agentLayer({
+      info: (id) => {
+        const info = infos[id];
+        return info !== undefined
+          ? Effect.succeed(info)
+          : Effect.fail(new AgentError({ reason: 'no-session-id' }));
+      },
+      children: (id) => Effect.succeed(childrenOf[id] ?? []),
+    });
+
+  it.effect('a forked session resolves its parent and lists parent-first', () =>
+    Effect.gen(function* () {
+      const out = yield* siblingSet(SessionId.make('fork-1'));
+      expect(out.map((s) => s.sessionId)).toEqual(['root', 'fork-1', 'fork-2']);
+      expect(out[0]?.parentId).toBeUndefined(); // the root is marked by absence
+    }).pipe(
+      Effect.provide(
+        infoStub(
+          {
+            'fork-1': { id: 'fork-1', parentID: 'root' },
+            root: { id: 'root', title: 'card chat' },
+          },
+          {
+            root: [
+              { id: 'fork-1', parentID: 'root' },
+              { id: 'fork-2', parentID: 'root' },
+            ],
+          },
+        ),
+      ),
+    ),
+  );
+
+  it.effect('an unforked session is its own root (self + own children)', () =>
+    Effect.gen(function* () {
+      const out = yield* siblingSet(SessionId.make('root'));
+      expect(out.map((s) => s.sessionId)).toEqual(['root', 'fork-1']);
+    }).pipe(
+      Effect.provide(
+        infoStub({ root: { id: 'root' } }, { root: [{ id: 'fork-1', parentID: 'root' }] }),
+      ),
+    ),
+  );
+
+  it.effect('an unknown session yields an empty set (no arrows)', () =>
+    Effect.gen(function* () {
+      const out = yield* siblingSet(SessionId.make('gone'));
+      expect(out).toEqual([]);
+    }).pipe(Effect.provide(infoStub({}, {}))),
+  );
 });

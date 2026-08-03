@@ -23,7 +23,7 @@ const chatStub = (over: Partial<ChatThreadShape> = {}): Layer.Layer<ChatThread> 
         patch: {},
       } satisfies ChatTurnResponseT),
     history: () => Effect.succeed([]),
-    children: () => Effect.succeed([]),
+    siblings: () => Effect.succeed([]),
     cancel: () => Effect.void,
     revert: () => Effect.void,
     regenerate: () => Effect.fail(new ChatRequestError({ status: 0, detail: 'x' })),

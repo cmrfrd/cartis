@@ -931,6 +931,35 @@ export function sessionSummary(info: SessionInfoT): ThreadSummaryT {
   };
 }
 
+/**
+ * Parent-first sibling set for the ‹ n/m › picker (maturity spec §2): resolve
+ * the session's root (its parent, or itself when unforked), then list the root
+ * followed by all its forks. The root is marked by an ABSENT parentId. The
+ * client cannot compute this — nothing else exposes parentID to it.
+ */
+export function siblingSet(
+  sessionId: SessionIdT,
+): Effect.Effect<readonly ThreadSummaryT[], never, AgentClient> {
+  return Effect.gen(function* () {
+    const agent = yield* AgentClient;
+    const info = yield* agent.info(sessionId).pipe(
+      Effect.map(Option.some),
+      Effect.orElseSucceed(() => Option.none<SessionInfoT>()),
+    );
+    if (Option.isNone(info)) return [];
+    const rootId =
+      info.value.parentID !== undefined ? SessionId.make(info.value.parentID) : sessionId;
+    const root =
+      rootId === sessionId
+        ? info.value
+        : yield* agent.info(rootId).pipe(Effect.orElseSucceed(() => info.value));
+    const children = yield* agent
+      .children(rootId)
+      .pipe(Effect.orElseSucceed(() => [] as readonly SessionInfoT[]));
+    return [sessionSummary(root), ...children.map(sessionSummary)];
+  });
+}
+
 // ---------- history mapping (opencode messages → thread messages) ----------
 
 /** Concatenate the non-synthetic text parts of a message. */
@@ -1447,8 +1476,8 @@ export function cartisBridge(): Plugin {
         );
       });
 
-      // ----- /api/chat/children?sessionId=… — branch siblings for the picker -----
-      server.middlewares.use('/api/chat/children', (req, res) => {
+      // ----- /api/chat/siblings?sessionId=… — parent-first branch set for ‹ n/m › -----
+      server.middlewares.use('/api/chat/siblings', (req, res) => {
         const sres = res as ServerResponse;
         const [, query = ''] = (req.url ?? '').split('?');
         const sessionId = new URLSearchParams(query).get('sessionId') ?? '';
@@ -1457,9 +1486,7 @@ export function cartisBridge(): Plugin {
           sres,
           Effect.gen(function* () {
             if (sessionId.length === 0) return { branches: [] as ThreadSummaryT[] };
-            const agent = yield* AgentClient;
-            const children = yield* agent.children(SessionId.make(sessionId));
-            return { branches: children.map(sessionSummary) };
+            return { branches: yield* siblingSet(SessionId.make(sessionId)) };
           }),
         );
       });

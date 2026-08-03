@@ -311,7 +311,7 @@ export class ThreadState extends State {
       this.branches = [];
       return;
     }
-    const exit = await runAppExit(Effect.flatMap(ChatThread, (c) => c.children(sid)));
+    const exit = await runAppExit(Effect.flatMap(ChatThread, (c) => c.siblings(sid)));
     if (this.get(null)) return;
     if (Exit.isSuccess(exit)) this.branches = [...exit.value];
   }

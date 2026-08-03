@@ -19,7 +19,7 @@ const threadStub = (over: Partial<ChatThreadShape> = {}): Layer.Layer<ChatThread
         patch: {},
       } satisfies ChatTurnResponseT),
     history: () => Effect.succeed([]),
-    children: () => Effect.succeed([]),
+    siblings: () => Effect.succeed([]),
     cancel: () => Effect.void,
     revert: () => Effect.void,
     regenerate: () =>
@@ -454,7 +454,7 @@ describe('ThreadState capabilities', () => {
   it('loadBranches() lists the session forks', async () => {
     const state = makeThread(
       threadStub({
-        children: () => Effect.succeed([{ sessionId: SessionId.make('b1'), title: 'branch a' }]),
+        siblings: () => Effect.succeed([{ sessionId: SessionId.make('b1'), title: 'branch a' }]),
       }),
     );
     state.sessionId = SessionId.make('orig');
