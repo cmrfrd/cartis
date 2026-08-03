@@ -3,7 +3,7 @@ import { describe, expect } from 'vitest';
 import { it } from '../../test/effect.ts';
 import type { ChatTurnRequestT } from '../contracts/api.ts';
 import { AgentError } from '../contracts/errors.ts';
-import { MessageId, PermissionId, SessionId } from '../contracts/ids.ts';
+import { DataUrl, MessageId, PermissionId, SessionId } from '../contracts/ids.ts';
 import type { SessionInfoT, SessionMessagesT } from '../contracts/opencode.ts';
 import type { PredictionT } from '../contracts/replicate.ts';
 import type { ThreadEventT } from '../contracts/thread.ts';
@@ -347,7 +347,7 @@ describe('ReplicateClient.generate', () => {
         yield* Effect.flatMap(ReplicateClient, (c) =>
           c.generate('tok', {
             prompt: 'a mossy henge',
-            imageDataUrl: 'data:application/octet-stream;base64,', // empty — no source photo
+            imageDataUrl: undefined, // absent — no source photo (the sentinel is unrepresentable now)
             aspectRatio: 'match_input_image',
           }),
         );
@@ -380,7 +380,7 @@ describe('ReplicateClient.generate', () => {
       yield* Effect.flatMap(ReplicateClient, (c) =>
         c.generate('tok', {
           prompt: 'stylize me',
-          imageDataUrl: 'data:image/png;base64,QQ==',
+          imageDataUrl: DataUrl.make('data:image/png;base64,QQ=='),
           aspectRatio: '3:4',
         }),
       );
@@ -397,7 +397,7 @@ describe('ReplicateClient.generate', () => {
         Effect.flatMap(ReplicateClient, (c) =>
           c.generate('tok', {
             prompt: 'stylize me',
-            imageDataUrl: 'data:image/png;base64,QQ==',
+            imageDataUrl: DataUrl.make('data:image/png;base64,QQ=='),
             aspectRatio: '3:2',
           }),
         ),
@@ -440,7 +440,11 @@ describe('ReplicateClient.generate', () => {
       // only read output once status is succeeded.
       const fiber = yield* Effect.fork(
         Effect.flatMap(ReplicateClient, (c) =>
-          c.generate('tok', { prompt: 'p', imageDataUrl: 'data:image/png;base64,QQ==' }),
+          c.generate('tok', {
+            prompt: 'p',
+            imageDataUrl: DataUrl.make('data:image/png;base64,QQ=='),
+            aspectRatio: 'match_input_image',
+          }),
         ),
       );
       // Immediate poll: processing (output null); one interval later: succeeded.
@@ -473,7 +477,11 @@ describe('ReplicateClient.generate', () => {
     Effect.gen(function* () {
       const fiber = yield* Effect.fork(
         Effect.flatMap(ReplicateClient, (c) =>
-          c.generate('tok', { prompt: 'p', imageDataUrl: 'data:image/png;base64,QQ==' }),
+          c.generate('tok', {
+            prompt: 'p',
+            imageDataUrl: DataUrl.make('data:image/png;base64,QQ=='),
+            aspectRatio: 'match_input_image',
+          }),
         ).pipe(Effect.flip),
       );
       // The first getPrediction call is immediate and returns 'failed'; the fiber
@@ -495,7 +503,11 @@ describe('ReplicateClient.generate', () => {
     Effect.gen(function* () {
       const fiber = yield* Effect.fork(
         Effect.flatMap(ReplicateClient, (c) =>
-          c.generate('tok', { prompt: 'p', imageDataUrl: 'data:image/png;base64,QQ==' }),
+          c.generate('tok', {
+            prompt: 'p',
+            imageDataUrl: DataUrl.make('data:image/png;base64,QQ=='),
+            aspectRatio: 'match_input_image',
+          }),
         ).pipe(Effect.flip),
       );
       // Never reaches succeeded; advance past the 120s cap.

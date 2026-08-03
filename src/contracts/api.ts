@@ -7,8 +7,8 @@
  */
 
 import { Schema } from 'effect';
-import { CardDataSchema, FieldSummary } from './fields.ts';
-import { MessageId, PermissionId, SessionId } from './ids.ts';
+import { AspectRatio, CardDataSchema, FieldSummary } from './fields.ts';
+import { DataUrl, MessageId, PermissionId, SessionId } from './ids.ts';
 import { StoredRecord } from './records.ts';
 import { ThemeContext } from './theme.ts';
 import { ThreadMessage, ThreadSummary } from './thread.ts';
@@ -139,8 +139,14 @@ export type PermissionReplyT = typeof PermissionReply.Type;
 
 export const ImageGenerateRequest = Schema.Struct({
   prompt: Schema.String,
-  imageDataUrl: Schema.String,
-  aspectRatio: Schema.optional(Schema.String),
+  /**
+   * The source photo as a validated data URL. ABSENT means text-to-image —
+   * the old empty-string sentinel is unrepresentable now (the E006
+   * empty-input_image bug class is caught at decode).
+   */
+  imageDataUrl: Schema.optional(DataUrl),
+  /** Closed union with a decode-side default — a decoded request is always complete. */
+  aspectRatio: Schema.optionalWith(AspectRatio, { default: () => 'match_input_image' as const }),
   themeContext: Schema.optional(ThemeContext),
   argumentValues: Schema.optional(Schema.Record({ key: Schema.String, value: Schema.String })),
   brief: Schema.optional(Schema.String),

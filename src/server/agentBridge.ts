@@ -34,8 +34,9 @@ import {
   NetworkError,
   ReplicateError,
 } from '../contracts/errors.ts';
-import { schemaFromFields } from '../contracts/fields.ts';
+import { type AspectRatioT, schemaFromFields } from '../contracts/fields.ts';
 import {
+  type DataUrlT,
   MessageId,
   type MessageIdT,
   PermissionId,
@@ -1016,7 +1017,7 @@ export class ReplicateClient extends Context.Tag('cartis/ReplicateClient')<
   {
     generate(
       token: string,
-      input: { prompt: string; imageDataUrl: string; aspectRatio?: string },
+      input: { prompt: string; imageDataUrl?: DataUrlT; aspectRatio: AspectRatioT },
     ): Effect.Effect<string, ReplicateError | NetworkError>;
   }
 >() {}
@@ -1036,14 +1037,14 @@ export const replicateClientLive: Layer.Layer<
 
     const generate = (
       token: string,
-      input: { prompt: string; imageDataUrl: string; aspectRatio?: string },
+      input: { prompt: string; imageDataUrl?: DataUrlT; aspectRatio: AspectRatioT },
     ): Effect.Effect<string, ReplicateError | NetworkError> =>
       Effect.gen(function* () {
-        // Text-first generation sends an EMPTY data URL — flux-kontext-pro
-        // rejects it (E006). Omit input_image entirely (pure text-to-image)
-        // and never ask to match a nonexistent input image's aspect.
-        const hasSource = /^data:[^;]+;base64,.+/.test(input.imageDataUrl);
-        const requested = input.aspectRatio ?? 'match_input_image';
+        // Presence IS validity now — the DataUrl brand proves a non-empty
+        // base64 source (the E006 empty-input_image class is unrepresentable).
+        // Still never ask to match a nonexistent input image's aspect.
+        const hasSource = input.imageDataUrl !== undefined;
+        const requested = input.aspectRatio;
         const aspectRatio = !hasSource && requested === 'match_input_image' ? '1:1' : requested;
         const startedAt = yield* Clock.currentTimeMillis;
         const elapsed = Clock.currentTimeMillis.pipe(

@@ -132,8 +132,12 @@ export const imageProviderLive: Layer.Layer<ImageProvider, never, HttpClient.Htt
           const url = '/api/image/generate';
           const wire = yield* Schema.encode(ImageGenerateRequest)({
             prompt: input.prompt,
-            imageDataUrl: bytesToDataUrl(input.sourceBytes, input.sourceType),
-            aspectRatio: input.aspectRatio,
+            // Absent = text-to-image; the old empty-data-URL sentinel is gone.
+            imageDataUrl:
+              input.sourceBytes.byteLength > 0
+                ? bytesToDataUrl(input.sourceBytes, input.sourceType)
+                : undefined,
+            aspectRatio: input.aspectRatio ?? 'match_input_image',
             themeContext: input.themeContext,
             argumentValues: input.argumentValues,
             brief: input.brief,

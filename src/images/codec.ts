@@ -1,13 +1,20 @@
 /** Environment-neutral (browser + node/bun): used by the UI and the dev-server bridge. */
 
-export function bytesToDataUrl(bytes: ArrayBuffer, type: string): string {
+import { DataUrl, type DataUrlT } from '../contracts/ids';
+
+/**
+ * Encode bytes as a BRANDED data URL. Throws on empty bytes — an empty
+ * payload is not a valid DataUrl (callers with maybe-empty sources must
+ * branch and omit instead; that is the point of the brand).
+ */
+export function bytesToDataUrl(bytes: ArrayBuffer, type: string): DataUrlT {
   const view = new Uint8Array(bytes);
   let binary = '';
   const chunk = 0x8000;
   for (let i = 0; i < view.length; i += chunk) {
     binary += String.fromCharCode(...view.subarray(i, i + chunk));
   }
-  return `data:${type};base64,${btoa(binary)}`;
+  return DataUrl.make(`data:${type};base64,${btoa(binary)}`);
 }
 
 export function dataUrlToBytes(dataUrl: string): { bytes: ArrayBuffer; type: string } {

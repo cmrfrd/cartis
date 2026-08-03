@@ -5,6 +5,8 @@
  * ImageProvider.ts as the Effect service.
  */
 
+import type { AspectRatioT } from '../contracts/fields';
+
 /** Paint I/O shapes — the (optional) source photo in, the stylized frame out. */
 export interface GenerationInput {
   /** Empty buffer = text-first generation with no source photo. */
@@ -12,8 +14,8 @@ export interface GenerationInput {
   sourceType: string;
   prompt: string;
   styleId: string;
-  /** Replicate aspect enum (e.g. '3:2', 'match_input_image'). */
-  aspectRatio?: string;
+  /** Replicate aspect — the closed union (e.g. '3:2', 'match_input_image'). */
+  aspectRatio?: AspectRatioT;
   themeContext?: { lookAndFeel: string; palette: string; argumentSummary: string };
   argumentValues?: Record<string, string>;
   brief?: string;

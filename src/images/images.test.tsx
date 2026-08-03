@@ -3,6 +3,7 @@ import { describe, expect, vi, it as vit } from 'vitest';
 import { it } from '../../test/effect';
 import { mount } from '../../test/util';
 import { ImageGenerateRequest } from '../contracts/api';
+import { DataUrl } from '../contracts/ids';
 import { httpClientFromHandler } from '../lib/http';
 import { CameraCapture } from './CameraCapture';
 import { bytesToDataUrl, dataUrlToBytes } from './codec';
@@ -76,7 +77,7 @@ describe('ImageProvider (Live)', () => {
     Effect.gen(function* () {
       const wire = yield* Schema.encode(ImageGenerateRequest)({
         prompt: 'p',
-        imageDataUrl: 'data:image/png;base64,QQ==',
+        imageDataUrl: DataUrl.make('data:image/png;base64,QQ=='),
         aspectRatio: '3:4',
         themeContext: { lookAndFeel: 'oil', palette: 'ember', argumentSummary: 'name' },
         argumentValues: { name: 'Nyra' },

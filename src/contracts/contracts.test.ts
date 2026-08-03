@@ -507,12 +507,27 @@ describe('ImageGenerateRequest / ImageGenerateResponse', () => {
     expect(decoded.aspectRatio).toBe('3:2');
   });
 
-  it('decodes request without aspectRatio', () => {
+  it('fills the decode-side aspectRatio default (a decoded request is always complete)', () => {
     const decoded = Schema.decodeUnknownSync(ImageGenerateRequest)({
       prompt: 'mythic ember dragon',
       imageDataUrl: 'data:image/png;base64,abc',
     });
-    expect(decoded.aspectRatio).toBeUndefined();
+    expect(decoded.aspectRatio).toBe('match_input_image');
+  });
+
+  it('rejects an empty imageDataUrl (the old sentinel) and unknown aspects', () => {
+    expect(() =>
+      Schema.decodeUnknownSync(ImageGenerateRequest)({
+        prompt: 'p',
+        imageDataUrl: 'data:application/octet-stream;base64,',
+      }),
+    ).toThrow();
+    expect(() =>
+      Schema.decodeUnknownSync(ImageGenerateRequest)({ prompt: 'p', aspectRatio: '5:7' }),
+    ).toThrow();
+    // absent imageDataUrl = text-to-image — decodes fine
+    const textFirst = Schema.decodeUnknownSync(ImageGenerateRequest)({ prompt: 'p' });
+    expect(textFirst.imageDataUrl).toBeUndefined();
   });
 
   it('decodes response', () => {
