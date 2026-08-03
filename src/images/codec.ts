@@ -1,6 +1,6 @@
 /** Environment-neutral (browser + node/bun): used by the UI and the dev-server bridge. */
 
-import { DataUrl, type DataUrlT } from '../contracts/ids';
+import { DataUrl, type DataUrlT } from '../contracts/ids.ts';
 
 /**
  * Encode bytes as a BRANDED data URL. Throws on empty bytes — an empty
