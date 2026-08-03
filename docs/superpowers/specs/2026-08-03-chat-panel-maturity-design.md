@@ -74,6 +74,16 @@ replacing the top branch strip.
   - accepted files are FileReader'd to a data-URL (doubles as the thumbnail
     `src`; no object-URL lifecycle).
 - `removeAttachment(index)` — composer × button.
+- **Three entry points, one gate:** the `+` button's hidden file input, paste
+  into the composer textarea (`onPaste` → `clipboardData.files`), and
+  drag-and-drop anywhere on the panel (`onDragOver`/`onDrop` on the aside,
+  with a visible "drop files to attach" overlay while dragging) all call the
+  same `addAttachments`. The file input's `value` is reset after each pick so
+  re-selecting the same file works.
+- **Vision only (v1):** the model SEES attached images (style reference,
+  reading a photo) via the FilePartInput; using an attachment as
+  flux-kontext's `input_image` (true img2img of the attachment) is explicitly
+  v2 — `artAction` does not grow an attachment reference.
 - `submitDraft` sends when **text OR attachments** exist; submit clears both.
   An attachment-only send (empty draft) still sends the full prompt scaffold;
   the `USER_REQUEST_MARKER` is followed by the stand-in text
@@ -123,6 +133,24 @@ One `rounded-2xl border-2 border-border bg-background shadow-shadow` container:
 - Enter sends, Shift+Enter newlines (unchanged). `data-testid`s preserved:
   `composer-send`, `composer-cancel`; new `composer-attach`,
   `composer-attachment` (per thumb), `attachment-remove`.
+
+### Note strip
+
+`ThreadState.note` is currently rendered NOWHERE — turn failures only surface
+because the error also lands in an incomplete bubble, so attachment
+rejections (which have no bubble) would be silent. New: a dismissible strip
+directly above the composer (`data-testid="note-strip"`, danger-tinted text +
+× button clearing `note`); any `note` assignment shows it, including turn
+failures.
+
+### Resizable panel
+
+The aside is drag-resizable via a handle on its left edge: min 340px, max
+600px, default 400px. Width lives on `BuilderView` (`chatWidth: number`) —
+session-only, not persisted to any record. Pointer-event drag (pointerdown →
+setPointerCapture → pointermove updates width → pointerup); double-click
+resets to 400. Handle: a 4px hover-highlighted strip,
+`data-testid="chat-resize"`, `cursor: col-resize`.
 
 ### Empty state
 
@@ -197,10 +225,13 @@ computation; zero usable siblings → no arrows (today's silent behavior).
   `mapSessionMessages` maps named file parts → Image/File and skips unnamed;
   `/api/chat/siblings` returns parent-first sibling sets for forked, unforked,
   and parentless sessions (stub client).
-- **Mounted (happy-dom):** `+` wires the hidden input; thumbs render/remove;
-  Send morphs (disabled-empty → enabled → Stop) ; empty state appears and
-  yields to messages; markdown renders (bold → `<strong>`); ✓ copy feedback;
-  regenerate only on last assistant message; ‹ n/m › switches branches.
+- **Mounted (happy-dom):** `+` wires the hidden input; paste and drop reach
+  the same gate (synthetic ClipboardEvent/DragEvent with files); thumbs
+  render/remove; Send morphs (disabled-empty → enabled → Stop); empty state
+  appears and yields to messages; markdown renders (bold → `<strong>`);
+  ✓ copy feedback; regenerate only on last assistant message; ‹ n/m ›
+  switches branches; note strip shows on rejection and dismisses; resize
+  handle updates `chatWidth` within min/max clamps.
 - `bun run verify` green per task; **live e2e** at the end: attach a real
   image, confirm the model references it; save → dev-server restart → reopen →
   attachment thumb survives rehydration.
@@ -208,4 +239,6 @@ computation; zero usable siblings → no arrows (today's silent behavior).
 ## Non-goals
 
 Voice/dictation, feedback thumbs, share/export, thread-list rail, attachment
-re-send on edit, non-Chrome fallbacks for `field-sizing`.
+re-send on edit/regenerate, attachment-as-art-source (flux-kontext
+`input_image` from an attachment — v2), persisted panel width, non-Chrome
+fallbacks for `field-sizing`.
