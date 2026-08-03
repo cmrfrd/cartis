@@ -16,7 +16,7 @@ import {
   Scope,
   Stream,
 } from 'effect';
-import type { Plugin } from 'vite';
+import { createLogger, type Logger, type Plugin } from 'vite';
 import {
   ArtAction,
   type ArtActionT,
@@ -70,7 +70,7 @@ import {
 import { bytesToDataUrl } from '../images/codec.ts';
 import { makeBridgeRuntime, readBody, respond, sendJson } from './BridgeRuntime.ts';
 import { FileStore, type StoreName } from './fileStore.ts';
-import { ThreadBus } from './threadBus.ts';
+import { type LogScope, type LogSink, ThreadBus } from './threadBus.ts';
 
 // ---------- opencode ----------
 
@@ -1248,7 +1248,16 @@ export function cartisBridge(): Plugin {
   return {
     name: 'cartis-bridge',
     configureServer(server) {
-      const runtime = makeBridgeRuntime(DATA_ROOT);
+      // Log through vite's own logger so [cartis:*] lines match vite's output
+      // (timestamped, colored prefix) — one cohesive terminal.
+      const loggers: Record<LogScope, Logger> = {
+        agent: createLogger('info', { prefix: '[cartis:agent]', allowClearScreen: false }),
+        image: createLogger('info', { prefix: '[cartis:image]', allowClearScreen: false }),
+        bridge: createLogger('info', { prefix: '[cartis:bridge]', allowClearScreen: false }),
+      };
+      const viteSink: LogSink = (scope, message) =>
+        loggers[scope].info(message, { timestamp: true });
+      const runtime = makeBridgeRuntime(DATA_ROOT, viteSink);
       server.httpServer?.once('close', () => {
         void runtime.dispose();
       });

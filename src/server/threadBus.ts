@@ -20,6 +20,15 @@ const PUBSUB_REPLAY = 50;
 
 export type LogScope = 'agent' | 'image' | 'bridge';
 
+/**
+ * Where terminal lines go. The vite plugin injects a sink built on vite's own
+ * `createLogger` (timestamped, colored — cohesive with vite's output); the
+ * default is a plain console.log preserving the classic `[cartis:*]` lines.
+ */
+export type LogSink = (scope: LogScope, message: string) => void;
+
+const consoleSink: LogSink = (scope, message) => console.log(`[cartis:${scope}] ${message}`);
+
 export class ThreadBus extends Context.Tag('cartis/ThreadBus')<
   ThreadBus,
   {
@@ -32,33 +41,39 @@ export class ThreadBus extends Context.Tag('cartis/ThreadBus')<
   }
 >() {}
 
+/** A rendered terminal line, split so sinks can tag the scope themselves. */
+export interface ScopedLine {
+  readonly scope: LogScope;
+  readonly message: string;
+}
+
 /**
  * Terminal mirror for an event — Some(full `[cartis:*]` line), or None for
  * variants too noisy to log (pending tools, image parts). Strings preserve
  * the old activity-log console format exactly (plan Global Constraints).
  */
 export function renderThreadEvent(event: ThreadEventT): Option.Option<string> {
-  return Option.fromNullable(renderLine(event));
+  return Option.map(renderScoped(event), ({ scope, message }) => `[cartis:${scope}] ${message}`);
 }
 
 /** Both levels are Match.exhaustive (spec §Match): new event/part variants fail tsc here. */
-const renderPartLine = (part: ThreadPartT): string | undefined =>
+const renderPartMessage = (part: ThreadPartT): string | undefined =>
   Match.value(part).pipe(
-    Match.tag('Step', () => '[cartis:agent] step started'),
-    Match.tag('Reasoning', () => '[cartis:agent] thinking…'),
-    Match.tag('Text', (p) => `[cartis:agent] writing response… (${String(p.text.length)} chars)`),
+    Match.tag('Step', () => 'step started'),
+    Match.tag('Reasoning', () => 'thinking…'),
+    Match.tag('Text', (p) => `writing response… (${String(p.text.length)} chars)`),
     Match.tag('ToolCall', (p) => {
       const title = p.title;
       if (p.status === 'running') {
-        return `[cartis:agent] tool ${p.name}: running${
+        return `tool ${p.name}: running${
           title !== undefined && title.length > 0 ? ` — ${title}` : ''
         }`;
       }
       if (p.status === 'completed') {
-        return `[cartis:agent] tool ${p.name}: done — ${title ?? ''} (${(p.secs ?? 0).toFixed(1)}s)`;
+        return `tool ${p.name}: done — ${title ?? ''} (${(p.secs ?? 0).toFixed(1)}s)`;
       }
       if (p.status === 'error') {
-        return `[cartis:agent] tool ${p.name}: FAILED — ${p.result ?? 'unknown'}`;
+        return `tool ${p.name}: FAILED — ${p.result ?? 'unknown'}`;
       }
       return undefined; // pending — too noisy for the terminal
     }),
@@ -66,21 +81,39 @@ const renderPartLine = (part: ThreadPartT): string | undefined =>
     Match.exhaustive,
   );
 
-const renderLine = (event: ThreadEventT): string | undefined =>
-  Match.value(event).pipe(
-    Match.tag('TurnStarted', () => '[cartis:agent] turn started'),
-    Match.tag('TurnCompleted', (e) => `[cartis:agent] turn ${e.status}`),
-    Match.tag('SessionError', (e) => `[cartis:agent] agent error: ${e.message}`),
-    Match.tag('PermissionRequested', (e) => `[cartis:agent] permission requested: ${e.title}`),
-    // Compose lines were agent-sourced in the old log; pipeline lines image-sourced.
-    Match.tag('Art', (e) =>
-      e.phase === 'composing'
-        ? `[cartis:agent] ${e.detail ?? 'composing art prompt'}`
-        : `[cartis:image] ${e.detail ?? e.phase}`,
+/** The event's terminal line as (scope, message) — what sinks consume. */
+export function renderScoped(event: ThreadEventT): Option.Option<ScopedLine> {
+  return Option.fromNullable(
+    Match.value(event).pipe(
+      Match.tag('TurnStarted', (): ScopedLine => ({ scope: 'agent', message: 'turn started' })),
+      Match.tag(
+        'TurnCompleted',
+        (e): ScopedLine => ({ scope: 'agent', message: `turn ${e.status}` }),
+      ),
+      Match.tag(
+        'SessionError',
+        (e): ScopedLine => ({ scope: 'agent', message: `agent error: ${e.message}` }),
+      ),
+      Match.tag(
+        'PermissionRequested',
+        (e): ScopedLine => ({ scope: 'agent', message: `permission requested: ${e.title}` }),
+      ),
+      // Compose lines were agent-sourced in the old log; pipeline lines image-sourced.
+      Match.tag(
+        'Art',
+        (e): ScopedLine =>
+          e.phase === 'composing'
+            ? { scope: 'agent', message: e.detail ?? 'composing art prompt' }
+            : { scope: 'image', message: e.detail ?? e.phase },
+      ),
+      Match.tag('PartDelta', (e): ScopedLine | undefined => {
+        const message = renderPartMessage(e.part);
+        return message === undefined ? undefined : { scope: 'agent', message };
+      }),
+      Match.exhaustive,
     ),
-    Match.tag('PartDelta', (e) => renderPartLine(e.part)),
-    Match.exhaustive,
   );
+}
 
 const capped = <A>(prev: ReadonlyArray<A>, next: A): ReadonlyArray<A> => {
   const out = [...prev, next];
@@ -88,7 +121,7 @@ const capped = <A>(prev: ReadonlyArray<A>, next: A): ReadonlyArray<A> => {
 };
 
 /** Build the bus internals. `silent` drops the terminal mirror (test layer). */
-const makeBus = (silent: boolean) =>
+const makeBus = (silent: boolean, sink: LogSink) =>
   Effect.gen(function* () {
     const pubsub = yield* PubSub.sliding<ThreadEventT>({
       capacity: PUBSUB_CAPACITY,
@@ -101,9 +134,9 @@ const makeBus = (silent: boolean) =>
       Effect.gen(function* () {
         yield* Ref.update(historyRef, (prev) => capped(prev, event));
         if (!silent) {
-          Option.match(renderThreadEvent(event), {
+          Option.match(renderScoped(event), {
             onNone: () => undefined,
-            onSome: (line) => console.log(line),
+            onSome: ({ scope, message }) => sink(scope, message),
           });
         }
         yield* PubSub.publish(pubsub, event);
@@ -111,9 +144,8 @@ const makeBus = (silent: boolean) =>
 
     const log = (scope: LogScope, message: string): Effect.Effect<void> =>
       Effect.gen(function* () {
-        const line = `[cartis:${scope}] ${message}`;
-        yield* Ref.update(logsRef, (prev) => capped(prev, line));
-        if (!silent) console.log(line);
+        yield* Ref.update(logsRef, (prev) => capped(prev, `[cartis:${scope}] ${message}`));
+        if (!silent) sink(scope, message);
       });
 
     return ThreadBus.of({
@@ -125,8 +157,13 @@ const makeBus = (silent: boolean) =>
     });
   });
 
-/** Live layer — mirrors to the dev-server terminal. */
-export const threadBusLive: Layer.Layer<ThreadBus> = Layer.scoped(ThreadBus, makeBus(false));
+/** Live layer — mirrors to the terminal via `sink` (vite logger in the plugin). */
+export function threadBusLive(sink: LogSink = consoleSink): Layer.Layer<ThreadBus> {
+  return Layer.scoped(ThreadBus, makeBus(false, sink));
+}
 
-/** Test layer — identical bus with the console mirror silenced. */
-export const threadBusTestLayer: Layer.Layer<ThreadBus> = Layer.scoped(ThreadBus, makeBus(true));
+/** Test layer — identical bus with the terminal mirror silenced. */
+export const threadBusTestLayer: Layer.Layer<ThreadBus> = Layer.scoped(
+  ThreadBus,
+  makeBus(true, consoleSink),
+);

@@ -3,7 +3,7 @@ import { describe, expect } from 'vitest';
 import { it } from '../../test/effect.ts';
 import { MessageId, PermissionId, SessionId } from '../contracts/ids';
 import type { ThreadEventT, ThreadPartT } from '../contracts/thread.ts';
-import { renderThreadEvent, ThreadBus, threadBusTestLayer } from './threadBus.ts';
+import { renderThreadEvent, ThreadBus, threadBusLive, threadBusTestLayer } from './threadBus.ts';
 
 /** Unwrap the Option for terse assertions. */
 const render = (event: ThreadEventT) => Option.getOrUndefined(renderThreadEvent(event));
@@ -87,6 +87,27 @@ describe('ThreadBus', () => {
       ]);
     }).pipe(Effect.provide(threadBusTestLayer)),
   );
+});
+
+describe('ThreadBus log sink', () => {
+  it.effect('routes emitted lines through the injected sink as (scope, message)', () => {
+    const seen: Array<[string, string]> = [];
+    return Effect.gen(function* () {
+      const bus = yield* ThreadBus;
+      yield* bus.emit(art('status: processing (2s)'));
+      yield* bus.emit({
+        _tag: 'TurnStarted',
+        sessionId: SessionId.make('s1'),
+        messageId: MessageId.make('m1'),
+      });
+      yield* bus.log('bridge', 'hello');
+      expect(seen).toEqual([
+        ['image', 'status: processing (2s)'],
+        ['agent', 'turn started'],
+        ['bridge', 'hello'],
+      ]);
+    }).pipe(Effect.provide(threadBusLive((scope, message) => seen.push([scope, message]))));
+  });
 });
 
 // ---------------------------------------------------------------------------

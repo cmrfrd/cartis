@@ -11,7 +11,7 @@ import {
   replicateSdkLive,
 } from './agentBridge.ts';
 import { type FileStore, fileStoreLayer } from './fileStore.ts';
-import { type ThreadBus, threadBusLive } from './threadBus.ts';
+import { type LogSink, type ThreadBus, threadBusLive } from './threadBus.ts';
 
 /**
  * Per-dev-server Effect runtime. All bridge services live in one merged layer;
@@ -22,9 +22,10 @@ import { type ThreadBus, threadBusLive } from './threadBus.ts';
 /** The full bridge service surface, provided with the live HTTP client. */
 export function bridgeLive(
   root: string,
+  sink?: LogSink,
 ): Layer.Layer<ThreadBus | FileStore | ReplicateSdk | ReplicateClient | AgentClient> {
   // Leaf services shared across the runtime (one ThreadBus, one ReplicateSdk).
-  const leaves = Layer.mergeAll(threadBusLive, fileStoreLayer(root), replicateSdkLive);
+  const leaves = Layer.mergeAll(threadBusLive(sink), fileStoreLayer(root), replicateSdkLive);
   // AgentClient's thread watcher emits on the SHARED bus (from `leaves`).
   const agentClient = agentClientLive.pipe(Layer.provide(leaves));
   // ReplicateClient needs ReplicateSdk + ThreadBus (from `leaves`) + HttpClient.
@@ -40,8 +41,8 @@ export type BridgeRuntime = ManagedRuntime.ManagedRuntime<
   never
 >;
 
-export function makeBridgeRuntime(root: string): BridgeRuntime {
-  return ManagedRuntime.make(bridgeLive(root));
+export function makeBridgeRuntime(root: string, sink?: LogSink): BridgeRuntime {
+  return ManagedRuntime.make(bridgeLive(root, sink));
 }
 
 // ---------------------------------------------------------------------------
