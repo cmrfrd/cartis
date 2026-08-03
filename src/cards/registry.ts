@@ -1,9 +1,10 @@
 import { Schema } from 'effect';
 import { FieldSpecList } from '../contracts/fields';
+import type { LayoutIdT, ThemeIdT } from '../contracts/ids';
 import { ThemeIdentity } from '../contracts/theme';
 import type { Layout, Theme } from './types';
 
-const themes = new Map<string, Theme>();
+const themes = new Map<ThemeIdT, Theme>();
 const decodeIdentity = Schema.decodeUnknownSync(ThemeIdentity);
 const decodeFieldSpecs = Schema.decodeUnknownSync(FieldSpecList);
 
@@ -38,7 +39,7 @@ export function registerTheme(theme: Theme): void {
   themes.set(theme.id, theme);
 }
 
-export function getTheme(id: string): Theme {
+export function getTheme(id: ThemeIdT): Theme {
   const found = themes.get(id);
   if (!found) throw new Error(`Unknown theme "${id}"`);
   return found;
@@ -48,7 +49,7 @@ export function listThemes(): Theme[] {
   return Array.from(themes.values());
 }
 
-export function getLayout(themeId: string, layoutId: string): Layout {
+export function getLayout(themeId: ThemeIdT, layoutId: LayoutIdT): Layout {
   const layout = getTheme(themeId).layouts.find((l) => l.id === layoutId);
   if (!layout) throw new Error(`Unknown layout "${layoutId}" in theme "${themeId}"`);
   return layout;

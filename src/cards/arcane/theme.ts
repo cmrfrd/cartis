@@ -1,3 +1,4 @@
+import { LayoutId, ThemeId } from '../../contracts/ids';
 import type { FieldSpec, Theme } from '../types';
 import { ArcaneCard } from './ArcaneCard';
 import { ArcaneCardBack } from './ArcaneCardBack';
@@ -65,7 +66,7 @@ const arcaneDefaults = {
 } as const;
 
 export const arcaneTheme: Theme = {
-  id: 'arcane',
+  id: ThemeId.make('arcane'),
   name: 'Arcane',
   description:
     'Cartis take on a classic fantasy trading card: essence frame, ability box, might/ward.',
@@ -76,7 +77,7 @@ export const arcaneTheme: Theme = {
   artFlavor: (data) => paletteFor(String(data.essence ?? 'relic')).artFlavor,
   layouts: [
     {
-      id: 'classic',
+      id: LayoutId.make('classic'),
       name: 'Arcane Hero',
       description:
         'Cartis take on a classic fantasy trading card: essence frame, ability box, might/ward.',
@@ -86,7 +87,7 @@ export const arcaneTheme: Theme = {
       Render: ArcaneCard,
     },
     {
-      id: 'fullart',
+      id: LayoutId.make('fullart'),
       name: 'Arcane Hero — Full Art',
       description:
         'Showcase frame: the portrait fills the card, plates float translucent above it.',

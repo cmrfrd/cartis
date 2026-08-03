@@ -5,7 +5,7 @@ import { setAppLayer, testAppLayerWith } from '../app/runtime';
 import { ChatThread, type ChatThreadShape } from '../chat/ChatThread';
 import type { ChatTurnRequestT, ChatTurnResponseT } from '../contracts/api';
 import { ChatRequestError, StoreError } from '../contracts/errors';
-import { Timestamp } from '../contracts/ids';
+import { CardId, LayoutId, ThemeId, Timestamp } from '../contracts/ids';
 import { type GenerationInput, ImageProvider } from '../images/ImageProvider';
 import type { StoredCard } from '../storage/CardArchive';
 import { StoreClient } from '../storage/StoreClient';
@@ -134,7 +134,7 @@ describe('BuilderView', () => {
     const builder = BuilderView.new();
     builder.setField('name', 'Custom Hero');
     builder.setField('ability', 'Draw two cards.');
-    builder.pickLayout('fullart');
+    builder.pickLayout(LayoutId.make('fullart'));
     expect(builder.layoutId).toBe('fullart');
     expect(builder.data.name).toBe('Custom Hero'); // shared key preserved
     expect(builder.data.ability).toBe('Draw two cards.');
@@ -144,7 +144,7 @@ describe('BuilderView', () => {
   it('seeds defaults only for a fresh card, not when switching layouts with edits', () => {
     const builder = BuilderView.new();
     builder.setField('name', 'Edited');
-    builder.pickLayout('fullart');
+    builder.pickLayout(LayoutId.make('fullart'));
     expect(builder.data.name).toBe('Edited'); // NOT reset to the fullart default
     builder.set(null);
   });
@@ -206,9 +206,9 @@ describe('BuilderView', () => {
     const builder = BuilderView.new();
     await builder.thread.send('start');
     expect(builder.thread.sessionId).toBe('s1');
-    builder.pickLayout('fullart');
+    builder.pickLayout(LayoutId.make('fullart'));
     expect(builder.thread.sessionId).toBe('s1'); // same card — chat persists
-    builder.pickTheme('arcane');
+    builder.pickTheme(ThemeId.make('arcane'));
     expect(builder.thread.sessionId).toBe('s1'); // same card — chat persists
     builder.newCard();
     expect(builder.thread.sessionId).toBeUndefined(); // new card — fresh chat
@@ -254,10 +254,10 @@ describe('BuilderView', () => {
 
 describe('document lifecycle (headless)', () => {
   const makeCard = (overrides: Partial<StoredCard> = {}): StoredCard => ({
-    id: 'card-1',
+    id: CardId.make('card-1'),
     name: 'Stored Hero',
-    themeId: 'arcane',
-    layoutId: 'classic',
+    themeId: ThemeId.make('arcane'),
+    layoutId: LayoutId.make('classic'),
     data: { name: 'Stored Hero', essence: 'tide' },
     holo: false,
     updatedAt: Timestamp.make(1),
@@ -271,14 +271,14 @@ describe('document lifecycle (headless)', () => {
     expect(builder.dirty).toBe(true);
     builder.loadCard(makeCard());
     expect(builder.dirty).toBe(false);
-    builder.pickLayout('fullart');
+    builder.pickLayout(LayoutId.make('fullart'));
     expect(builder.dirty).toBe(true);
     builder.newCard();
     expect(builder.dirty).toBe(false);
     builder.toggleHolo();
     expect(builder.dirty).toBe(true);
     builder.newCard();
-    builder.pickTheme('arcane');
+    builder.pickTheme(ThemeId.make('arcane'));
     expect(builder.dirty).toBe(true);
     builder.set(null);
   });
@@ -287,7 +287,7 @@ describe('document lifecycle (headless)', () => {
     const builder = BuilderView.new();
     builder.loadCard(makeCard({ data: { name: 'Keeper', essence: 'tide' } }));
     builder.thread.sessionId = 's1';
-    builder.pickTheme('arcane');
+    builder.pickTheme(ThemeId.make('arcane'));
     expect(builder.savedId).toBe('card-1'); // identity kept
     expect(builder.data.name).toBe('Keeper'); // overlapping key preserved
     expect(builder.dirty).toBe(true);
@@ -298,7 +298,7 @@ describe('document lifecycle (headless)', () => {
   it('newCard seeds current theme+layout defaults and clears the document + chat', () => {
     const builder = BuilderView.new();
     builder.loadCard(makeCard());
-    builder.pickLayout('fullart');
+    builder.pickLayout(LayoutId.make('fullart'));
     builder.thread.sessionId = 's1';
     builder.newCard();
     expect(builder.savedId).toBeUndefined();
@@ -401,8 +401,8 @@ describe('document bar (mounted)', () => {
     await vi.waitFor(() => expect(shell.archive.ready).toBe(true));
     const stored = await shell.archive.saveCard({
       name: 'From Gallery',
-      themeId: 'arcane',
-      layoutId: 'classic',
+      themeId: ThemeId.make('arcane'),
+      layoutId: LayoutId.make('classic'),
       data: { name: 'From Gallery' },
       holo: false,
     });
@@ -426,8 +426,8 @@ describe('document bar (mounted)', () => {
     await vi.waitFor(() => expect(shell.archive.ready).toBe(true));
     const stored = await shell.archive.saveCard({
       name: 'Target',
-      themeId: 'arcane',
-      layoutId: 'classic',
+      themeId: ThemeId.make('arcane'),
+      layoutId: LayoutId.make('classic'),
       data: { name: 'Target' },
       holo: false,
     });

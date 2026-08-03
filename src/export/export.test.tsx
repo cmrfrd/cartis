@@ -1,5 +1,6 @@
 import { Effect } from 'effect';
 import { describe, expect, it, vi } from 'vitest';
+import { CardId } from '../contracts/ids';
 import { CardArchive } from '../storage/CardArchive';
 import { ExportBar } from './ExportBar';
 import {
@@ -160,7 +161,11 @@ describe('ExportBar', () => {
       expect(archive.ready).toBe(true);
     });
     const node = document.createElement('div');
-    const bar = ExportBar.new({ cardName: 'Nyra', cardId: 'card-7', target: { current: node } });
+    const bar = ExportBar.new({
+      cardName: 'Nyra',
+      cardId: CardId.make('card-7'),
+      target: { current: node },
+    });
     await bar.exportAs('png', archive);
     expect(archive.exports[0]?.cardId).toBe('card-7');
     bar.set(null);

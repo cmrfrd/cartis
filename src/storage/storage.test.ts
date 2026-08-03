@@ -2,6 +2,7 @@ import type { HttpClientRequest } from '@effect/platform';
 import { Layer } from 'effect';
 import { describe, expect, it, vi } from 'vitest';
 import { setAppLayer, testAppLayerWith } from '../app/runtime';
+import { CardId, LayoutId, ThemeId } from '../contracts/ids';
 import { httpClientFromHandler } from '../lib/http';
 import { CardArchive } from './CardArchive';
 import { ImageLibrary } from './ImageLibrary';
@@ -55,23 +56,23 @@ describe('CardArchive', () => {
     await ready(archive);
     const first = await archive.saveCard({
       name: 'One',
-      themeId: 't',
-      layoutId: 'l',
+      themeId: ThemeId.make('t'),
+      layoutId: LayoutId.make('l'),
       data: { name: 'One' },
       holo: false,
     });
     await archive.saveCard({
       name: 'Two',
-      themeId: 't',
-      layoutId: 'l',
+      themeId: ThemeId.make('t'),
+      layoutId: LayoutId.make('l'),
       data: { name: 'Two' },
       holo: true,
     });
     const updated = await archive.saveCard({
       id: first.id,
       name: 'One v2',
-      themeId: 't',
-      layoutId: 'l',
+      themeId: ThemeId.make('t'),
+      layoutId: LayoutId.make('l'),
       data: { name: 'One v2' },
       holo: false,
     });
@@ -106,13 +107,20 @@ describe('CardArchive', () => {
     const good = {
       id: 'good',
       name: 'Good',
-      themeId: 't',
-      layoutId: 'l',
+      themeId: ThemeId.make('t'),
+      layoutId: LayoutId.make('l'),
       holo: false,
       updatedAt: 100,
       data: {},
     };
-    const bad = { id: 'bad', name: 'Bad', themeId: 't', layoutId: 'l', holo: false, data: {} }; // no updatedAt
+    const bad = {
+      id: 'bad',
+      name: 'Bad',
+      themeId: ThemeId.make('t'),
+      layoutId: LayoutId.make('l'),
+      holo: false,
+      data: {},
+    }; // no updatedAt
     const handler = (req: HttpClientRequest.HttpClientRequest): Response => {
       if (req.method === 'GET' && req.url.endsWith('/api/store/cards')) {
         return new Response(JSON.stringify([good, bad]), {
@@ -148,7 +156,7 @@ describe('CardArchive', () => {
       format: 'png',
       bytes: bytesOf('png'),
       type: 'image/png',
-      cardId: 'card-1',
+      cardId: CardId.make('card-1'),
     });
     expect(linked.cardId).toBe('card-1');
     const loose = await archive.saveExport({

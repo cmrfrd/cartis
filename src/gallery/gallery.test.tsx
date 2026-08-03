@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { click, mountApp, setInput, tick } from '../../test/util';
+import { LayoutId, ThemeId } from '../contracts/ids';
 
 const bytesOf = (text: string): ArrayBuffer => new TextEncoder().encode(text).buffer as ArrayBuffer;
 
@@ -11,8 +12,8 @@ describe('GalleryView', () => {
     });
     const hero = await shell.archive.saveCard({
       name: 'Stored Hero',
-      themeId: 'arcane',
-      layoutId: 'classic',
+      themeId: ThemeId.make('arcane'),
+      layoutId: LayoutId.make('classic'),
       data: { name: 'Stored Hero' },
       holo: false,
     });
@@ -62,8 +63,8 @@ describe('GalleryView', () => {
     });
     await shell.archive.saveCard({
       name: 'Round Trip',
-      themeId: 'arcane',
-      layoutId: 'classic',
+      themeId: ThemeId.make('arcane'),
+      layoutId: LayoutId.make('classic'),
       data: { name: 'Round Trip', essence: 'tide', ability: 'Draw a card.' },
       holo: true,
     });
@@ -93,16 +94,16 @@ describe('GalleryView', () => {
     await vi.waitFor(() => expect(shell.archive.ready).toBe(true));
     const first = await shell.archive.saveCard({
       name: 'Once',
-      themeId: 'arcane',
-      layoutId: 'classic',
+      themeId: ThemeId.make('arcane'),
+      layoutId: LayoutId.make('classic'),
       data: { name: 'Once' },
       holo: false,
     });
     const again = await shell.archive.saveCard({
       id: first.id,
       name: 'Twice',
-      themeId: 'arcane',
-      layoutId: 'classic',
+      themeId: ThemeId.make('arcane'),
+      layoutId: LayoutId.make('classic'),
       data: { name: 'Twice' },
       holo: false,
     });
@@ -117,8 +118,8 @@ describe('GalleryView', () => {
     await vi.waitFor(() => expect(shell.archive.ready).toBe(true));
     await shell.archive.saveCard({
       name: 'Solo',
-      themeId: 'arcane',
-      layoutId: 'classic',
+      themeId: ThemeId.make('arcane'),
+      layoutId: LayoutId.make('classic'),
       data: { name: 'Solo' },
       holo: true,
     });
@@ -147,8 +148,8 @@ describe('GalleryView', () => {
     await vi.waitFor(() => expect(shell.archive.ready).toBe(true));
     const saved = await shell.archive.saveCard({
       name: 'Linked Hero',
-      themeId: 'arcane',
-      layoutId: 'classic',
+      themeId: ThemeId.make('arcane'),
+      layoutId: LayoutId.make('classic'),
       data: { name: 'Linked Hero', ability: 'Fly high.' },
       holo: false,
     });
@@ -193,16 +194,16 @@ describe('GalleryView', () => {
     await vi.waitFor(() => expect(shell.archive.ready).toBe(true));
     const first = await shell.archive.saveCard({
       name: 'Once',
-      themeId: 'arcane',
-      layoutId: 'classic',
+      themeId: ThemeId.make('arcane'),
+      layoutId: LayoutId.make('classic'),
       data: { name: 'Once' },
       holo: false,
     });
     const again = await shell.archive.saveCard({
       id: first.id,
       name: 'Twice',
-      themeId: 'arcane',
-      layoutId: 'classic',
+      themeId: ThemeId.make('arcane'),
+      layoutId: LayoutId.make('classic'),
       data: { name: 'Twice' },
       holo: false,
     });
@@ -217,8 +218,8 @@ describe('GalleryView', () => {
     await vi.waitFor(() => expect(shell.archive.ready).toBe(true));
     await shell.archive.saveCard({
       name: 'Solo',
-      themeId: 'arcane',
-      layoutId: 'classic',
+      themeId: ThemeId.make('arcane'),
+      layoutId: LayoutId.make('classic'),
       data: { name: 'Solo' },
       holo: true,
     });
@@ -247,8 +248,8 @@ describe('GalleryView', () => {
     await vi.waitFor(() => expect(shell.archive.ready).toBe(true));
     await shell.archive.saveCard({
       name: 'Tile Hero',
-      themeId: 'arcane',
-      layoutId: 'classic',
+      themeId: ThemeId.make('arcane'),
+      layoutId: LayoutId.make('classic'),
       data: { name: 'Tile Hero', typeLine: 'Hero — Tiler', ability: 'Tessellate.' },
       holo: false,
     });

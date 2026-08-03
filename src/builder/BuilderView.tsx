@@ -1,5 +1,5 @@
 import { Component, get, ref } from '@expressive/react';
-import { Effect, Exit } from 'effect';
+import { Array as Arr, Effect, Exit } from 'effect';
 // Value import of AppShell is a deliberate module cycle (AppShell renders BuilderView).
 // Safe: neither module touches the other's binding during module evaluation — only
 // inside method bodies at runtime, which ESM live bindings resolve correctly.
@@ -10,6 +10,7 @@ import type { CardData, FieldValue, Layout, Theme } from '../cards/types';
 import { ThreadPanel } from '../chat/ThreadPanel';
 import { type ChatContext, ThreadState } from '../chat/ThreadState';
 import { summarizeField } from '../contracts/fields';
+import { type CardIdT, LayoutId, type LayoutIdT, ThemeId, type ThemeIdT } from '../contracts/ids';
 import { ExportBar } from '../export/ExportBar';
 import { ImageProvider } from '../images/ImageProvider';
 import type { StoredCard } from '../storage/CardArchive';
@@ -23,11 +24,12 @@ export type GuardResolution = 'save-first' | 'discard' | 'cancel';
 
 export class BuilderView extends Component {
   shell = get(AppShell, false);
-  themeId = '';
-  layoutId = '';
+  /** Transient empty sentinels until new() picks the first theme (nominal brands construct freely). */
+  themeId: ThemeIdT = ThemeId.make('');
+  layoutId: LayoutIdT = LayoutId.make('');
   data: CardData = {};
   holo = false;
-  savedId?: string = undefined;
+  savedId?: CardIdT = undefined;
   savedNote = '';
   /** Which image field's portrait tools are open (Task 8). */
   portraitKey?: string = undefined;
@@ -124,22 +126,23 @@ export class BuilderView extends Component {
 
   /** Switching theme EDITS the open document (lifecycle spec decision 4):
    *  identity kept, overlapping argument values preserved, dirty marked. */
-  pickTheme(id: string) {
-    const first = getTheme(id).layouts[0];
-    const keptKeys = new Set((first?.fields ?? []).map((f) => f.key));
+  pickTheme(id: ThemeIdT) {
+    // Non-emptiness is a type-level fact — no `first?` dance (spec §4).
+    const first = Arr.headNonEmpty(getTheme(id).layouts);
+    const keptKeys = new Set(first.fields.map((f) => f.key));
     const preserved: CardData = {};
     for (const [key, value] of Object.entries(this.data)) {
       if (keptKeys.has(key)) preserved[key] = value;
     }
     this.themeId = id;
-    this.layoutId = first?.id ?? '';
-    this.data = { ...(first ? first.defaults : {}), ...preserved };
+    this.layoutId = first.id;
+    this.data = { ...first.defaults, ...preserved };
     this.dirty = true;
     // The chat session belongs to the card, not the theme — it persists here.
   }
 
   /** Switching layouts is lossless for shared argument keys — user data wins over defaults. */
-  pickLayout(id: string) {
+  pickLayout(id: LayoutIdT) {
     const next = getLayout(this.themeId, id);
     const keptKeys = new Set(next.fields.map((f) => f.key));
     const preserved: CardData = {};
@@ -148,7 +151,7 @@ export class BuilderView extends Component {
     }
     // Seed defaults only for keys the user has no value for (keeps user data).
     this.data = { ...next.defaults, ...preserved };
-    this.layoutId = id;
+    this.layoutId = next.id;
     this.dirty = true;
   }
 
@@ -410,7 +413,7 @@ function BuilderForm() {
       <Panel title="Theme">
         <SelectInput
           value={themeId}
-          onValue={(id) => builder.pickTheme(id)}
+          onValue={(id) => builder.pickTheme(ThemeId.make(id))}
           options={listThemes().map((t) => ({ value: t.id, label: t.name }))}
         />
         <p className="mt-2 text-xs text-ink-dim">{theme.description}</p>
@@ -418,7 +421,7 @@ function BuilderForm() {
       <Panel title="Layout">
         <SelectInput
           value={layoutId}
-          onValue={(id) => builder.pickLayout(id)}
+          onValue={(id) => builder.pickLayout(LayoutId.make(id))}
           options={theme.layouts.map((l) => ({ value: l.id, label: l.name }))}
         />
         <p className="mt-2 text-xs text-ink-dim">{layout.description}</p>

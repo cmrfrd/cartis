@@ -1,6 +1,9 @@
 // Sanctioned type-only react import (see Global Constraints).
+
+import type { NonEmptyReadonlyArray } from 'effect/Array';
 import type { ComponentType } from 'react';
 import type { AspectRatioT, FieldSpecT, FieldValueT } from '../contracts/fields';
+import type { LayoutIdT, ThemeIdT } from '../contracts/ids';
 
 /**
  * Single source of truth: these types DERIVE from the canonical Schemas in
@@ -23,7 +26,7 @@ export type CardRenderer = ComponentType<CardRenderProps>;
 
 /** A card face: how theme components organize into a layout, parameterized by arguments. */
 export interface Layout {
-  id: string;
+  id: LayoutIdT;
   name: string;
   description: string;
   fields: readonly FieldSpec[];
@@ -35,14 +38,14 @@ export interface Layout {
 
 /** A collection/world: identity + shared code parts + ordered layouts. */
 export interface Theme {
-  id: string;
+  id: ThemeIdT;
   name: string;
   description: string;
   /** Prose visual identity consumed by the AI art + fill pipelines. */
   lookAndFeel: string;
   CardBack: CardRenderer;
-  /** Ordered; layouts[0] is the default. */
-  layouts: readonly Layout[];
+  /** Ordered; the head is the default — non-emptiness is a type-level fact. */
+  layouts: NonEmptyReadonlyArray<Layout>;
   /** Optional per-card flavor derived from data (e.g. palette artFlavor). */
   artFlavor?: (data: CardData) => string;
 }

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { mount, tick } from '../../../test/util';
+import { LayoutId, ThemeId } from '../../contracts/ids';
 import { getLayout, getTheme } from '../registry';
 import { ArcaneCard } from './ArcaneCard';
 import { EssenceGlyph } from './glyphs';
@@ -18,11 +19,11 @@ describe('arcane palette', () => {
 
 describe('arcane theme', () => {
   it('is registered by test setup', () => {
-    expect(getTheme('arcane').name).toBe('Arcane');
+    expect(getTheme(ThemeId.make('arcane')).name).toBe('Arcane');
   });
 
   it('provides defaults for every non-image field', () => {
-    const classic = getLayout('arcane', 'classic');
+    const classic = getLayout(ThemeId.make('arcane'), LayoutId.make('classic'));
     for (const field of classic.fields) {
       if (field.kind === 'image') continue;
       expect(classic.defaults[field.key], `default for ${field.key}`).toBeDefined();
@@ -30,7 +31,7 @@ describe('arcane theme', () => {
   });
 
   it('shares one field list across layouts', () => {
-    expect(getLayout('arcane', 'fullart').fields).toBe(arcaneFields);
+    expect(getLayout(ThemeId.make('arcane'), LayoutId.make('fullart')).fields).toBe(arcaneFields);
   });
 });
 
@@ -101,8 +102,8 @@ describe('optional card sections', () => {
 
 describe('full-art template and card back', () => {
   it('registers the fullart layout alongside the classic frame', () => {
-    expect(getLayout('arcane', 'fullart').Render).toBeDefined();
-    expect(getLayout('arcane', 'fullart').fields).toBe(arcaneFields);
+    expect(getLayout(ThemeId.make('arcane'), LayoutId.make('fullart')).Render).toBeDefined();
+    expect(getLayout(ThemeId.make('arcane'), LayoutId.make('fullart')).fields).toBe(arcaneFields);
   });
 
   it('renders full-bleed art layer with floating plates', async () => {

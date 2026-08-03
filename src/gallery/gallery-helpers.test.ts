@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { Timestamp } from '../contracts/ids';
+import { CardId, ExportId, LayoutId, ThemeId, Timestamp } from '../contracts/ids';
 import type { StoredCard, StoredExport } from '../storage/CardArchive';
 import {
   exportMatchesQuery,
@@ -10,10 +10,10 @@ import {
 } from './gallery-helpers';
 
 const card = (over: Partial<StoredCard> = {}): StoredCard => ({
-  id: 'c1',
+  id: CardId.make('c1'),
   name: 'The Great Henge',
-  themeId: 'arcane',
-  layoutId: 'fullart',
+  themeId: ThemeId.make('arcane'),
+  layoutId: LayoutId.make('fullart'),
   data: { name: 'The Great Henge', typeLine: 'Legendary Artifact', ability: 'Gain 2 life.' },
   holo: false,
   updatedAt: Timestamp.make(1),
@@ -21,7 +21,7 @@ const card = (over: Partial<StoredCard> = {}): StoredCard => ({
 });
 
 const exp = (over: Partial<StoredExport> = {}): StoredExport => ({
-  id: 'e1',
+  id: ExportId.make('e1'),
   name: 'the-great-henge.png',
   format: 'png',
   type: 'image/png',
@@ -33,9 +33,9 @@ describe('groupExports', () => {
   it('groups linked exports under their card; legacy and dangling go to other', () => {
     const cards = [card()];
     const exports = [
-      exp({ id: 'e1', cardId: 'c1' }),
-      exp({ id: 'e2' }), // legacy: no cardId
-      exp({ id: 'e3', cardId: 'deleted-card' }), // dangling
+      exp({ id: ExportId.make('e1'), cardId: CardId.make('c1') }),
+      exp({ id: ExportId.make('e2') }), // legacy: no cardId
+      exp({ id: ExportId.make('e3'), cardId: CardId.make('deleted-card') }), // dangling
     ];
     const { byCard, other } = groupExports(cards, exports);
     expect(byCard.get('c1')?.map((e) => e.id)).toEqual(['e1']);
@@ -71,8 +71,8 @@ describe('exportMatchesQuery', () => {
 describe('layoutOf', () => {
   it('resolves registered layouts and returns undefined for unknown ones', () => {
     expect(layoutOf(card())?.id).toBe('fullart');
-    expect(layoutOf(card({ themeId: 'gone' }))).toBeUndefined();
-    expect(layoutOf(card({ layoutId: 'gone' }))).toBeUndefined();
+    expect(layoutOf(card({ themeId: ThemeId.make('gone') }))).toBeUndefined();
+    expect(layoutOf(card({ layoutId: LayoutId.make('gone') }))).toBeUndefined();
   });
 });
 

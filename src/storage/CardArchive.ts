@@ -3,7 +3,14 @@ import { Effect, Exit } from 'effect';
 import { runAppExit } from '../app/runtime';
 import type { CardData } from '../cards/types';
 import { noteFromCause } from '../contracts/errors';
-import { Timestamp } from '../contracts/ids';
+import {
+  CardId,
+  type CardIdT,
+  ExportId,
+  type LayoutIdT,
+  type ThemeIdT,
+  Timestamp,
+} from '../contracts/ids';
 import {
   CardRecord,
   type CardRecordT,
@@ -22,10 +29,10 @@ export type StoredCard = CardRecordT;
 export type StoredExport = ExportRecordT;
 
 export interface SaveCardInput {
-  id?: string;
+  id?: CardIdT;
   name: string;
-  themeId: string;
-  layoutId: string;
+  themeId: ThemeIdT;
+  layoutId: LayoutIdT;
   data: CardData;
   holo: boolean;
   /** The opencode chat session backing this card (card chat panel). */
@@ -71,7 +78,7 @@ export class CardArchive extends State {
 
   async saveCard(input: SaveCardInput): Promise<StoredCard> {
     const card: StoredCard = {
-      id: input.id ?? crypto.randomUUID(),
+      id: input.id ?? CardId.make(crypto.randomUUID()),
       name: input.name,
       themeId: input.themeId,
       layoutId: input.layoutId,
@@ -108,12 +115,12 @@ export class CardArchive extends State {
     format: ExportFormat;
     bytes: ArrayBuffer;
     type: string;
-    cardId?: string;
+    cardId?: CardIdT;
   }): Promise<StoredExport> {
     const { bytes, ...meta } = input;
     const record: StoredExport = {
       ...meta,
-      id: crypto.randomUUID(),
+      id: ExportId.make(crypto.randomUUID()),
       createdAt: Timestamp.make(Date.now()),
     };
     const exit = await runAppExit(

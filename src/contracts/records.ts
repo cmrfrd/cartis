@@ -11,7 +11,7 @@
 
 import { Schema } from 'effect';
 import { FieldValue } from './fields.ts';
-import { Timestamp } from './ids.ts';
+import { CardId, ExportId, ImageId, LayoutId, ThemeId, Timestamp } from './ids.ts';
 
 // ---------------------------------------------------------------------------
 // StoreName
@@ -51,10 +51,10 @@ export type StoredRecordT = typeof StoredRecord.Type;
 // ---------------------------------------------------------------------------
 
 export const CardRecord = Schema.Struct({
-  id: Schema.String,
+  id: CardId,
   name: Schema.String,
-  themeId: Schema.String,
-  layoutId: Schema.String,
+  themeId: ThemeId,
+  layoutId: LayoutId,
   holo: Schema.Boolean,
   updatedAt: Timestamp,
   data: Schema.Record({ key: Schema.String, value: FieldValue }),
@@ -78,14 +78,14 @@ export const ExportFormat = Schema.Literal('png', 'jpeg', 'webp');
 export type ExportFormatT = typeof ExportFormat.Type;
 
 export const ExportRecord = Schema.Struct({
-  id: Schema.String,
+  id: ExportId,
   name: Schema.String,
   format: ExportFormat,
   type: Schema.String,
   createdAt: Timestamp,
   fileName: Schema.optional(Schema.String),
   /** The saved card this render was exported from (absent on legacy/back exports). */
-  cardId: Schema.optional(Schema.String),
+  cardId: Schema.optional(CardId),
 });
 export type ExportRecordT = typeof ExportRecord.Type;
 
@@ -99,7 +99,7 @@ export const ImageKind = Schema.Literal('source', 'generated');
 export type ImageKindT = typeof ImageKind.Type;
 
 export const ImageRecord = Schema.Struct({
-  id: Schema.String,
+  id: ImageId,
   name: Schema.String,
   kind: ImageKind,
   prompt: Schema.optional(Schema.String),

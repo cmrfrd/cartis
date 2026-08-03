@@ -3,6 +3,7 @@ import { Exit } from 'effect';
 import { AppShell } from '../app/AppShell';
 import { runAppExit } from '../app/runtime';
 import { noteFromCause } from '../contracts/errors';
+import type { CardIdT } from '../contracts/ids';
 import type { CardArchive, ExportFormat } from '../storage/CardArchive';
 import { Button, SelectInput } from '../ui';
 import type { ExportDpi } from './exportCard';
@@ -15,7 +16,7 @@ export class ExportBar extends Component {
   shell = get(AppShell, false);
   cardName = '';
   /** The saved card this preview belongs to — links renders to their card. */
-  cardId?: string = undefined;
+  cardId?: CardIdT = undefined;
   /** The preview's ref() object — expressive data flow instead of a fetch closure. */
   target?: { current: HTMLElement | null } = undefined;
   note = '';
