@@ -10,7 +10,6 @@ import { HttpClient, HttpClientError, HttpClientResponse } from '@effect/platfor
 import { Effect, Schema } from 'effect';
 import { describe, expect } from 'vitest';
 import { it } from '../../test/effect';
-import type { FieldSpec } from '../cards/types';
 import { AppHttpLive, httpClientFromHandler } from '../lib/http';
 import {
   ChatHistoryResponse,
@@ -22,7 +21,6 @@ import {
   SessionRef,
   StatusResponse,
   StorePutRequest,
-  schemaFromFields,
 } from './api';
 import { PromptResult, SessionCreated } from './opencode';
 import {
@@ -484,19 +482,7 @@ describe('ChatTurnRequest / Response + history + session refs', () => {
   });
 });
 
-describe('schemaFromFields', () => {
-  const fields: FieldSpec[] = [
-    { kind: 'text', key: 'name', label: 'Name' },
-    { kind: 'number', key: 'cost', label: 'Cost', min: 0, max: 9 },
-  ];
-  it('accepts a matching partial patch', () => {
-    const decoded = Schema.decodeUnknownSync(schemaFromFields(fields))({ name: 'X' });
-    expect(decoded.name).toBe('X');
-  });
-  it('rejects a wrong-typed field', () => {
-    expect(() => Schema.decodeUnknownSync(schemaFromFields(fields))({ cost: 'high' })).toThrow();
-  });
-});
+// schemaFromFields constraint tests live in src/contracts/fields.test.ts.
 
 describe('ImageGenerateRequest / ImageGenerateResponse', () => {
   it('decodes request with aspectRatio', () => {

@@ -6,7 +6,15 @@
 
 import { Schema } from 'effect';
 import { describe, expect, it } from 'vitest';
-import { AspectRatio, CardDataSchema, FieldKind, FieldSpecSchema, FieldValue } from './fields';
+import {
+  AspectRatio,
+  CardDataSchema,
+  FieldKind,
+  FieldSpecSchema,
+  FieldValue,
+  schemaFromFields,
+  summarizeField,
+} from './fields';
 
 const decodeValue = Schema.decodeUnknownSync(FieldValue);
 const decodeKind = Schema.decodeUnknownSync(FieldKind);
@@ -78,5 +86,85 @@ describe('FieldSpecSchema', () => {
 
   it('rejects an unknown kind', () => {
     expect(() => decodeSpec({ kind: 'slider', key: 'x', label: 'X' })).toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// schemaFromFields — the agent-patch validator MUST honor field constraints
+// (spec §6: a chat agent could previously set cost: 999 or an invalid select
+// value and it validated and applied).
+// ---------------------------------------------------------------------------
+
+describe('schemaFromFields', () => {
+  const fields = [
+    { kind: 'text', key: 'name', label: 'Name' },
+    { kind: 'number', key: 'cost', label: 'Cost', min: 0, max: 9 },
+    { kind: 'select', key: 'essence', label: 'Essence', options: ['ember', 'tide'] },
+    { kind: 'toggle', key: 'showStats', label: 'Stats' },
+  ] as const;
+  const decode = Schema.decodeUnknownSync(schemaFromFields(fields));
+
+  it('accepts an in-constraint patch', () => {
+    expect(decode({ name: 'Vorak', cost: 5, essence: 'tide', showStats: true })).toEqual({
+      name: 'Vorak',
+      cost: 5,
+      essence: 'tide',
+      showStats: true,
+    });
+  });
+
+  it('rejects an out-of-range number (the cost:999 hole)', () => {
+    expect(() => decode({ cost: 999 })).toThrow();
+    expect(() => decode({ cost: -1 })).toThrow();
+  });
+
+  it('rejects a non-integer number', () => {
+    expect(() => decode({ cost: 1.5 })).toThrow();
+  });
+
+  it('rejects a select value outside its options', () => {
+    expect(() => decode({ essence: 'banana' })).toThrow();
+  });
+
+  it('still drops unknown keys and rejects wrong-typed values', () => {
+    expect(decode({ name: 'X', hacker: 'y' })).toEqual({ name: 'X' });
+    expect(() => decode({ cost: 'expensive' })).toThrow();
+    expect(() => decode({ showStats: 'yes' })).toThrow();
+  });
+
+  it('a number summary without min/max validates as a plain integer', () => {
+    const loose = Schema.decodeUnknownSync(
+      schemaFromFields([{ kind: 'number', key: 'n', label: 'N' }]),
+    );
+    expect(loose({ n: 42 })).toEqual({ n: 42 });
+    expect(() => loose({ n: 1.5 })).toThrow();
+  });
+});
+
+describe('summarizeField', () => {
+  it('carries number ranges and select options onto the wire summary', () => {
+    expect(summarizeField({ kind: 'number', key: 'cost', label: 'Cost', min: 0, max: 9 })).toEqual({
+      kind: 'number',
+      key: 'cost',
+      label: 'Cost',
+      min: 0,
+      max: 9,
+    });
+    expect(
+      summarizeField({
+        kind: 'select',
+        key: 'essence',
+        label: 'Essence',
+        options: [
+          { value: 'ember', label: 'Ember' },
+          { value: 'tide', label: 'Tide' },
+        ],
+      }),
+    ).toEqual({ kind: 'select', key: 'essence', label: 'Essence', options: ['ember', 'tide'] });
+    expect(summarizeField({ kind: 'text', key: 'name', label: 'Name' })).toEqual({
+      kind: 'text',
+      key: 'name',
+      label: 'Name',
+    });
   });
 });

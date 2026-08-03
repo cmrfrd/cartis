@@ -98,3 +98,79 @@ export const FieldSpecSchema = Schema.Union(
 export type FieldSpecT = typeof FieldSpecSchema.Type;
 
 export const FieldSpecList = Schema.Array(FieldSpecSchema);
+
+// ---------------------------------------------------------------------------
+// FieldSummary — the wire-shaped slice of a FieldSpec the agent pipelines see.
+// Constraints (number range, select options) TRAVEL WITH IT so the bridge —
+// which has no theme registry — can enforce them (spec §6).
+// ---------------------------------------------------------------------------
+
+export const FieldSummary = Schema.Struct({
+  kind: FieldKind,
+  key: Schema.String,
+  label: Schema.String,
+  min: Schema.optional(Schema.Number),
+  max: Schema.optional(Schema.Number),
+  options: Schema.optional(Schema.Array(Schema.String)),
+});
+export type FieldSummaryT = typeof FieldSummary.Type;
+
+/** Build the wire summary from a layout's FieldSpec (constraints included). */
+export function summarizeField(spec: FieldSpecT): FieldSummaryT {
+  return {
+    kind: spec.kind,
+    key: spec.key,
+    label: spec.label,
+    ...(spec.kind === 'number' ? { min: spec.min, max: spec.max } : {}),
+    ...(spec.kind === 'select' ? { options: spec.options.map((o) => o.value) } : {}),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// schemaFromFields — derive the agent-patch validator from field summaries.
+// Every key optional; each value typed AND constrained per its field:
+// numbers are integers within [min, max], selects must be one of the declared
+// options (a Schema.filter over String — validation-equivalent to a literal
+// union, with friendlier types), toggles booleans, the rest strings.
+// Unknown keys are dropped.
+// ---------------------------------------------------------------------------
+
+const plainInt = Schema.Number.pipe(Schema.int());
+
+const rangedInt = (min: number, max: number) =>
+  Schema.Number.pipe(Schema.int(), Schema.between(min, max));
+
+const oneOf = (options: readonly string[]) =>
+  Schema.String.pipe(
+    Schema.filter((value: string) => options.includes(value), {
+      message: () => `expected one of: ${options.join(', ')}`,
+    }),
+  );
+
+type PatchValue =
+  | typeof Schema.String
+  | typeof Schema.Boolean
+  | typeof plainInt
+  | ReturnType<typeof rangedInt>
+  | ReturnType<typeof oneOf>;
+
+function patchValueFor(field: FieldSummaryT): PatchValue {
+  if (field.kind === 'number') {
+    return field.min !== undefined && field.max !== undefined
+      ? rangedInt(field.min, field.max)
+      : plainInt;
+  }
+  if (field.kind === 'toggle') return Schema.Boolean;
+  if (field.kind === 'select' && field.options !== undefined && field.options.length > 0) {
+    return oneOf(field.options);
+  }
+  return Schema.String;
+}
+
+export function schemaFromFields(fields: readonly FieldSummaryT[]) {
+  const shape: Record<string, Schema.optional<PatchValue>> = {};
+  for (const field of fields) {
+    shape[field.key] = Schema.optional(patchValueFor(field));
+  }
+  return Schema.Struct(shape);
+}

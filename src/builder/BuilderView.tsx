@@ -9,6 +9,7 @@ import { getLayout, getTheme, listThemes } from '../cards/registry';
 import type { CardData, FieldValue, Layout, Theme } from '../cards/types';
 import { ThreadPanel } from '../chat/ThreadPanel';
 import { type ChatContext, ThreadState } from '../chat/ThreadState';
+import { summarizeField } from '../contracts/fields';
 import { ExportBar } from '../export/ExportBar';
 import { ImageProvider } from '../images/ImageProvider';
 import type { StoredCard } from '../storage/CardArchive';
@@ -59,7 +60,7 @@ export class BuilderView extends Component {
         palette: theme.artFlavor?.(this.data) ?? '',
         argumentSummary: layout.fields.map((f) => f.key).join(', '),
       },
-      fields: layout.fields.map((f) => ({ kind: f.kind, key: f.key, label: f.label })),
+      fields: layout.fields.map(summarizeField),
       currentData: { ...this.data },
       currentArtFileName: this.currentArtFileName(),
       applyPatch: (patch) => {

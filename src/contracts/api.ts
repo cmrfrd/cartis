@@ -7,7 +7,7 @@
  */
 
 import { Schema } from 'effect';
-import { CardDataSchema } from './fields.ts';
+import { CardDataSchema, FieldSummary } from './fields.ts';
 import { StoredRecord } from './records.ts';
 import { ThemeContext } from './theme.ts';
 import { ThreadMessage, ThreadSummary } from './thread.ts';
@@ -55,13 +55,6 @@ export type StatusResponseT = typeof StatusResponse.Type;
 /** Lenient card-data record (patch shape when no field schema is available). */
 export const CardData = CardDataSchema;
 export type CardDataT = typeof CardData.Type;
-
-/** FieldSpec-shaped summary the LLM sees (kind + key + label). */
-const FieldSummary = Schema.Struct({
-  kind: Schema.String,
-  key: Schema.String,
-  label: Schema.String,
-});
 
 export const ArtAction = Schema.Struct({
   brief: Schema.String,
@@ -128,25 +121,7 @@ export const PermissionReply = Schema.Struct({
 });
 export type PermissionReplyT = typeof PermissionReply.Type;
 
-/**
- * Derive a Schema for a targeted patch from field specs: every key optional,
- * each typed per its kind (text/select/image/textarea → string, number →
- * number, toggle → boolean). Unknown keys are dropped. The parameter is
- * deliberately minimal ({ kind, key }) so BOTH a layout's full FieldSpec[]
- * and the fill request's { kind, key, label } summaries feed it directly.
- */
-export function schemaFromFields(fields: readonly { kind: string; key: string }[]) {
-  const shape: Record<
-    string,
-    Schema.optional<typeof Schema.String | typeof Schema.Number | typeof Schema.Boolean>
-  > = {};
-  for (const f of fields) {
-    const value =
-      f.kind === 'number' ? Schema.Number : f.kind === 'toggle' ? Schema.Boolean : Schema.String;
-    shape[f.key] = Schema.optional(value);
-  }
-  return Schema.Struct(shape);
-}
+// schemaFromFields lives in ./fields.ts (constraint-honoring; spec §6).
 
 // ---------------------------------------------------------------------------
 // POST /api/image/generate

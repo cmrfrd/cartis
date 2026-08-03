@@ -14,6 +14,7 @@ import { Effect, Exit, Fiber, Stream } from 'effect';
 import { forkApp, runAppExit } from '../app/runtime';
 import type { ArtActionT, CardDataT, ChatTurnRequestT, ChatTurnResponseT } from '../contracts/api';
 import { noteFromCause } from '../contracts/errors';
+import type { FieldSummaryT } from '../contracts/fields';
 import { materializeAssistantParts } from '../contracts/materialize';
 import type { ThemeContextT } from '../contracts/theme';
 import type {
@@ -27,17 +28,10 @@ import { ChatEvents } from './ChatEvents';
 import { ChatThread } from './ChatThread';
 import { foldThreadEvent } from './fold';
 
-/** Field summary the agent sees (kind + key + label) — a slice of FieldSpec. */
-export interface ChatFieldSummary {
-  readonly kind: string;
-  readonly key: string;
-  readonly label: string;
-}
-
 /** The card context + appliers BuilderView injects so a turn can edit the card. */
 export interface ChatContext {
   readonly themeContext: ThemeContextT;
-  readonly fields: readonly ChatFieldSummary[];
+  readonly fields: readonly FieldSummaryT[];
   readonly currentData: CardDataT;
   readonly currentArtFileName?: string;
   /** Apply the agent's field patch to the open document. */

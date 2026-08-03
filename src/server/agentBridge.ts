@@ -27,7 +27,6 @@ import {
   PermissionReply,
   SessionAction,
   StorePutRequest,
-  schemaFromFields,
 } from '../contracts/api.ts';
 import {
   AgentError,
@@ -35,6 +34,7 @@ import {
   NetworkError,
   ReplicateError,
 } from '../contracts/errors.ts';
+import { schemaFromFields } from '../contracts/fields.ts';
 import { materializeAssistantParts } from '../contracts/materialize.ts';
 import {
   AgentEvent,
