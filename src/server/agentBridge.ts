@@ -15,7 +15,6 @@ import {
   Stream,
 } from 'effect';
 import type { Plugin } from 'vite';
-import { ActivityEventJson } from '../contracts/activity.ts';
 import {
   AgentFillRequest,
   type AgentFillRequestT,
@@ -34,10 +33,16 @@ import {
 import { AgentEvent, PromptResult, SessionCreated } from '../contracts/opencode.ts';
 import { Prediction, type PredictionT } from '../contracts/replicate.ts';
 import type { ThemeContextT } from '../contracts/theme.ts';
+import {
+  type ArtPhaseT,
+  ThreadEventJson,
+  type ThreadEventT,
+  type ThreadPartT,
+} from '../contracts/thread.ts';
 import { bytesToDataUrl } from '../images/codec.ts';
-import { ActivityBus } from './activity.ts';
 import { makeBridgeRuntime, readBody, respond, sendJson } from './BridgeRuntime.ts';
 import { FileStore, type StoreName } from './fileStore.ts';
+import { ThreadBus } from './threadBus.ts';
 
 // ---------- opencode ----------
 
@@ -67,26 +72,48 @@ function envOption(name: string): Effect.Effect<Option.Option<string>> {
 
 const decodeSessionOption = Schema.decodeUnknownOption(SessionCreated);
 
-// ---------- session activity watcher ----------
+// ---------- session thread watcher ----------
 
 const decodeAgentEvent = Schema.decodeUnknownOption(AgentEvent);
 
-/** Reducer state for the activity watcher (dedupe + text throttle). */
+interface TextTrack {
+  readonly tag: 'Text' | 'Reasoning';
+  readonly text: string;
+  readonly lastEmitAt: number;
+  readonly dirty: boolean;
+}
+
+/**
+ * Reducer state for the thread watcher: message roles (assistant parts stream,
+ * the user's prompt echo is skipped), turn start/completion dedupe, stable
+ * part indexes per message, tool-state transition dedupe, and the cumulative
+ * text throttle with its unflushed tail.
+ */
 export interface WatchState {
-  readonly runningCalls: ReadonlySet<string>;
-  readonly reasonedMessages: ReadonlySet<string>;
-  readonly lastTextLogAt: number;
-  readonly hasLoggedText: boolean;
+  readonly roles: ReadonlyMap<string, 'user' | 'assistant'>;
+  readonly started: ReadonlySet<string>;
+  readonly completed: ReadonlySet<string>;
+  readonly partIndexByKey: ReadonlyMap<string, number>;
+  readonly partCountByMessage: ReadonlyMap<string, number>;
+  readonly toolStatusByCall: ReadonlyMap<string, string>;
+  readonly textByKey: ReadonlyMap<string, TextTrack>;
 }
 
 export const initialWatchState: WatchState = {
-  runningCalls: new Set<string>(),
-  reasonedMessages: new Set<string>(),
-  lastTextLogAt: 0,
-  hasLoggedText: false,
+  roles: new Map(),
+  started: new Set(),
+  completed: new Set(),
+  partIndexByKey: new Map(),
+  partCountByMessage: new Map(),
+  toolStatusByCall: new Map(),
+  textByKey: new Map(),
 };
 
-const TEXT_LOG_INTERVAL_MS = 2000;
+const TEXT_DELTA_INTERVAL_MS = 2000;
+
+const mapSet = <K, V>(map: ReadonlyMap<K, V>, key: K, value: V): ReadonlyMap<K, V> =>
+  new Map([...map, [key, value]]);
+const setAdd = <A>(set: ReadonlySet<A>, value: A): ReadonlySet<A> => new Set([...set, value]);
 
 function sessionErrorMessage(error: unknown): string {
   if (typeof error === 'object' && error !== null && 'message' in error) {
@@ -96,76 +123,235 @@ function sessionErrorMessage(error: unknown): string {
   return 'unknown';
 }
 
+/** Stable part index for `key` within `messageId`, assigning the next slot on first sight. */
+function assignIndex(
+  state: WatchState,
+  messageId: string,
+  key: string,
+): { index: number; state: WatchState } {
+  const fullKey = `${messageId}/${key}`;
+  const existing = state.partIndexByKey.get(fullKey);
+  if (existing !== undefined) return { index: existing, state };
+  const index = state.partCountByMessage.get(messageId) ?? 0;
+  return {
+    index,
+    state: {
+      ...state,
+      partIndexByKey: mapSet(state.partIndexByKey, fullKey, index),
+      partCountByMessage: mapSet(state.partCountByMessage, messageId, index + 1),
+    },
+  };
+}
+
+const partDelta = (
+  sessionId: string,
+  messageId: string,
+  partIndex: number,
+  part: ThreadPartT,
+): ThreadEventT => ({ _tag: 'PartDelta', sessionId, messageId, partIndex, part });
+
+/** Cumulative text/reasoning delta, throttled to one emission per 2s per part. */
+function textDelta(
+  state: WatchState,
+  sessionId: string,
+  messageId: string,
+  key: string,
+  tag: 'Text' | 'Reasoning',
+  text: string,
+  now: number,
+): { events: readonly ThreadEventT[]; state: WatchState } {
+  const assigned = assignIndex(state, messageId, key);
+  const fullKey = `${messageId}/${key}`;
+  const track = assigned.state.textByKey.get(fullKey);
+  if (track !== undefined && now - track.lastEmitAt < TEXT_DELTA_INTERVAL_MS) {
+    return {
+      events: [],
+      state: {
+        ...assigned.state,
+        textByKey: mapSet(assigned.state.textByKey, fullKey, {
+          tag,
+          text,
+          lastEmitAt: track.lastEmitAt,
+          dirty: true,
+        }),
+      },
+    };
+  }
+  const part: ThreadPartT = tag === 'Text' ? { _tag: 'Text', text } : { _tag: 'Reasoning', text };
+  return {
+    events: [partDelta(sessionId, messageId, assigned.index, part)],
+    state: {
+      ...assigned.state,
+      textByKey: mapSet(assigned.state.textByKey, fullKey, {
+        tag,
+        text,
+        lastEmitAt: now,
+        dirty: false,
+      }),
+    },
+  };
+}
+
+/** Unthrottled final deltas for every dirty text part of `messageId` (spec: final flush). */
+function flushDirtyText(
+  state: WatchState,
+  sessionId: string,
+  messageId: string,
+): { events: readonly ThreadEventT[]; state: WatchState } {
+  const events: ThreadEventT[] = [];
+  let textByKey = state.textByKey;
+  const prefix = `${messageId}/`;
+  for (const [fullKey, track] of state.textByKey) {
+    if (!fullKey.startsWith(prefix) || !track.dirty) continue;
+    const index = state.partIndexByKey.get(fullKey);
+    if (index === undefined) continue;
+    const part: ThreadPartT =
+      track.tag === 'Text'
+        ? { _tag: 'Text', text: track.text }
+        : { _tag: 'Reasoning', text: track.text };
+    events.push(partDelta(sessionId, messageId, index, part));
+    textByKey = mapSet(textByKey, fullKey, { ...track, dirty: false });
+  }
+  return { events, state: { ...state, textByKey } };
+}
+
+const TOOL_STATUSES = ['pending', 'running', 'completed', 'error'] as const;
+type ToolStatus = (typeof TOOL_STATUSES)[number];
+const toolStatusOf = (raw: string | undefined): ToolStatus =>
+  TOOL_STATUSES.find((s) => s === raw) ?? 'pending';
+
 /**
- * Pure per-event reducer for the watcher (spec: agent-activity-observability):
- * every discrete agent action becomes a readable line, deduped (one 'running'
- * per tool call, one 'thinking' per message) and text progress throttled to
- * one line per 2 seconds. Unknown or other-session events yield no message.
+ * Pure per-event reducer: raw opencode events → typed ThreadEvents for the
+ * watched session. TurnStarted/TurnCompleted derive from `message.updated`
+ * (real message ids end to end); assistant parts become PartDeltas at stable
+ * indexes; the user's prompt echo is skipped; unknown event/part kinds map to
+ * NO event — dropped, never a decode crash (spec: tolerant boundaries).
  */
 export function mapAgentEvent(
   raw: unknown,
   sessionId: string,
   state: WatchState,
   now: number,
-): { message?: string; state: WatchState } {
+): { events: readonly ThreadEventT[]; state: WatchState } {
   const decoded = decodeAgentEvent(raw);
-  if (Option.isNone(decoded)) return { state };
+  if (Option.isNone(decoded)) return { events: [], state };
   const event = decoded.value;
 
   if (event.type === 'session.error') {
-    return { message: `agent error: ${sessionErrorMessage(event.properties?.error)}`, state };
+    return {
+      events: [{ _tag: 'SessionError', message: sessionErrorMessage(event.properties?.error) }],
+      state,
+    };
   }
-  if (event.type !== 'message.part.updated') return { state };
+
+  if (event.type === 'permission.updated') {
+    const props = event.properties;
+    if (props?.sessionID !== sessionId) return { events: [], state };
+    return {
+      events: [
+        {
+          _tag: 'PermissionRequested',
+          sessionId,
+          permissionId: props.id ?? '',
+          title: props.title ?? 'permission requested',
+        },
+      ],
+      state,
+    };
+  }
+
+  if (event.type === 'message.updated') {
+    const info = event.properties?.info;
+    if (!info || info.sessionID !== sessionId) return { events: [], state };
+    const id = info.id ?? '';
+    const role =
+      info.role === 'assistant' ? 'assistant' : info.role === 'user' ? 'user' : undefined;
+    if (id.length === 0 || role === undefined) return { events: [], state };
+    let next: WatchState =
+      state.roles.get(id) === role ? state : { ...state, roles: mapSet(state.roles, id, role) };
+    if (role !== 'assistant') return { events: [], state: next };
+    const events: ThreadEventT[] = [];
+    if (!next.started.has(id)) {
+      events.push({ _tag: 'TurnStarted', sessionId, messageId: id });
+      next = { ...next, started: setAdd(next.started, id) };
+    }
+    if (info.time?.completed !== undefined && !next.completed.has(id)) {
+      const flushed = flushDirtyText(next, sessionId, id);
+      events.push(...flushed.events);
+      events.push({ _tag: 'TurnCompleted', sessionId, messageId: id, status: 'complete' });
+      next = { ...flushed.state, completed: setAdd(flushed.state.completed, id) };
+    }
+    return { events, state: next };
+  }
+
+  if (event.type !== 'message.part.updated') return { events: [], state };
   const part = event.properties?.part;
-  if (!part || part.sessionID !== sessionId) return { state };
+  if (!part || part.sessionID !== sessionId) return { events: [], state };
+  const messageId = part.messageID ?? '';
+  if (messageId.length === 0 || state.roles.get(messageId) !== 'assistant') {
+    return { events: [], state };
+  }
 
   switch (part.type) {
-    case 'step-start':
-      return { message: 'step started', state };
+    case 'step-start': {
+      const assigned = assignIndex(state, messageId, part.id ?? 'step');
+      return {
+        events: [partDelta(sessionId, messageId, assigned.index, { _tag: 'Step' })],
+        state: assigned.state,
+      };
+    }
     case 'tool': {
-      const tool = part.tool ?? 'tool';
-      const status = part.state?.status;
-      if (status === 'running') {
-        const callId = part.callID ?? '';
-        if (state.runningCalls.has(callId)) return { state };
-        const title = part.state?.title;
-        return {
-          message: `tool ${tool}: running${title !== undefined && title.length > 0 ? ` — ${title}` : ''}`,
-          state: { ...state, runningCalls: new Set([...state.runningCalls, callId]) },
-        };
-      }
-      if (status === 'completed') {
-        const title = part.state?.title ?? '';
-        const start = part.state?.time?.start ?? now;
-        const end = part.state?.time?.end ?? now;
-        const secs = ((end - start) / 1000).toFixed(1);
-        return { message: `tool ${tool}: done — ${title} (${secs}s)`, state };
-      }
-      if (status === 'error') {
-        return { message: `tool ${tool}: FAILED — ${part.state?.error ?? 'unknown'}`, state };
-      }
-      return { state };
-    }
-    case 'reasoning': {
-      const messageId = part.messageID ?? '';
-      if (state.reasonedMessages.has(messageId)) return { state };
+      const callId = part.callID ?? part.id ?? 'tool';
+      const status = toolStatusOf(part.state?.status);
+      if (state.toolStatusByCall.get(callId) === status) return { events: [], state };
+      const assigned = assignIndex(state, messageId, part.id ?? callId);
+      const st = part.state;
+      const secs =
+        status === 'completed'
+          ? ((st?.time?.end ?? now) - (st?.time?.start ?? now)) / 1000
+          : undefined;
+      const result = status === 'error' ? (st?.error ?? 'unknown') : st?.output;
+      const toolPart: ThreadPartT = {
+        _tag: 'ToolCall',
+        callId,
+        name: part.tool ?? 'tool',
+        ...(st?.title !== undefined ? { title: st.title } : {}),
+        status,
+        ...(st?.input !== undefined ? { argsText: JSON.stringify(st.input) } : {}),
+        ...(result !== undefined ? { result } : {}),
+        ...(status === 'error' ? { isError: true } : {}),
+        ...(secs !== undefined ? { secs } : {}),
+      };
       return {
-        message: 'thinking…',
-        state: { ...state, reasonedMessages: new Set([...state.reasonedMessages, messageId]) },
+        events: [partDelta(sessionId, messageId, assigned.index, toolPart)],
+        state: {
+          ...assigned.state,
+          toolStatusByCall: mapSet(assigned.state.toolStatusByCall, callId, status),
+        },
       };
     }
-    case 'text': {
-      if (state.hasLoggedText && now - state.lastTextLogAt < TEXT_LOG_INTERVAL_MS) {
-        return { state };
-      }
-      const chars = part.text?.length ?? 0;
-      return {
-        message: `writing response… (${String(chars)} chars)`,
-        state: { ...state, hasLoggedText: true, lastTextLogAt: now },
-      };
-    }
+    case 'reasoning':
+      return textDelta(
+        state,
+        sessionId,
+        messageId,
+        part.id ?? 'reasoning',
+        'Reasoning',
+        part.text ?? '',
+        now,
+      );
+    case 'text':
+      return textDelta(
+        state,
+        sessionId,
+        messageId,
+        part.id ?? 'text',
+        'Text',
+        part.text ?? '',
+        now,
+      );
     default:
-      return { state };
+      return { events: [], state };
   }
 }
 
@@ -189,7 +375,7 @@ export class AgentClient extends Context.Tag('cartis/AgentClient')<
 
 /** Live wiring the watcher needs: the bus to emit on + a runtime for the SSE callback. */
 export interface AgentActivityWiring {
-  readonly bus: Context.Tag.Service<ActivityBus>;
+  readonly bus: Context.Tag.Service<ThreadBus>;
   readonly runtime: Runtime.Runtime<never>;
 }
 
@@ -229,8 +415,8 @@ export function agentClientFromSdk(
               for await (const data of stream) {
                 const out = mapAgentEvent(data, sessionId, state.current, Date.now());
                 state.current = out.state;
-                if (out.message !== undefined) {
-                  Runtime.runSync(activity.runtime)(activity.bus.emit('agent', out.message));
+                for (const event of out.events) {
+                  Runtime.runSync(activity.runtime)(activity.bus.emit(event));
                 }
               }
             })().catch(() => undefined);
@@ -278,10 +464,10 @@ export function agentClientFromSdk(
  * `bun run dev` startup stays fast when the agent is never invoked.
  * `OPENCODE_MODEL` via Config.option.
  */
-export const agentClientLive: Layer.Layer<AgentClient, never, ActivityBus> = Layer.effect(
+export const agentClientLive: Layer.Layer<AgentClient, never, ThreadBus> = Layer.effect(
   AgentClient,
   Effect.gen(function* () {
-    const bus = yield* ActivityBus;
+    const bus = yield* ThreadBus;
     const runtime = yield* Effect.runtime<never>();
     const wiring: AgentActivityWiring = { bus, runtime };
     const model = yield* envOption('OPENCODE_MODEL');
@@ -346,11 +532,15 @@ export function composeArtPrompt(
   themeContext: ThemeContextT,
   argumentValues: Record<string, string>,
   brief?: string,
-): Effect.Effect<string, AgentError, AgentClient | ActivityBus> {
+): Effect.Effect<string, AgentError, AgentClient | ThreadBus> {
   return Effect.gen(function* () {
     const agent = yield* AgentClient;
-    const bus = yield* ActivityBus;
-    yield* bus.emit('agent', 'composing art prompt from theme + arguments');
+    const bus = yield* ThreadBus;
+    yield* bus.emit({
+      _tag: 'Art',
+      phase: 'composing',
+      detail: 'composing art prompt from theme + arguments',
+    });
     const id = yield* agent.createSession('cartis art compose');
     const argLines = Object.entries(argumentValues)
       .map(([k, v]) => `- ${k}: ${v}`)
@@ -367,7 +557,11 @@ export function composeArtPrompt(
     const result = yield* agent.withActivity(id, agent.prompt(id, instruction));
     const composed = promptText(result);
     const final = composed.length > 0 ? composed : themeContext.lookAndFeel;
-    yield* bus.emit('agent', `art prompt composed (${String(final.length)} chars)`);
+    yield* bus.emit({
+      _tag: 'Art',
+      phase: 'composing',
+      detail: `art prompt composed (${String(final.length)} chars)`,
+    });
     return final;
   });
 }
@@ -405,10 +599,10 @@ export function runFillAgent(
   readArt: (
     fileName: string,
   ) => Effect.Effect<Option.Option<{ mime: string; dataUrl: string }>, FileStoreError>,
-): Effect.Effect<AgentFillResponseT, AgentError | FileStoreError, AgentClient | ActivityBus> {
+): Effect.Effect<AgentFillResponseT, AgentError | FileStoreError, AgentClient | ThreadBus> {
   return Effect.gen(function* () {
     const agent = yield* AgentClient;
-    const bus = yield* ActivityBus;
+    const bus = yield* ThreadBus;
     const sessionId = req.sessionId ?? (yield* agent.createSession('cartis card fill'));
     const image =
       req.currentArtFileName !== undefined
@@ -421,7 +615,7 @@ export function runFillAgent(
       `Current values (respect these; the user may have hand-edited): ${JSON.stringify(req.currentData)}`,
       `User request: ${req.userPrompt}`,
     ].join('\n\n');
-    yield* bus.emit('agent', `fill: “${req.userPrompt.slice(0, 60)}”`);
+    yield* bus.log('agent', `fill: “${req.userPrompt.slice(0, 60)}”`);
     const startedAt = yield* Clock.currentTimeMillis;
     const elapsed = Clock.currentTimeMillis.pipe(
       Effect.map((now) => Math.round((now - startedAt) / 1000)),
@@ -430,7 +624,7 @@ export function runFillAgent(
       Effect.gen(function* () {
         yield* Effect.forkScoped(
           elapsed.pipe(
-            Effect.flatMap((secs) => bus.emit('agent', `still working… (${String(secs)}s)`)),
+            Effect.flatMap((secs) => bus.log('agent', `still working… (${String(secs)}s)`)),
             Effect.delay('5 seconds'),
             Effect.forever,
           ),
@@ -448,7 +642,7 @@ export function runFillAgent(
       Effect.mapError(() => new AgentError({ reason: 'no-fill' })),
     );
     const artAction = Option.getOrUndefined(decodeArtActionOption(body.artAction));
-    yield* bus.emit('agent', 'fill patch ready');
+    yield* bus.log('agent', 'fill patch ready');
     return { sessionId, patch, artAction };
   });
 }
@@ -553,13 +747,15 @@ export class ReplicateClient extends Context.Tag('cartis/ReplicateClient')<
 export const replicateClientLive: Layer.Layer<
   ReplicateClient,
   never,
-  ReplicateSdk | ActivityBus | HttpClient.HttpClient
+  ReplicateSdk | ThreadBus | HttpClient.HttpClient
 > = Layer.effect(
   ReplicateClient,
   Effect.gen(function* () {
     const sdk = yield* ReplicateSdk;
-    const bus = yield* ActivityBus;
+    const bus = yield* ThreadBus;
     const http = yield* HttpClient.HttpClient;
+    const art = (phase: ArtPhaseT, detail: string): Effect.Effect<void> =>
+      bus.emit({ _tag: 'Art', phase, detail });
 
     const generate = (
       token: string,
@@ -577,8 +773,8 @@ export const replicateClientLive: Layer.Layer<
           Effect.map((now) => Math.round((now - startedAt) / 1000)),
         );
 
-        yield* bus.emit(
-          'image',
+        yield* art(
+          'generating',
           hasSource
             ? `sending photo + prompt to replicate (flux-kontext-pro, ${aspectRatio})`
             : `sending prompt to replicate (flux-kontext-pro, ${aspectRatio})`,
@@ -590,7 +786,7 @@ export const replicateClientLive: Layer.Layer<
           aspect_ratio: aspectRatio,
         });
         const id = created.id;
-        yield* bus.emit('image', `prediction ${id ?? '?'} created`);
+        yield* art('generating', `prediction ${id ?? '?'} created`);
         if (typeof id !== 'string') {
           return yield* Effect.fail(new ReplicateError({ reason: 'no-output' }));
         }
@@ -603,7 +799,7 @@ export const replicateClientLive: Layer.Layer<
             if (status !== prev) {
               yield* Ref.set(lastStatus, status);
               const secs = yield* elapsed;
-              yield* bus.emit('image', `status: ${status} (${secs}s)`);
+              yield* art('progress', `status: ${status} (${String(secs)}s)`);
             }
           });
 
@@ -657,9 +853,9 @@ export const replicateClientLive: Layer.Layer<
         );
         const contentType = response.headers['content-type'] ?? 'image/png';
         const secs = yield* elapsed;
-        yield* bus.emit(
-          'image',
-          `output downloaded (${String(Math.round(bytes.byteLength / 1024))}KB) in ${secs}s`,
+        yield* art(
+          'downloaded',
+          `output downloaded (${String(Math.round(bytes.byteLength / 1024))}KB) in ${String(secs)}s`,
         );
         return bytesToDataUrl(bytes, contentType);
       });
@@ -684,7 +880,7 @@ function parseStorePath(url: string): { store: StoreName; rest: string } | undef
 const decodeStorePut = Schema.decodeUnknown(StorePutRequest);
 const decodeFill = Schema.decodeUnknown(AgentFillRequest);
 const decodeImageGenerate = Schema.decodeUnknown(ImageGenerateRequest);
-const encodeActivity = Schema.encode(ActivityEventJson);
+const encodeThreadEvent = Schema.encode(ThreadEventJson);
 
 export function cartisBridge(): Plugin {
   return {
@@ -759,8 +955,8 @@ export function cartisBridge(): Plugin {
         });
       });
 
-      // ----- /api/activity (SSE) -----
-      server.middlewares.use('/api/activity', (req, res) => {
+      // ----- /api/chat/events (SSE) -----
+      server.middlewares.use('/api/chat/events', (req, res) => {
         const sse = res as ServerResponse;
         sse.statusCode = 200;
         sse.setHeader('Content-Type', 'text/event-stream');
@@ -776,9 +972,9 @@ export function cartisBridge(): Plugin {
             }
           });
 
-        const stream = Effect.flatMap(ActivityBus, (bus) =>
+        const stream = Effect.flatMap(ThreadBus, (bus) =>
           bus.changes.pipe(
-            Stream.mapEffect(encodeActivity),
+            Stream.mapEffect(encodeThreadEvent),
             Stream.map((json) => `data: ${json}\n\n`),
             Stream.runForEach(write),
           ),

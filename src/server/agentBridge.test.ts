@@ -3,8 +3,8 @@ import { describe, expect } from 'vitest';
 import { it } from '../../test/effect.ts';
 import type { AgentFillRequestT } from '../contracts/api.ts';
 import type { PredictionT } from '../contracts/replicate.ts';
+import type { ThreadEventT } from '../contracts/thread.ts';
 import { httpClientFromHandler } from '../lib/http.ts';
-import { ActivityBus, activityBusTestLayer } from './activity.ts';
 import {
   AgentClient,
   agentClientFromSdk,
@@ -16,10 +16,16 @@ import {
   ReplicateSdk,
   replicateClientLive,
   runFillAgent,
+  type WatchState,
 } from './agentBridge.ts';
+import { ThreadBus, threadBusTestLayer } from './threadBus.ts';
+
+/** Art-event details from a bus history (the replicate/compose progress lane). */
+const artDetails = (history: ReadonlyArray<ThreadEventT>): string[] =>
+  history.flatMap((e) => (e._tag === 'Art' && e.detail !== undefined ? [e.detail] : []));
 
 // ---------------------------------------------------------------------------
-// composeArtPrompt — stub AgentClient + test ActivityBus
+// composeArtPrompt — stub AgentClient + test ThreadBus
 // ---------------------------------------------------------------------------
 
 /** Stub AgentClient whose prompt() records the instruction and answers with prose. */
@@ -56,15 +62,15 @@ describe('composeArtPrompt', () => {
           composeStub((t) => {
             seen = t;
           }),
-          activityBusTestLayer,
+          threadBusTestLayer,
         ),
       ),
     );
   });
 
-  it.effect('falls back to the lookAndFeel when the model returns no text', () =>
+  it.effect('falls back to the lookAndFeel and emits Art composing events', () =>
     Effect.gen(function* () {
-      const bus = yield* ActivityBus;
+      const bus = yield* ThreadBus;
       const prompt = yield* composeArtPrompt(
         { lookAndFeel: 'painterly oil', palette: '', argumentSummary: '' },
         {},
@@ -78,9 +84,9 @@ describe('composeArtPrompt', () => {
         ),
       );
       expect(prompt).toBe('painterly oil');
-      const messages = (yield* bus.history).map((e) => e.message);
-      expect(messages.some((m) => m.includes('composing art prompt'))).toBe(true);
-    }).pipe(Effect.provide(activityBusTestLayer)),
+      const details = artDetails(yield* bus.history);
+      expect(details.some((d) => d.includes('composing art prompt'))).toBe(true);
+    }).pipe(Effect.provide(threadBusTestLayer)),
   );
 });
 
@@ -140,11 +146,16 @@ describe('runFillAgent', () => {
       expect(calls[0]?.text).toContain('Hand-edited.');
       expect(calls[0]?.text).toContain('rename him to Vorak');
       expect(calls[0]?.image).toBeUndefined();
+      // turn-level notes go to the console-only log lane, not the event stream
+      const bus = yield* ThreadBus;
+      const logs = yield* bus.logs;
+      expect(logs.some((l) => l.includes('fill:'))).toBe(true);
+      expect(logs.some((l) => l.includes('fill patch ready'))).toBe(true);
     }).pipe(
       Effect.provide(
         Layer.mergeAll(
           fillStub('{"patch": {"name": "Vorak"}}', calls, sessions),
-          activityBusTestLayer,
+          threadBusTestLayer,
         ),
       ),
     );
@@ -160,7 +171,7 @@ describe('runFillAgent', () => {
       expect(calls[0]?.sessionId).toBe('episode-1');
     }).pipe(
       Effect.provide(
-        Layer.mergeAll(fillStub('{"patch": {}}', calls, sessions), activityBusTestLayer),
+        Layer.mergeAll(fillStub('{"patch": {}}', calls, sessions), threadBusTestLayer),
       ),
     );
   });
@@ -181,7 +192,7 @@ describe('runFillAgent', () => {
             calls,
             [],
           ),
-          activityBusTestLayer,
+          threadBusTestLayer,
         ),
       ),
     );
@@ -195,7 +206,7 @@ describe('runFillAgent', () => {
         Effect.provide(
           Layer.mergeAll(
             fillStub('{"patch": {"name": "Vorak", "hacker": "x"}}', calls, []),
-            activityBusTestLayer,
+            threadBusTestLayer,
           ),
         ),
       );
@@ -204,10 +215,7 @@ describe('runFillAgent', () => {
       const err = yield* runFillAgent(fillReq(), noArt).pipe(
         Effect.flip,
         Effect.provide(
-          Layer.mergeAll(
-            fillStub('{"patch": {"cost": "expensive"}}', [], []),
-            activityBusTestLayer,
-          ),
+          Layer.mergeAll(fillStub('{"patch": {"cost": "expensive"}}', [], []), threadBusTestLayer),
         ),
       );
       expect(err._tag).toBe('AgentError');
@@ -224,7 +232,7 @@ describe('runFillAgent', () => {
         return Effect.void;
       }),
       Effect.provide(
-        Layer.mergeAll(fillStub('sorry, I cannot help with that', [], []), activityBusTestLayer),
+        Layer.mergeAll(fillStub('sorry, I cannot help with that', [], []), threadBusTestLayer),
       ),
     ),
   );
@@ -283,9 +291,9 @@ const pngHandler = () =>
 const replicateEnv = (sequence: ReadonlyArray<PredictionT>) =>
   replicateClientLive.pipe(
     Layer.provide(
-      Layer.mergeAll(sdkStub(sequence), activityBusTestLayer, httpClientFromHandler(pngHandler)),
+      Layer.mergeAll(sdkStub(sequence), threadBusTestLayer, httpClientFromHandler(pngHandler)),
     ),
-    Layer.merge(activityBusTestLayer),
+    Layer.merge(threadBusTestLayer),
   );
 
 describe('ReplicateClient.generate', () => {
@@ -302,11 +310,11 @@ describe('ReplicateClient.generate', () => {
         Layer.provide(
           Layer.mergeAll(
             recordingSdkStub([succeeded], created),
-            activityBusTestLayer,
+            threadBusTestLayer,
             httpClientFromHandler(pngHandler),
           ),
         ),
-        Layer.merge(activityBusTestLayer),
+        Layer.merge(threadBusTestLayer),
       );
       return Effect.gen(function* () {
         yield* Effect.flatMap(ReplicateClient, (c) =>
@@ -335,11 +343,11 @@ describe('ReplicateClient.generate', () => {
       Layer.provide(
         Layer.mergeAll(
           recordingSdkStub([succeeded], created),
-          activityBusTestLayer,
+          threadBusTestLayer,
           httpClientFromHandler(pngHandler),
         ),
       ),
-      Layer.merge(activityBusTestLayer),
+      Layer.merge(threadBusTestLayer),
     );
     return Effect.gen(function* () {
       yield* Effect.flatMap(ReplicateClient, (c) =>
@@ -355,9 +363,9 @@ describe('ReplicateClient.generate', () => {
     }).pipe(Effect.provide(env));
   });
 
-  it.effect('creates a prediction, polls to success, downloads output, logs progress', () =>
+  it.effect('creates a prediction, polls to success, downloads output, emits Art events', () =>
     Effect.gen(function* () {
-      const bus = yield* ActivityBus;
+      const bus = yield* ThreadBus;
       const fiber = yield* Effect.fork(
         Effect.flatMap(ReplicateClient, (c) =>
           c.generate('tok', {
@@ -373,11 +381,16 @@ describe('ReplicateClient.generate', () => {
       const dataUrl = yield* Fiber.join(fiber);
       expect(dataUrl.startsWith('data:image/png;base64,')).toBe(true);
 
-      const messages = (yield* bus.history).map((e) => e.message);
-      expect(messages.some((m) => m.includes('prediction pred-1 created'))).toBe(true);
-      expect(messages.some((m) => m.includes('status: processing'))).toBe(true);
-      expect(messages.some((m) => m.includes('status: succeeded'))).toBe(true);
-      expect(messages.some((m) => m.includes('output downloaded'))).toBe(true);
+      const details = artDetails(yield* bus.history);
+      expect(details.some((d) => d.includes('prediction pred-1 created'))).toBe(true);
+      expect(details.some((d) => d.includes('status: processing'))).toBe(true);
+      expect(details.some((d) => d.includes('status: succeeded'))).toBe(true);
+      expect(details.some((d) => d.includes('output downloaded'))).toBe(true);
+      // phases ride the events: generating → progress → downloaded
+      const phases = (yield* bus.history).flatMap((e) => (e._tag === 'Art' ? [e.phase] : []));
+      expect(phases).toContain('generating');
+      expect(phases).toContain('progress');
+      expect(phases).toContain('downloaded');
     }).pipe(
       Effect.provide(
         replicateEnv([
@@ -475,128 +488,252 @@ describe('ReplicateClient.generate', () => {
 });
 
 // ---------------------------------------------------------------------------
-// mapAgentEvent — pure reducer for the session activity watcher
+// mapAgentEvent — pure reducer: raw opencode events → ThreadEvents
 // ---------------------------------------------------------------------------
 
 describe('mapAgentEvent', () => {
   const S = 'sess-1';
-  const part = (over: Record<string, unknown>) => ({
+
+  const msgUpdated = (id: string, role: string, completed?: number) => ({
+    type: 'message.updated',
+    properties: {
+      info: {
+        id,
+        role,
+        sessionID: S,
+        time: { created: 1, ...(completed !== undefined ? { completed } : {}) },
+      },
+    },
+  });
+
+  const partEvent = (over: Record<string, unknown>) => ({
     type: 'message.part.updated',
     properties: { part: { sessionID: S, messageID: 'm1', ...over } },
   });
 
-  it('maps steps, tools, thinking, and text to activity lines', () => {
+  /** Run a raw-event sequence through the reducer, collecting all events. */
+  const run = (
+    raws: readonly unknown[],
+    times: readonly number[] = [],
+  ): { events: ThreadEventT[]; state: WatchState } => {
     let state = initialWatchState;
-    let out = mapAgentEvent(part({ type: 'step-start' }), S, state, 0);
-    expect(out.message).toBe('step started');
-    state = out.state;
+    const events: ThreadEventT[] = [];
+    raws.forEach((raw, i) => {
+      const out = mapAgentEvent(raw, S, state, times[i] ?? 0);
+      state = out.state;
+      events.push(...out.events);
+    });
+    return { events, state };
+  };
 
-    out = mapAgentEvent(
-      part({
-        type: 'tool',
-        callID: 'c1',
-        tool: 'read',
-        state: { status: 'running', title: 'src/main.tsx' },
-      }),
-      S,
-      state,
-      0,
-    );
-    expect(out.message).toBe('tool read: running — src/main.tsx');
-    state = out.state;
-
-    out = mapAgentEvent(
-      part({
-        type: 'tool',
-        callID: 'c1',
-        tool: 'read',
-        state: { status: 'completed', title: 'src/main.tsx', time: { start: 0, end: 2100 } },
-      }),
-      S,
-      state,
-      2100,
-    );
-    expect(out.message).toBe('tool read: done — src/main.tsx (2.1s)');
-    state = out.state;
-
-    out = mapAgentEvent(
-      part({
-        type: 'tool',
-        callID: 'c2',
-        tool: 'bash',
-        state: { status: 'error', error: 'exit 1' },
-      }),
-      S,
-      state,
-      3000,
-    );
-    expect(out.message).toBe('tool bash: FAILED — exit 1');
-    state = out.state;
-
-    out = mapAgentEvent(part({ type: 'reasoning' }), S, state, 3000);
-    expect(out.message).toBe('thinking…');
-    state = out.state;
-
-    out = mapAgentEvent(part({ type: 'text', text: 'Hello wor' }), S, state, 3100);
-    expect(out.message).toBe('writing response… (9 chars)');
+  it('emits TurnStarted once per assistant message; user messages are silent', () => {
+    const { events } = run([
+      msgUpdated('m1', 'assistant'),
+      msgUpdated('m1', 'assistant'), // repeat update — no second TurnStarted
+      msgUpdated('u1', 'user'),
+    ]);
+    expect(events).toEqual([{ _tag: 'TurnStarted', sessionId: S, messageId: 'm1' }]);
   });
 
-  it('dedupes running tools per callID and thinking per messageID', () => {
-    let state = initialWatchState;
-    const running = part({
+  it('maps assistant parts to PartDeltas at stable per-message indexes', () => {
+    const { events } = run(
+      [
+        msgUpdated('m1', 'assistant'),
+        partEvent({ type: 'step-start', id: 'p0' }),
+        partEvent({
+          type: 'tool',
+          id: 'p1',
+          callID: 'c1',
+          tool: 'read',
+          state: { status: 'running', title: 'src/main.tsx' },
+        }),
+        partEvent({ type: 'text', id: 'p2', text: 'The card' }),
+        partEvent({
+          type: 'tool',
+          id: 'p1',
+          callID: 'c1',
+          tool: 'read',
+          state: {
+            status: 'completed',
+            title: 'src/main.tsx',
+            time: { start: 0, end: 2100 },
+            output: 'file contents',
+          },
+        }),
+      ],
+      [0, 0, 0, 0, 2100],
+    );
+    expect(events[0]?._tag).toBe('TurnStarted');
+    expect(events.slice(1)).toEqual([
+      {
+        _tag: 'PartDelta',
+        sessionId: S,
+        messageId: 'm1',
+        partIndex: 0,
+        part: { _tag: 'Step' },
+      },
+      {
+        _tag: 'PartDelta',
+        sessionId: S,
+        messageId: 'm1',
+        partIndex: 1,
+        part: {
+          _tag: 'ToolCall',
+          callId: 'c1',
+          name: 'read',
+          title: 'src/main.tsx',
+          status: 'running',
+        },
+      },
+      {
+        _tag: 'PartDelta',
+        sessionId: S,
+        messageId: 'm1',
+        partIndex: 2,
+        part: { _tag: 'Text', text: 'The card' },
+      },
+      {
+        // the completed transition lands at the SAME index as its running state
+        _tag: 'PartDelta',
+        sessionId: S,
+        messageId: 'm1',
+        partIndex: 1,
+        part: {
+          _tag: 'ToolCall',
+          callId: 'c1',
+          name: 'read',
+          title: 'src/main.tsx',
+          status: 'completed',
+          result: 'file contents',
+          secs: 2.1,
+        },
+      },
+    ]);
+  });
+
+  it('skips parts of user messages (prompt echo) and unknown-role messages', () => {
+    const { events } = run([
+      msgUpdated('u1', 'user'),
+      partEvent({ type: 'text', id: 'p1', messageID: 'u1', text: 'user prompt echo' }),
+      partEvent({ type: 'text', id: 'p2', messageID: 'never-announced', text: 'mystery' }),
+    ]);
+    expect(events).toEqual([]);
+  });
+
+  it('dedupes repeated tool states but lets transitions and errors through', () => {
+    const running = partEvent({
       type: 'tool',
+      id: 'p1',
       callID: 'c1',
       tool: 'read',
       state: { status: 'running' },
     });
-    let out = mapAgentEvent(running, S, state, 0);
-    expect(out.message).toBe('tool read: running');
-    state = out.state;
-    out = mapAgentEvent(running, S, state, 100); // repeat update, same call
-    expect(out.message).toBeUndefined();
-    state = out.state;
-    out = mapAgentEvent(part({ type: 'reasoning' }), S, state, 100);
-    expect(out.message).toBe('thinking…');
-    state = out.state;
-    out = mapAgentEvent(part({ type: 'reasoning' }), S, state, 200); // same messageID
-    expect(out.message).toBeUndefined();
+    const { events } = run([
+      msgUpdated('m1', 'assistant'),
+      running,
+      running, // repeat — dropped
+      partEvent({
+        type: 'tool',
+        id: 'p1',
+        callID: 'c1',
+        tool: 'read',
+        state: { status: 'error', error: 'exit 1' },
+      }),
+    ]);
+    const tools = events.filter((e) => e._tag === 'PartDelta');
+    expect(tools).toHaveLength(2);
+    expect(
+      tools.map((e) => (e._tag === 'PartDelta' && e.part._tag === 'ToolCall' ? e.part.status : '')),
+    ).toEqual(['running', 'error']);
+    const last = tools[1];
+    expect(
+      last?._tag === 'PartDelta' && last.part._tag === 'ToolCall' ? last.part : undefined,
+    ).toMatchObject({ result: 'exit 1', isError: true });
   });
 
-  it('throttles text progress to one line per 2 seconds', () => {
-    let state = initialWatchState;
-    let out = mapAgentEvent(part({ type: 'text', text: 'ab' }), S, state, 0);
-    expect(out.message).toBe('writing response… (2 chars)'); // first chunk logs
-    state = out.state;
-    out = mapAgentEvent(part({ type: 'text', text: 'abcd' }), S, state, 1500);
-    expect(out.message).toBeUndefined(); // inside the window
-    state = out.state;
-    out = mapAgentEvent(part({ type: 'text', text: 'abcdef' }), S, state, 2100);
-    expect(out.message).toBe('writing response… (6 chars)');
+  it('throttles cumulative text to one delta per 2s and flushes the tail at completion', () => {
+    const text = (t: string) => partEvent({ type: 'text', id: 'p1', text: t });
+    const { events } = run(
+      [
+        msgUpdated('m1', 'assistant'),
+        text('ab'), //        t=0     first chunk emits immediately
+        text('abcd'), //      t=1500  inside the window — suppressed (dirty)
+        text('abcdef'), //    t=2100  window elapsed — emits cumulative
+        text('abcdefgh'), //  t=3000  suppressed (dirty)
+        msgUpdated('m1', 'assistant', 3100), // completion → flush + TurnCompleted
+        msgUpdated('m1', 'assistant', 3100), // repeat — no second completion
+      ],
+      [0, 0, 1500, 2100, 3000, 3100, 3200],
+    );
+    const texts = events.flatMap((e) =>
+      e._tag === 'PartDelta' && e.part._tag === 'Text' ? [e.part.text] : [],
+    );
+    expect(texts).toEqual(['ab', 'abcdef', 'abcdefgh']); // final flush is unthrottled
+    const completions = events.filter((e) => e._tag === 'TurnCompleted');
+    expect(completions).toEqual([
+      { _tag: 'TurnCompleted', sessionId: S, messageId: 'm1', status: 'complete' },
+    ]);
+    // flush precedes completion
+    expect(events[events.length - 1]?._tag).toBe('TurnCompleted');
   });
 
-  it('skips other sessions, session errors surface, malformed events skip', () => {
+  it('streams reasoning parts like text', () => {
+    const { events } = run([
+      msgUpdated('m1', 'assistant'),
+      partEvent({ type: 'reasoning', id: 'r1', text: 'thinking about the card' }),
+    ]);
+    const last = events[events.length - 1];
+    expect(last?._tag === 'PartDelta' ? last.part : undefined).toEqual({
+      _tag: 'Reasoning',
+      text: 'thinking about the card',
+    });
+  });
+
+  it('filters other sessions, surfaces errors + permissions, drops unknowns', () => {
     const state = initialWatchState;
     expect(
       mapAgentEvent(
         {
           type: 'message.part.updated',
-          properties: { part: { sessionID: 'other', type: 'step-start' } },
+          properties: { part: { sessionID: 'other', messageID: 'm9', type: 'step-start' } },
         },
         S,
         state,
         0,
-      ).message,
-    ).toBeUndefined();
+      ).events,
+    ).toEqual([]);
     expect(
       mapAgentEvent(
         { type: 'session.error', properties: { error: { message: 'boom' } } },
         S,
         state,
         0,
-      ).message,
-    ).toBe('agent error: boom');
-    expect(mapAgentEvent({ nonsense: true }, S, state, 0).message).toBeUndefined();
-    expect(mapAgentEvent('not even an object', S, state, 0).message).toBeUndefined();
+      ).events,
+    ).toEqual([{ _tag: 'SessionError', message: 'boom' }]);
+    expect(
+      mapAgentEvent(
+        {
+          type: 'permission.updated',
+          properties: { id: 'perm1', sessionID: S, title: 'Run bash?' },
+        },
+        S,
+        state,
+        0,
+      ).events,
+    ).toEqual([
+      { _tag: 'PermissionRequested', sessionId: S, permissionId: 'perm1', title: 'Run bash?' },
+    ]);
+    expect(
+      mapAgentEvent(
+        { type: 'permission.updated', properties: { id: 'p2', sessionID: 'other', title: 'x' } },
+        S,
+        state,
+        0,
+      ).events,
+    ).toEqual([]);
+    expect(mapAgentEvent({ type: 'installation.updated' }, S, state, 0).events).toEqual([]);
+    expect(mapAgentEvent({ nonsense: true }, S, state, 0).events).toEqual([]);
+    expect(mapAgentEvent('not even an object', S, state, 0).events).toEqual([]);
   });
 });
 
@@ -607,11 +744,18 @@ describe('mapAgentEvent', () => {
 describe('AgentClient.withActivity', () => {
   it('drains mapped events while the effect runs and aborts the subscription after', () => {
     const captured: { signal?: AbortSignal } = {};
+    const announce = {
+      type: 'message.updated',
+      properties: {
+        info: { id: 'm1', role: 'assistant', sessionID: 'sess-1', time: { created: 1 } },
+      },
+    };
     const toolEvent = {
       type: 'message.part.updated',
       properties: {
         part: {
           type: 'tool',
+          id: 'p1',
           sessionID: 'sess-1',
           messageID: 'm1',
           callID: 'c1',
@@ -628,9 +772,10 @@ describe('AgentClient.withActivity', () => {
       event: {
         subscribe: (opts) => {
           captured.signal = opts.signal;
-          // Lazy generator like the real SDK: yields one event, then parks
+          // Lazy generator like the real SDK: yields events, then parks
           // until the subscriber aborts (mirrors a long-lived SSE stream).
           const stream = (async function* () {
+            yield announce;
             yield toolEvent;
             await new Promise<void>((resolve) => {
               if (opts.signal?.aborted) resolve();
@@ -642,7 +787,7 @@ describe('AgentClient.withActivity', () => {
       },
     };
     return Effect.gen(function* () {
-      const bus = yield* ActivityBus;
+      const bus = yield* ThreadBus;
       const runtime = yield* Effect.runtime<never>();
       const service = agentClientFromSdk(fakeClient, { bus, runtime });
       const result = yield* service.withActivity(
@@ -656,9 +801,18 @@ describe('AgentClient.withActivity', () => {
       );
       expect(result).toBe(42);
       expect(captured.signal?.aborted).toBe(true); // released with the scope
-      const messages = (yield* bus.history).map((e) => e.message);
-      expect(messages).toContain('tool grep: running — searching');
-    }).pipe(Effect.provide(activityBusTestLayer));
+      const history = yield* bus.history;
+      expect(history.some((e) => e._tag === 'TurnStarted' && e.messageId === 'm1')).toBe(true);
+      expect(
+        history.some(
+          (e) =>
+            e._tag === 'PartDelta' &&
+            e.part._tag === 'ToolCall' &&
+            e.part.name === 'grep' &&
+            e.part.status === 'running',
+        ),
+      ).toBe(true);
+    }).pipe(Effect.provide(threadBusTestLayer));
   });
 });
 
@@ -667,7 +821,7 @@ describe('AgentClient.withActivity', () => {
 // ---------------------------------------------------------------------------
 
 describe('runFillAgent heartbeat', () => {
-  it('emits still-working while a slow prompt is in flight', () => {
+  it.effect('logs still-working while a slow prompt is in flight', () => {
     const slowStub: Layer.Layer<AgentClient> = Layer.succeed(AgentClient, {
       createSession: () => Effect.succeed('s1'),
       prompt: () =>
@@ -677,13 +831,13 @@ describe('runFillAgent heartbeat', () => {
       withActivity: (_sessionId, effect) => effect,
     });
     return Effect.gen(function* () {
-      const bus = yield* ActivityBus;
+      const bus = yield* ThreadBus;
       const fiber = yield* Effect.fork(runFillAgent(fillReq(), noArt));
       yield* TestClock.adjust('5 seconds');
-      const during = (yield* bus.history).map((e) => e.message);
-      expect(during.some((m) => m.startsWith('still working…'))).toBe(true);
+      const during = yield* bus.logs;
+      expect(during.some((l) => l.includes('still working…'))).toBe(true);
       yield* TestClock.adjust('2 seconds');
       yield* Fiber.join(fiber);
-    }).pipe(Effect.provide(Layer.mergeAll(slowStub, activityBusTestLayer)));
+    }).pipe(Effect.provide(Layer.mergeAll(slowStub, threadBusTestLayer)));
   });
 });

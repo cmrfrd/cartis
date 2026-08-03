@@ -109,6 +109,8 @@ const AgentToolState = Schema.Struct({
   status: Schema.optional(Schema.String),
   title: Schema.optional(Schema.String),
   error: Schema.optional(Schema.String),
+  input: Schema.optional(Schema.Unknown),
+  output: Schema.optional(Schema.String),
   time: Schema.optional(
     Schema.Struct({
       start: Schema.optional(Schema.Number),
@@ -118,6 +120,7 @@ const AgentToolState = Schema.Struct({
 });
 
 const AgentEventPart = Schema.Struct({
+  id: Schema.optional(Schema.String),
   type: Schema.optional(Schema.String),
   sessionID: Schema.optional(Schema.String),
   messageID: Schema.optional(Schema.String),
@@ -127,12 +130,34 @@ const AgentEventPart = Schema.Struct({
   state: Schema.optional(AgentToolState),
 });
 
+/**
+ * `message.updated` payload: the message envelope with role and lifecycle
+ * timestamps. The watcher uses it to tell assistant messages from the user's
+ * own prompt echo, and `time.completed` to detect turn completion.
+ */
+const AgentMessageInfo = Schema.Struct({
+  id: Schema.optional(Schema.String),
+  role: Schema.optional(Schema.String),
+  sessionID: Schema.optional(Schema.String),
+  time: Schema.optional(
+    Schema.Struct({
+      created: Schema.optional(Schema.Number),
+      completed: Schema.optional(Schema.Number),
+    }),
+  ),
+});
+
 export const AgentEvent = Schema.Struct({
   type: Schema.String,
   properties: Schema.optional(
     Schema.Struct({
       part: Schema.optional(AgentEventPart),
+      info: Schema.optional(AgentMessageInfo),
       error: Schema.optional(Schema.Unknown),
+      // permission.updated carries its fields flat on properties
+      id: Schema.optional(Schema.String),
+      sessionID: Schema.optional(Schema.String),
+      title: Schema.optional(Schema.String),
     }),
   ),
 });

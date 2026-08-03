@@ -2,7 +2,6 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { Cause, Effect, Layer, ManagedRuntime, Option } from 'effect';
 import { BodyError } from '../contracts/errors.ts';
 import { AppHttpLive } from '../lib/http.ts';
-import { type ActivityBus, activityBusLive } from './activity.ts';
 import {
   type AgentClient,
   agentClientLive,
@@ -12,6 +11,7 @@ import {
   replicateSdkLive,
 } from './agentBridge.ts';
 import { type FileStore, fileStoreLayer } from './fileStore.ts';
+import { type ThreadBus, threadBusLive } from './threadBus.ts';
 
 /**
  * Per-dev-server Effect runtime. All bridge services live in one merged layer;
@@ -22,12 +22,12 @@ import { type FileStore, fileStoreLayer } from './fileStore.ts';
 /** The full bridge service surface, provided with the live HTTP client. */
 export function bridgeLive(
   root: string,
-): Layer.Layer<ActivityBus | FileStore | ReplicateSdk | ReplicateClient | AgentClient> {
-  // Leaf services shared across the runtime (one ActivityBus, one ReplicateSdk).
-  const leaves = Layer.mergeAll(activityBusLive, fileStoreLayer(root), replicateSdkLive);
-  // AgentClient's activity watcher emits on the SHARED bus (from `leaves`).
+): Layer.Layer<ThreadBus | FileStore | ReplicateSdk | ReplicateClient | AgentClient> {
+  // Leaf services shared across the runtime (one ThreadBus, one ReplicateSdk).
+  const leaves = Layer.mergeAll(threadBusLive, fileStoreLayer(root), replicateSdkLive);
+  // AgentClient's thread watcher emits on the SHARED bus (from `leaves`).
   const agentClient = agentClientLive.pipe(Layer.provide(leaves));
-  // ReplicateClient needs ReplicateSdk + ActivityBus (from `leaves`) + HttpClient.
+  // ReplicateClient needs ReplicateSdk + ThreadBus (from `leaves`) + HttpClient.
   const replicateClient = replicateClientLive.pipe(
     Layer.provide(leaves),
     Layer.provide(AppHttpLive),
@@ -36,7 +36,7 @@ export function bridgeLive(
 }
 
 export type BridgeRuntime = ManagedRuntime.ManagedRuntime<
-  ActivityBus | FileStore | ReplicateSdk | ReplicateClient | AgentClient,
+  ThreadBus | FileStore | ReplicateSdk | ReplicateClient | AgentClient,
   never
 >;
 
