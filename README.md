@@ -41,23 +41,46 @@ mapping).
 
 ## The AI assistant
 
-Two agent-backed features run through the dev-server bridge (both stream into
-the **AI activity bar** at the bottom, mirrored to the terminal as
-`[cartis:agent]` / `[cartis:image]` lines):
+Two agent-backed features run through the dev-server bridge. All agent activity
+now streams into the **chat sidebar** (right of the Builder), mirrored to the
+terminal as `[cartis:agent]` / `[cartis:image]` lines — there is no separate
+activity bar.
 
-- **Fill with AI** (Builder) — a conversational session per card-editing
-  episode: describe the card ("a fire mage with a phoenix companion") and the
-  assistant fills the layout's arguments as a **targeted patch** (asked to
-  change the title, it changes only the title). Every field stays
-  hand-editable; later prompts see your edits (they always win). When a prompt
-  concerns the art, the assistant sees the current art (vision) and can
-  trigger generation or an edit of it. The session resets when you switch
-  card, theme, or layout.
-- **Art generation** (Builder art tools) — text-first: an LLM composes the
-  image prompt from the theme's look-and-feel + the card's current argument
+- **Chat sidebar** (Builder, right) — a ChatGPT-style conversation that edits
+  the open card. It speaks assistant-ui's model (threads of ordered parts, tool
+  calls with visible status, edit/regenerate/branch, a composer) but every
+  affordance is backed by a real [opencode](https://opencode.ai) **session**,
+  one per card. Ask it to rename the title, rewrite the ability, or generate
+  art: field changes arrive as a **targeted patch** applied to the document and
+  shown as a `card_patch` chip; art requests stream progress as a
+  `card_generate_art` strip. Every field stays hand-editable and later turns see
+  your edits (they always win). The full capability set is native:
+  - **Cancel** a running turn (Stop button → session abort; the turn finalizes
+    incomplete).
+  - **Edit** an earlier message — this *forks* the session (native branching) so
+    the original survives, reverts to that point, and resends.
+  - **Regenerate** the last reply (revert + replay).
+  - **Branch picker** to switch between a session's forks.
+  - **Permission prompts** (Allow / Deny) when the agent requests one.
+  - A failed turn shows an inline error strip (opencode down / not
+    authenticated surfaces here on the first turn — there is no preflight).
+  The conversation **persists per card**: a saved card stores its
+  `chatSessionId` in `cartis-data/`, and reopening rehydrates the thread from
+  opencode (surviving dev-server restarts). Copies (Save as copy / gallery
+  Duplicate) start a fresh chat. Switching theme/layout keeps the session — it
+  belongs to the card, not the theme.
+- **Art generation** (Builder art tools + chat) — text-first: an LLM composes
+  the image prompt from the theme's look-and-feel + the card's current argument
   values (element `fire` shapes the art), then flux-kontext-pro renders it.
   Attaching a photo (upload/webcam) steers identity/pose; picking from the
   library reuses existing art.
+
+Under the hood the card's chat is the full assistant-ui thread model expressed
+natively in effect Schema + Effect services + expressive, with opencode as the
+runtime — see `docs/superpowers/specs/2026-08-03-card-chat-panel-design.md`.
+Card actions ride a v1 JSON transport materialized into real ToolCall parts by a
+single shared materializer (`src/contracts/materialize.ts`), used identically by
+live turns and rehydrated history, so raw JSON never reaches the UI.
 
 ### Optional integrations (off by default; the app is fully offline without them)
 
@@ -65,9 +88,10 @@ the **AI activity bar** at the bottom, mirrored to the terminal as
   `.env.example`). Without it, a local canvas "stub stylizer" fakes the effect
   (deterministic gradient art for text-first generations) and nothing leaves
   your machine.
-- **AI fill + prompt composition** — [opencode](https://opencode.ai): install
-  it, run `opencode auth login` once. Fill works best on a sonnet-class model —
-  set `OPENCODE_MODEL=anthropic/claude-sonnet-4-6` (or better) in `.env`.
+- **Chat + prompt composition** — [opencode](https://opencode.ai): install
+  it, run `opencode auth login` once. The chat works best on a sonnet-class
+  model — set `OPENCODE_MODEL=anthropic/claude-sonnet-4-6` (or better) in
+  `.env`.
 
 ## Your data
 
@@ -95,7 +119,7 @@ grouped beneath it (renders exported before card-linking existed appear under
 **Other renders**). Click to reopen in the Builder (saving again updates the
 **same** record), **Duplicate** for a fresh copy — and the image **Library**.
 Every agent action (steps, tool calls, thinking, writing progress) streams
-into the AI activity log while fill or art generation runs.
+into the chat sidebar while a turn or art generation runs.
 
 ## Adding a theme / adding a layout
 
@@ -139,9 +163,12 @@ Business logic is in [Effect v3](https://effect.website) using
 
 Schemas (`effect` core `Schema`) + `Data.TaggedError` classes shared between
 client and server. `errors.ts` is the canonical tagged-error registry;
-`api.ts`, `records.ts`, `theme.ts`, `replicate.ts`, `opencode.ts`,
-`activity.ts` are wire schemas for the bridge routes, theme identity/context,
-and the SSE activity feed.
+`api.ts`, `records.ts`, `theme.ts`, `replicate.ts`, `opencode.ts` are wire
+schemas for the bridge routes, theme identity/context, and opencode reads.
+`thread.ts` is the canonical chat vocabulary (`ThreadPart`/`ThreadMessage`/
+`ThreadEvent`/`ThreadSummary`) — it imports no opencode shapes (the bridge maps
+opencode → thread; the client consumes thread only). `materialize.ts` is the one
+shared v1-transport materializer.
 
 ### Services and layers
 
@@ -149,13 +176,18 @@ and the SSE activity feed.
 |---|---|---|
 | `StoreClient` | `cartis/StoreClient` | Browser: CRUD over `/api/store/:store` |
 | `ImageProvider` | `cartis/ImageProvider` | Browser: generate art (stub or bridge/Replicate) |
-| `AgentFill` | `cartis/AgentFill` | Browser: POST to `/api/agent/fill` (conversational fill) |
-| `ActivityClient` | `cartis/ActivityClient` | Browser: SSE stream from `/api/activity` |
-| `ActivityBus` | `cartis/ActivityBus` | Server: fan-out activity log (in-memory) |
+| `ChatThread` | `cartis/ChatThread` | Browser: session passthrough (turn/history/abort/revert/regenerate/fork/children/permission) |
+| `ChatEvents` | `cartis/ChatEvents` | Browser: `Stream<ThreadEvent>` over `/api/chat/events` (SSE) |
+| `ThreadBus` | `cartis/ThreadBus` | Server: fan-out `ThreadEvent` stream (in-memory) |
 | `FileStore` | `cartis/FileStore` | Server: binary + sidecar I/O under `cartis-data/` |
-| `AgentClient` | `cartis/AgentClient` | Server: opencode session + prompt (text + vision parts) |
+| `AgentClient` | `cartis/AgentClient` | Server: opencode session ops (create/prompt/messages/abort/revert/fork/children) |
 | `ReplicateSdk` | `cartis/ReplicateSdk` | Server: thin Effect wrapper over replicate SDK |
 | `ReplicateClient` | `cartis/ReplicateClient` | Server: create prediction, poll, download |
+
+The card's chat store is `ThreadState` (an expressive State adopted by
+BuilderView): it folds `ChatEvents` into a message list via the pure
+`src/chat/fold.ts` reducer, runs turns through the Effect boundary, and applies
+the resulting patch/art to the document through an injected `ChatContext`.
 
 ### Browser runtime seam — `src/app/runtime.ts`
 

@@ -1440,11 +1440,19 @@ export function cartisBridge(): Plugin {
                 }
               }
               const client = yield* ReplicateClient;
-              const dataUrl = yield* client.generate(token, {
-                prompt,
-                imageDataUrl,
-                aspectRatio: parsed.aspectRatio,
-              });
+              const bus = yield* ThreadBus;
+              const dataUrl = yield* client
+                .generate(token, {
+                  prompt,
+                  imageDataUrl,
+                  aspectRatio: parsed.aspectRatio,
+                })
+                .pipe(
+                  // Surface art failures in the chat as an Art 'error' event.
+                  Effect.tapError((e) =>
+                    bus.emit({ _tag: 'Art', phase: 'error', detail: e.message }),
+                  ),
+                );
               return { dataUrl };
             }),
           );

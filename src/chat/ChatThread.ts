@@ -1,8 +1,8 @@
 /**
  * The client-side chat runtime service: a typed passthrough over the bridge's
  * session routes (spec §Decision 3). Mirrors the HTTP/boundary pattern of
- * AgentFill/ImageProvider — every wire shape Schema-decoded, non-ok responses
- * mapped to a typed error.
+ * ImageProvider — every wire shape Schema-decoded, non-ok responses mapped to a
+ * typed error.
  */
 
 import { HttpClient, HttpClientRequest, type HttpClientResponse } from '@effect/platform';
@@ -19,12 +19,12 @@ import {
   SessionAction,
   SessionRef,
 } from '../contracts/api';
-import { AgentFillError, NetworkError } from '../contracts/errors';
+import { ChatRequestError, NetworkError } from '../contracts/errors';
 import type { ThreadMessageT, ThreadSummaryT } from '../contracts/thread';
 
 export interface ChatThreadShape {
   /** Run one conversational turn. */
-  turn(req: ChatTurnRequestT): Effect.Effect<ChatTurnResponseT, AgentFillError | NetworkError>;
+  turn(req: ChatTurnRequestT): Effect.Effect<ChatTurnResponseT, ChatRequestError | NetworkError>;
   /** Rehydrate a card's conversation from opencode. */
   history(sessionId: string): Effect.Effect<readonly ThreadMessageT[], NetworkError>;
   /** Interrupt the running turn. */
@@ -32,7 +32,7 @@ export interface ChatThreadShape {
   /** Revert the session to (and undoing) `messageId`. */
   revert(sessionId: string, messageId: string): Effect.Effect<void, NetworkError>;
   /** Regenerate the last assistant turn. */
-  regenerate(sessionId: string): Effect.Effect<ChatTurnResponseT, AgentFillError | NetworkError>;
+  regenerate(sessionId: string): Effect.Effect<ChatTurnResponseT, ChatRequestError | NetworkError>;
   /** Branch the session; resolves the new session id. */
   fork(sessionId: string): Effect.Effect<string, NetworkError>;
   /** Branch (fork) siblings of a session — the branch picker. */
@@ -72,7 +72,7 @@ export const chatThreadLive: Layer.Layer<ChatThread, never, HttpClient.HttpClien
       url: string,
       encoded: unknown,
       schema: Schema.Schema<A, I>,
-    ): Effect.Effect<A, AgentFillError | NetworkError> =>
+    ): Effect.Effect<A, ChatRequestError | NetworkError> =>
       Effect.gen(function* () {
         const request = HttpClientRequest.post(url).pipe(HttpClientRequest.bodyUnsafeJson(encoded));
         const response = yield* http
@@ -80,7 +80,7 @@ export const chatThreadLive: Layer.Layer<ChatThread, never, HttpClient.HttpClien
           .pipe(Effect.mapError((cause) => new NetworkError({ url, cause })));
         if (!isOk(response.status)) {
           const detail = yield* detailOf(response);
-          return yield* Effect.fail(new AgentFillError({ status: response.status, detail }));
+          return yield* Effect.fail(new ChatRequestError({ status: response.status, detail }));
         }
         const json = yield* response.json.pipe(
           Effect.mapError((cause) => new NetworkError({ url, cause })),
@@ -92,7 +92,7 @@ export const chatThreadLive: Layer.Layer<ChatThread, never, HttpClient.HttpClien
 
     const turn = (
       req: ChatTurnRequestT,
-    ): Effect.Effect<ChatTurnResponseT, AgentFillError | NetworkError> =>
+    ): Effect.Effect<ChatTurnResponseT, ChatRequestError | NetworkError> =>
       Effect.gen(function* () {
         const wire = yield* Schema.encode(ChatTurnRequest)(req).pipe(
           Effect.mapError((cause) => new NetworkError({ url: '/api/chat/turn', cause })),
@@ -135,7 +135,7 @@ export const chatThreadLive: Layer.Layer<ChatThread, never, HttpClient.HttpClien
           Effect.mapError((cause) => new NetworkError({ url, cause })),
         );
         yield* post(url, wire, SessionRef).pipe(
-          Effect.catchTag('AgentFillError', (e) =>
+          Effect.catchTag('ChatRequestError', (e) =>
             Effect.fail(new NetworkError({ url, cause: e })),
           ),
         );
@@ -160,7 +160,7 @@ export const chatThreadLive: Layer.Layer<ChatThread, never, HttpClient.HttpClien
             Effect.mapError((cause) => new NetworkError({ url: '/api/chat/fork', cause })),
           );
           const ref = yield* post('/api/chat/fork', wire, SessionRef).pipe(
-            Effect.catchTag('AgentFillError', (e) =>
+            Effect.catchTag('ChatRequestError', (e) =>
               Effect.fail(new NetworkError({ url: '/api/chat/fork', cause: e })),
             ),
           );
@@ -175,7 +175,7 @@ export const chatThreadLive: Layer.Layer<ChatThread, never, HttpClient.HttpClien
             granted,
           }).pipe(Effect.mapError((cause) => new NetworkError({ url, cause })));
           yield* post(url, wire, SessionRef).pipe(
-            Effect.catchTag('AgentFillError', (e) =>
+            Effect.catchTag('ChatRequestError', (e) =>
               Effect.fail(new NetworkError({ url, cause: e })),
             ),
           );
@@ -188,12 +188,12 @@ export const chatThreadLive: Layer.Layer<ChatThread, never, HttpClient.HttpClien
 export const chatThreadEmpty: Layer.Layer<ChatThread> = Layer.succeed(
   ChatThread,
   ChatThread.of({
-    turn: () => Effect.fail(new AgentFillError({ status: 0, detail: 'no agent in tests' })),
+    turn: () => Effect.fail(new ChatRequestError({ status: 0, detail: 'no agent in tests' })),
     history: () => Effect.succeed([]),
     children: () => Effect.succeed([]),
     cancel: () => Effect.void,
     revert: () => Effect.void,
-    regenerate: () => Effect.fail(new AgentFillError({ status: 0, detail: 'no agent in tests' })),
+    regenerate: () => Effect.fail(new ChatRequestError({ status: 0, detail: 'no agent in tests' })),
     fork: () => Effect.succeed('fork-stub'),
     replyPermission: () => Effect.void,
   }),

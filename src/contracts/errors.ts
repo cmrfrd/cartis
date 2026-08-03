@@ -70,12 +70,12 @@ export class AgentError extends Data.TaggedError('AgentError')<{
 }
 
 /** Client-side chat/turn request failures. src/chat/ChatThread.ts */
-export class AgentFillError extends Data.TaggedError('AgentFillError')<{
+export class ChatRequestError extends Data.TaggedError('ChatRequestError')<{
   readonly status: number;
   readonly detail?: string;
 }> {
   override get message(): string {
-    return this.detail ?? `fill request failed (${String(this.status)})`;
+    return this.detail ?? `chat request failed (${String(this.status)})`;
   }
 }
 

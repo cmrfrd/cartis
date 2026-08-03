@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { click, mountApp, setInput } from '../../test/util';
 import { setAppLayer, testAppLayerWith } from '../app/runtime';
 import type { ChatTurnResponseT } from '../contracts/api';
-import { AgentFillError } from '../contracts/errors';
+import { ChatRequestError } from '../contracts/errors';
 import type { ThreadEventT } from '../contracts/thread';
 import { chatEventsFromPubSub } from './ChatEvents';
 import { ChatThread, type ChatThreadShape } from './ChatThread';
@@ -20,7 +20,7 @@ const chatStub = (over: Partial<ChatThreadShape> = {}): Layer.Layer<ChatThread> 
     children: () => Effect.succeed([]),
     cancel: () => Effect.void,
     revert: () => Effect.void,
-    regenerate: () => Effect.fail(new AgentFillError({ status: 0, detail: 'x' })),
+    regenerate: () => Effect.fail(new ChatRequestError({ status: 0, detail: 'x' })),
     fork: () => Effect.succeed('fork-1'),
     replyPermission: () => Effect.void,
     ...over,
@@ -90,7 +90,7 @@ describe('ThreadPanel', () => {
     setAppLayer(
       testAppLayerWith({
         thread: chatStub({
-          turn: () => Effect.fail(new AgentFillError({ status: 503, detail: 'opencode down' })),
+          turn: () => Effect.fail(new ChatRequestError({ status: 503, detail: 'opencode down' })),
         }),
       }),
     );

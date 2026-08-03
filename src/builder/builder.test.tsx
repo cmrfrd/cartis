@@ -4,7 +4,7 @@ import { click, mountApp, setInput, tick } from '../../test/util';
 import { setAppLayer, testAppLayerWith } from '../app/runtime';
 import { ChatThread, type ChatThreadShape } from '../chat/ChatThread';
 import type { ChatTurnRequestT, ChatTurnResponseT } from '../contracts/api';
-import { AgentFillError, StoreError } from '../contracts/errors';
+import { ChatRequestError, StoreError } from '../contracts/errors';
 import { type GenerationInput, ImageProvider } from '../images/ImageProvider';
 import type { StoredCard } from '../storage/CardArchive';
 import { StoreClient } from '../storage/StoreClient';
@@ -25,7 +25,7 @@ const chatStub = (over: Partial<ChatThreadShape> = {}): Layer.Layer<ChatThread> 
     children: () => Effect.succeed([]),
     cancel: () => Effect.void,
     revert: () => Effect.void,
-    regenerate: () => Effect.fail(new AgentFillError({ status: 0, detail: 'x' })),
+    regenerate: () => Effect.fail(new ChatRequestError({ status: 0, detail: 'x' })),
     fork: () => Effect.succeed('fork-1'),
     replyPermission: () => Effect.void,
     ...over,

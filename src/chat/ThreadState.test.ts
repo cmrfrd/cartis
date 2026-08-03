@@ -2,7 +2,7 @@ import { Effect, Layer, PubSub as PS, type PubSub } from 'effect';
 import { describe, expect, it, vi } from 'vitest';
 import { setAppLayer, testAppLayerWith } from '../app/runtime';
 import type { ChatTurnResponseT } from '../contracts/api';
-import { AgentFillError, NetworkError } from '../contracts/errors';
+import { ChatRequestError, NetworkError } from '../contracts/errors';
 import type { ThreadEventT } from '../contracts/thread';
 import { type ChatEvents, chatEventsFromPubSub } from './ChatEvents';
 import { ChatThread, type ChatThreadShape } from './ChatThread';
@@ -107,7 +107,7 @@ describe('ThreadState.send', () => {
   it('finalizes a failed turn as incomplete with an error strip (no toast)', async () => {
     const state = makeThread(
       threadStub({
-        turn: () => Effect.fail(new AgentFillError({ status: 503, detail: 'opencode down' })),
+        turn: () => Effect.fail(new ChatRequestError({ status: 503, detail: 'opencode down' })),
       }),
     );
     await state.send('hi');
