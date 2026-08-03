@@ -78,6 +78,7 @@ const renderPartMessage = (part: ThreadPartT): string | undefined =>
       return undefined; // pending — too noisy for the terminal
     }),
     Match.tag('Image', () => undefined),
+    Match.tag('File', () => undefined),
     Match.exhaustive,
   );
 

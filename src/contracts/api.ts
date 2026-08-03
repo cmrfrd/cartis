@@ -8,7 +8,7 @@
 
 import { Schema } from 'effect';
 import { AspectRatio, CardDataSchema, FieldSummary } from './fields.ts';
-import { DataUrl, MessageId, PermissionId, SessionId } from './ids.ts';
+import { DataUrl, FileName, MessageId, MimeType, PermissionId, SessionId } from './ids.ts';
 import { StoredRecord } from './records.ts';
 import { ThemeContext } from './theme.ts';
 import { ThreadMessage, ThreadSummary } from './thread.ts';
@@ -74,6 +74,19 @@ export type ArtActionT = typeof ArtAction.Type;
 // optional vision attach); the response carries the raw assistant text (fed to
 // the SHARED materializer for display) plus the validated patch (applied to the
 // card) and an optional art action.
+/**
+ * One user attachment riding a chat turn (spec 2026-08-03 chat-panel-maturity
+ * §1). The data-URL doubles as the composer thumbnail src; on the wire it
+ * becomes an opencode FilePartInput whose `filename` marks it as user-supplied
+ * (the unnamed card-art context part stays invisible).
+ */
+export const ChatAttachment = Schema.Struct({
+  name: FileName,
+  mime: MimeType,
+  dataUrl: DataUrl,
+});
+export type ChatAttachmentT = typeof ChatAttachment.Type;
+
 export const ChatTurnRequest = Schema.Struct({
   sessionId: Schema.optional(SessionId),
   themeContext: ThemeContext,
@@ -81,6 +94,7 @@ export const ChatTurnRequest = Schema.Struct({
   currentData: CardDataSchema,
   currentArtFileName: Schema.optional(Schema.String),
   userPrompt: Schema.String,
+  attachments: Schema.optional(Schema.Array(ChatAttachment)),
 });
 export type ChatTurnRequestT = typeof ChatTurnRequest.Type;
 

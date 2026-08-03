@@ -231,6 +231,11 @@ function PartView(props: {
     Match.tag('Image', (p) => (
       <img src={p.url} alt="generated" className="max-w-[85%] rounded-base" />
     )),
+    Match.tag('File', (p) => (
+      <span className="rounded-base border border-edge bg-secondary-background px-2 py-1 font-mono text-[11px] text-ink-dim">
+        {p.name}
+      </span>
+    )),
     Match.tag('Step', () => null), // not rendered in v1
     Match.exhaustive,
   );

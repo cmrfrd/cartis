@@ -42,10 +42,23 @@ export const ImagePart = Schema.TaggedStruct('Image', {
   url: Schema.String,
 });
 
+/** A non-image user attachment (name + mime chip; bytes live in opencode). */
+export const FilePart = Schema.TaggedStruct('File', {
+  name: Schema.String,
+  mime: Schema.String,
+});
+
 /** Turn segment boundary. Kept in the schema; not rendered in v1. */
 export const StepPart = Schema.TaggedStruct('Step', {});
 
-export const ThreadPart = Schema.Union(TextPart, ReasoningPart, ToolCallPart, ImagePart, StepPart);
+export const ThreadPart = Schema.Union(
+  TextPart,
+  ReasoningPart,
+  ToolCallPart,
+  ImagePart,
+  FilePart,
+  StepPart,
+);
 export type ThreadPartT = typeof ThreadPart.Type;
 
 // ---------------------------------------------------------------------------

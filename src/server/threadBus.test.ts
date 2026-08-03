@@ -171,6 +171,9 @@ describe('renderThreadEvent', () => {
       render(delta({ _tag: 'ToolCall', callId: 'c3', name: 'grep', status: 'pending' })),
     ).toBeUndefined();
     expect(render(delta({ _tag: 'Image', url: 'blob:x' }))).toBeUndefined();
+    expect(
+      render(delta({ _tag: 'File', name: 'notes.md', mime: 'text/markdown' })),
+    ).toBeUndefined();
   });
 
   it('renders turn, art, error, and permission lines', () => {

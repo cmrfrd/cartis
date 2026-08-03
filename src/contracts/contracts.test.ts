@@ -12,6 +12,7 @@ import { describe, expect } from 'vitest';
 import { AppHttpLive, httpClientFromHandler } from '@/lib/http';
 import { it } from '../../test/effect';
 import {
+  ChatAttachment,
   ChatHistoryResponse,
   ChatTurnRequest,
   ChatTurnResponse,
@@ -494,6 +495,37 @@ describe('ChatTurnRequest / Response + history + session refs', () => {
     expect(Schema.decodeUnknownSync(SessionRef)({ sessionId: 'branch-2' }).sessionId).toBe(
       'branch-2',
     );
+  });
+
+  it('decodes a chat attachment and rejects an empty mime', () => {
+    const att = Schema.decodeUnknownSync(ChatAttachment)({
+      name: 'notes.md',
+      mime: 'text/markdown',
+      dataUrl: 'data:text/markdown;base64,QQ==',
+    });
+    expect(att.name).toBe('notes.md');
+    expect(() =>
+      Schema.decodeUnknownSync(ChatAttachment)({
+        name: 'notes.md',
+        mime: '',
+        dataUrl: 'data:text/markdown;base64,QQ==',
+      }),
+    ).toThrow();
+  });
+
+  it('decodes a turn request with attachments (and still without)', () => {
+    const base = {
+      themeContext: { lookAndFeel: 'oil', palette: 'ember', argumentSummary: 'name' },
+      fields: [{ kind: 'text', key: 'name', label: 'Name' }],
+      currentData: { name: 'Nyra' },
+      userPrompt: '',
+    };
+    const withAtt = Schema.decodeUnknownSync(ChatTurnRequest)({
+      ...base,
+      attachments: [{ name: 'ref.png', mime: 'image/png', dataUrl: 'data:image/png;base64,AA==' }],
+    });
+    expect(withAtt.attachments).toHaveLength(1);
+    expect(Schema.decodeUnknownSync(ChatTurnRequest)(base).attachments).toBeUndefined();
   });
 });
 
