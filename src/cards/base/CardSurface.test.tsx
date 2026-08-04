@@ -27,4 +27,22 @@ describe('CardSurface', () => {
     expect(container.querySelector('[data-holo="true"]')).not.toBeNull();
     unmount();
   });
+
+  it('owns its text alignment — identical inside a <button> (live-caught UA-style leak)', async () => {
+    // The gallery wraps tiles in a <button>; browsers' UA stylesheet sets
+    // text-align: center on buttons and it INHERITS into the whole card face.
+    // The card root must declare its own alignment so the face renders the
+    // same in ANY wrapper (builder preview, gallery tile, exports).
+    const { container, unmount } = mount(
+      <button type="button" style={{ textAlign: 'center' }}>
+        <CardSurface>
+          <p>rules text</p>
+        </CardSurface>
+      </button>,
+    );
+    await tick();
+    const root = container.querySelector('[data-card-root="true"]') as HTMLElement;
+    expect(root.className).toContain('text-left');
+    unmount();
+  });
 });

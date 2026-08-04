@@ -47,7 +47,11 @@ export function CardSurface(props: {
   return (
     <div
       data-card-root="true"
-      className={`relative overflow-hidden rounded-[18px] bg-[#0d0b09] ${props.aura ? '' : 'shadow-xl'}`}
+      // text-left: the card OWNS its typography — browsers' UA stylesheet
+      // centers text inside <button> (the gallery tile wrapper), and
+      // text-align inherits; without this the face renders differently
+      // depending on what wraps it (live-caught: centered tiles).
+      className={`relative overflow-hidden rounded-[18px] text-left bg-[#0d0b09] ${props.aura ? '' : 'shadow-xl'}`}
       style={{
         width: CARD_WIDTH,
         height: CARD_HEIGHT,
