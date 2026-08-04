@@ -17,6 +17,12 @@ The dev server **is** the app: the AI bridge endpoints (`/api/*`) exist only
 under `bun run dev`. `bun run build` is kept as a compile smoke test, not a
 deployment story.
 
+The app has real URLs — `/builder`, `/builder/<cardId>`, `/gallery` — as a
+pure projection of app state (no router dependency): refreshing on a saved
+card reopens it (chat conversation included), back/forward crosses tabs and
+cards through the same unsaved-changes guard the UI uses, and the tab title
+follows the open card.
+
 Quality gates (run before every commit in this repo):
 
 ```bash
@@ -65,8 +71,14 @@ activity bar.
     "looks good, save it" persists the card (Save / Save as copy), and
     "export a print PNG" runs the real export pipeline (`png` 300 DPI /
     `print` 600 DPI + bleed / `sheet` 3×3 A4), sequenced AFTER any art
-    generation in the same turn so exports capture the new art. Each action
-    shows a receipt chip in the thread.
+    generation in the same turn so exports capture the new art. It can also
+    turn the document knobs — "make it fullart" / switch theme / toggle holo
+    — which apply BEFORE art so a same-turn generation uses the new layout's
+    aspect. Each action shows a receipt chip in the thread.
+  - **The agent sees the card** — every turn attaches a downscaled snapshot
+    of the live preview as vision, so "what does it look like?" and layout
+    judgments work from the actual render (literally what you see, card back
+    included if you're showing it).
   - **Cancel** a running turn (Stop button → session abort; the turn finalizes
     incomplete).
   - **Edit** an earlier message — this *forks* the session (native branching) so
