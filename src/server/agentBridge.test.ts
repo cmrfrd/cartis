@@ -1279,4 +1279,15 @@ describe('siblingSet', () => {
       expect(out).toEqual([]);
     }).pipe(Effect.provide(infoStub({}, {}))),
   );
+
+  it.effect('an ID-LESS info (opencode error body decodes leniently) also yields empty', () =>
+    Effect.gen(function* () {
+      const out = yield* siblingSet(SessionId.make('gone'));
+      expect(out).toEqual([]); // live-caught: no ghost { sessionId: "" } summary
+    }).pipe(
+      Effect.provide(
+        agentLayer({ info: () => Effect.succeed({}), children: () => Effect.succeed([]) }),
+      ),
+    ),
+  );
 });

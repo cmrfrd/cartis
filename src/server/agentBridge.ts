@@ -946,7 +946,11 @@ export function siblingSet(
       Effect.map(Option.some),
       Effect.orElseSucceed(() => Option.none<SessionInfoT>()),
     );
-    if (Option.isNone(info)) return [];
+    // Unknown session: opencode's error body decodes to an ID-LESS SessionInfo
+    // (all fields optional — live-caught) — treat it the same as a failure.
+    if (Option.isNone(info) || info.value.id === undefined || info.value.id.length === 0) {
+      return [];
+    }
     const rootId =
       info.value.parentID !== undefined ? SessionId.make(info.value.parentID) : sessionId;
     const root =
