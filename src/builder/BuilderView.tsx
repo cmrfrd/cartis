@@ -242,9 +242,10 @@ export class BuilderView extends Component {
     if (this.shell) this.shell.openCardId = card.id;
     this.savedNote = '';
     this.dirty = false;
-    // Rehydrate the card's conversation, or start fresh (spec: edge semantics).
+    // Reset the previous card's thread state (messages/note/attachments),
+    // then rehydrate this card's conversation, or start fresh.
+    this.thread.clear();
     if (card.chatSessionId !== undefined) this.thread.bind(card.chatSessionId);
-    else this.thread.clear();
   }
 
   /** Unguarded executor: blank card in the CURRENT theme + layout. */
