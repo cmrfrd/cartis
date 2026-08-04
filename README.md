@@ -54,8 +54,9 @@ activity bar.
 
 - **Chat sidebar** (Builder, right) — a ChatGPT-style conversation that edits
   the open card. It speaks assistant-ui's model (threads of ordered parts, tool
-  calls with visible status, edit/regenerate/branch, a composer) but every
-  affordance is backed by a real [opencode](https://opencode.ai) **session**,
+  calls with visible status, edit/regenerate/branch, a composer) and every
+  affordance is backed by a real **in-process agent session** (the
+  [pi](https://github.com/earendil-works/pi-coding-agent) coding-agent SDK),
   one per card. Ask it to rename the title, rewrite the ability, or generate
   art: field changes arrive as a **targeted patch** applied to the document and
   shown as a `card_patch` chip; art requests stream progress as a
@@ -81,22 +82,22 @@ activity bar.
     included if you're showing it).
   - **Cancel** a running turn (Stop button → session abort; the turn finalizes
     incomplete).
-  - **Edit** an earlier message — this *forks* the session (native branching) so
-    the original survives, reverts to that point, and resends.
-  - **Regenerate** the last reply (revert + replay; offered on the last reply
-    only).
-  - **‹ n/m › branch arrows** on the message where sibling branches diverge —
-    step between a session's forks in place (ChatGPT-style).
-  - **Permission prompts** (Allow / Deny) when the agent requests one.
-  - A failed turn shows an inline error strip (opencode down / not
-    authenticated surfaces here on the first turn — there is no preflight).
-  - Assistant replies render as **markdown**; the panel is **drag-resizable**
-    (left edge, 340–600px, double-click resets).
+  - **Edit** an earlier message — this creates a *sibling branch* in the
+    session tree (the original survives) and re-prompts from that point.
+  - **Regenerate** the last reply (replays the stored user text on a new
+    branch; offered on the last reply only).
+  - **‹ n/m › branch arrows** on messages where sibling branches diverge —
+    step between a session's branches in place (ChatGPT-style); the selection
+    is durable across restarts.
+  - A failed turn shows an inline error strip (missing API key surfaces here
+    on the first turn — there is no preflight).
+  - Assistant replies render as **markdown**, streaming live; the panel is
+    **drag-resizable** (left edge, 340–600px, double-click resets).
   The conversation **persists per card**: a saved card stores its
-  `chatSessionId` in `cartis-data/`, and reopening rehydrates the thread from
-  opencode (surviving dev-server restarts). Copies (Save as copy / gallery
-  Duplicate) start a fresh chat. Switching theme/layout keeps the session — it
-  belongs to the card, not the theme.
+  `chatSessionId` in `cartis-data/`, the transcript lives as a session file
+  under `cartis-data/chats/` (surviving dev-server restarts). Copies (Save as
+  copy / gallery Duplicate) start a fresh chat. Switching theme/layout keeps
+  the session — it belongs to the card, not the theme.
 - **Art generation** (Builder art tools + chat) — text-first: an LLM composes
   the image prompt from the theme's look-and-feel + the card's current argument
   values (element `fire` shapes the art), then flux-kontext-pro renders it.
@@ -104,11 +105,12 @@ activity bar.
   library reuses existing art.
 
 Under the hood the card's chat is the full assistant-ui thread model expressed
-natively in effect Schema + Effect services + expressive, with opencode as the
-runtime — see `docs/superpowers/specs/2026-08-03-card-chat-panel-design.md`.
-Card actions ride a v1 JSON transport materialized into real ToolCall parts by a
-single shared materializer (`src/contracts/materialize.ts`), used identically by
-live turns and rehydrated history, so raw JSON never reaches the UI.
+natively in effect Schema + Effect services + expressive, with pi as the
+in-process runtime — see
+`docs/superpowers/specs/2026-08-04-pi-runtime-migration-design.md`. Card
+actions are **real provider-validated tool calls** (typebox schemas derived
+from the card's fields): the turn response carries structured intents the
+client applies, so no model output is ever parsed as JSON.
 
 ### Optional integrations (off by default; the app is fully offline without them)
 
@@ -116,10 +118,11 @@ live turns and rehydrated history, so raw JSON never reaches the UI.
   `.env.example`). Without it, a local canvas "stub stylizer" fakes the effect
   (deterministic gradient art for text-first generations) and nothing leaves
   your machine.
-- **Chat + prompt composition** — [opencode](https://opencode.ai): install
-  it, run `opencode auth login` once. The chat works best on a sonnet-class
-  model — set `OPENCODE_MODEL=anthropic/claude-sonnet-4-6` (or better) in
-  `.env`.
+- **Chat + prompt composition** — set `ANTHROPIC_API_KEY` **or**
+  `OPENAI_API_KEY` in `.env` (the agent runs in-process; no separate install
+  or login). The chat works best on a sonnet-class model — the default is
+  `anthropic/claude-sonnet-4-6`; override with
+  `CARTIS_MODEL=provider/model-id` in `.env`.
 
 ## Your data
 
@@ -191,12 +194,12 @@ Business logic is in [Effect v3](https://effect.website) using
 
 Schemas (`effect` core `Schema`) + `Data.TaggedError` classes shared between
 client and server. `errors.ts` is the canonical tagged-error registry;
-`api.ts`, `records.ts`, `theme.ts`, `replicate.ts`, `opencode.ts` are wire
-schemas for the bridge routes, theme identity/context, and opencode reads.
-`thread.ts` is the canonical chat vocabulary (`ThreadPart`/`ThreadMessage`/
-`ThreadEvent`/`ThreadSummary`) — it imports no opencode shapes (the bridge maps
-opencode → thread; the client consumes thread only). `materialize.ts` is the one
-shared v1-transport materializer.
+`api.ts`, `records.ts`, `theme.ts`, `replicate.ts` are wire schemas for the
+bridge routes, theme identity/context, and Replicate reads. `thread.ts` is the
+canonical chat vocabulary (`ThreadPart`/`ThreadMessage`/`ThreadEvent`) — the
+bridge maps pi events/entries → thread; the client consumes thread only.
+`materialize.ts` is the `partsFromTurn` display builder (structured turn
+response → thread parts).
 
 ### Services and layers
 
@@ -204,18 +207,22 @@ shared v1-transport materializer.
 |---|---|---|
 | `StoreClient` | `cartis/StoreClient` | Browser: CRUD over `/api/store/:store` |
 | `ImageProvider` | `cartis/ImageProvider` | Browser: generate art (stub or bridge/Replicate) |
-| `ChatThread` | `cartis/ChatThread` | Browser: session passthrough (turn/history/abort/revert/regenerate/fork/siblings/permission) |
+| `ChatThread` | `cartis/ChatThread` | Browser: session passthrough (turn/edit/regenerate/history/tree/switch/abort) |
 | `ChatEvents` | `cartis/ChatEvents` | Browser: `Stream<ThreadEvent>` over `/api/chat/events` (SSE) |
 | `ThreadBus` | `cartis/ThreadBus` | Server: fan-out `ThreadEvent` stream (in-memory) |
 | `FileStore` | `cartis/FileStore` | Server: binary + sidecar I/O under `cartis-data/` |
-| `AgentClient` | `cartis/AgentClient` | Server: opencode session ops (create/prompt/messages/abort/revert/fork/children) |
 | `ReplicateSdk` | `cartis/ReplicateSdk` | Server: thin Effect wrapper over replicate SDK |
 | `ReplicateClient` | `cartis/ReplicateClient` | Server: create prediction, poll, download |
 
-The card's chat store is `ThreadState` (an expressive State adopted by
-BuilderView): it folds `ChatEvents` into a message list via the pure
-`src/chat/fold.ts` reducer, runs turns through the Effect boundary, and applies
-the resulting patch/art to the document through an injected `ChatContext`.
+The chat's server half lives in `src/server/pi/` — `runtime.ts` (lazy pi
+import, session cache, in-flight gate), `cardTools.ts` (typebox tool schemas
+derived from the card's fields), `turn.ts` (per-turn AgentSession
+orchestrator), `mapPiEvent.ts` (pi events → `ThreadEvent`), and `entries.ts`
+(history mapping + tree anchors + durable branch switch). The card's chat
+store is `ThreadState` (an expressive State adopted by BuilderView): it folds
+`ChatEvents` into a message list via the pure `src/chat/fold.ts` reducer, runs
+turns through the Effect boundary, and applies the turn's validated tool
+intents to the document through an injected `ChatContext`.
 
 ### Type discipline
 
@@ -262,8 +269,8 @@ This is the only place where Effect exits into Expressive-mvc.
 - **`as` casts are banned on external data**; use Schema decode or type
   narrowing. Sanctioned exceptions: type-level bridges on validated or
   self-produced values (e.g. `StoreClient` generic bridges after Schema decode)
-  and SDK-boundary narrowing where the import returns `unknown` (e.g.
-  `client as unknown as OpencodeClient` in `agentBridge.ts`).
+  and SDK-boundary narrowing (e.g. pi session entries in `src/server/pi/`,
+  which the SDK exposes as loosely-typed trees).
 
 ### Testing
 
@@ -272,5 +279,8 @@ vitest 4 + effect core. It exposes `it.effect` (TestClock-controlled),
 `it.scoped` (body may require `Scope`), and `it.live` (real clock). When
 `@effect/vitest` adds vitest 4 support, the adapter collapses to
 `export * from '@effect/vitest'`. TestClock drives all polling tests
-(ReplicateClient) so time advances are deterministic; agent behavior
-(fill patches, art composition) is tested through stub `AgentClient` layers.
+(ReplicateClient) so time advances are deterministic; agent behavior runs
+full-loop against pi's scripted **faux provider** (`src/server/pi/faux.ts`) —
+real agent loop, real tool validation, real session persistence, no network.
+`scripts/pi-canary.ts` is a permanent API-assumption canary (re-run on pi
+version bumps).

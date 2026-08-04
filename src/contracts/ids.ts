@@ -5,7 +5,7 @@
  * Two species:
  *   - NOMINAL id brands: structurally strings, nominally distinct — the
  *     compiler rejects passing a SessionId where a CardId is expected. No
- *     runtime refinement (ids come from crypto.randomUUID(), opencode, or
+ *     runtime refinement (ids come from crypto.randomUUID(), pi, or
  *     code-defined theme/layout definitions; transient sentinels like '' stay
  *     constructible).
  *   - REFINED string brands: carry a real runtime validation (DataUrl's
@@ -43,9 +43,6 @@ export type SessionIdT = typeof SessionId.Type;
 
 export const MessageId = Schema.String.pipe(Schema.brand('MessageId'));
 export type MessageIdT = typeof MessageId.Type;
-
-export const PermissionId = Schema.String.pipe(Schema.brand('PermissionId'));
-export type PermissionIdT = typeof PermissionId.Type;
 
 // ---------------------------------------------------------------------------
 // Refined string brands

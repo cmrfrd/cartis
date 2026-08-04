@@ -2,7 +2,7 @@
  * Bridge thread-event bus: every AI action emits a typed ThreadEvent here,
  * the browser subscribes via SSE (/api/chat/events), and event lines mirror
  * to the dev-server terminal via renderThreadEvent. In-memory only — history
- * dies with the server (clients rehydrate real conversations from opencode).
+ * dies with the server (clients rehydrate real conversations from pi's session files).
  *
  * Retypes the old ActivityBus (plan Task 1): same sliding PubSub with replay
  * (late SSE subscriber sees recent events) + capped Ref history, but the

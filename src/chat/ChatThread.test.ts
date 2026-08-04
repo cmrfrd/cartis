@@ -41,11 +41,11 @@ describe('ChatThread typed-error round-trip', () => {
       if (error._tag === 'ChatRequestError') {
         expect(error.remoteTag).toBe('AgentError'); // the typed identity survived
         expect(error.status).toBe(500);
-        expect(error.message).toBe('opencode session did not return an id'); // byte parity
+        expect(error.message).toBe('the agent turn failed — try again'); // byte parity
       }
     }).pipe(
       Effect.provide(
-        failingBridge({ tag: 'AgentError', error: 'opencode session did not return an id' }),
+        failingBridge({ tag: 'AgentError', error: 'the agent turn failed — try again' }),
       ),
     ),
   );

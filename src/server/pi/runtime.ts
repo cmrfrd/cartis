@@ -100,7 +100,7 @@ export function makePiRuntime(
       manager = pi.SessionManager.open(join(chatsDir, existing), chatsDir, dataRoot);
     } else {
       // Missing file = new conversation — ALSO the clean-break path for old
-      // opencode ids (a fresh pi session is minted under the same id).
+      // pre-migration ids (a fresh pi session is minted under the same id).
       manager = pi.SessionManager.create(dataRoot, chatsDir, { id });
     }
     sessions.set(id, manager);

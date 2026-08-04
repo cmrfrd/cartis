@@ -92,9 +92,11 @@ describe('effect toolchain canary', () => {
       const putErrDetail = new StoreError({ op: 'put', status: 400, detail: 'record.id required' });
       expect(putErrDetail.message).toBe('record.id required');
 
-      const noSession = new AgentError({ reason: 'no-session-id' });
-      expect(noSession._tag).toBe('AgentError');
-      expect(noSession.message).toBe('opencode session did not return an id');
+      const busy = new AgentError({ reason: 'busy' });
+      expect(busy._tag).toBe('AgentError');
+      expect(busy.message).toBe('a turn is already running for this card — wait for it to finish');
+      const turnFailed = new AgentError({ reason: 'turn-failed', detail: 'model exploded' });
+      expect(turnFailed.message).toBe('model exploded');
 
       const timeout = new ReplicateError({ reason: 'timeout' });
       expect(timeout._tag).toBe('ReplicateError');
@@ -124,8 +126,8 @@ describe('effect toolchain canary', () => {
   it.effect('noteFromCause: failure / defect / interrupt', () =>
     Effect.gen(function* () {
       yield* Effect.void;
-      const failure = Cause.fail(new AgentError({ reason: 'no-session-id' }));
-      expect(noteFromCause(failure)).toBe('opencode session did not return an id');
+      const failure = Cause.fail(new AgentError({ reason: 'turn-failed' }));
+      expect(noteFromCause(failure)).toBe('the agent turn failed — try again');
 
       const defect = Cause.die(new Error('boom'));
       expect(noteFromCause(defect)).toBe('boom');

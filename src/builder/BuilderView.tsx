@@ -44,7 +44,7 @@ export class BuilderView extends Component {
   /** Preview the shared card back instead of the front (both export). */
   showBack = false;
   previewEl = ref<HTMLDivElement>();
-  /** The card's chat sidebar (adopted child; opencode session per card). */
+  /** The card's chat sidebar (adopted child; pi session per card). */
   thread = new ThreadState();
   /** Chat panel width in px — session-only, drag-resizable (340–600, dbl-click 400). */
   chatWidth = 400;

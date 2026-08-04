@@ -19,7 +19,7 @@ import { Cause, Data, Match, Option } from 'effect';
  * | FileStoreError   | server fs I/O under cartis-data               | 500  | ErrorBody → client error → note     |
  * | BodyError        | server readBody JSON parse                    | 400  | ErrorBody → client error → note     |
  * | ParseError       | server route Schema decode (effect/Schema)    | 400  | ErrorBody → client error → note     |
- * | AgentError       | opencode contract violations (bridge)         | 500  | ErrorBody → client error → note     |
+ * | AgentError       | pi turn failures (bridge; busy → 409)         | 500  | ErrorBody → client error → note     |
  * | ChatRequestError | client chat routes non-ok (carries remoteTag) | n/a  | incomplete message + error strip    |
  * | ReplicateError   | replicate create/poll/failed/timeout (bridge) | 500  | ErrorBody → Art 'error' + note      |
  * | ImageBridgeError | client image route non-ok (carries remoteTag) | n/a  | generation note                     |
@@ -45,9 +45,12 @@ import { Cause, Data, Match, Option } from 'effect';
  * statuses (404 unknown store, 405 method, 503 missing token) are produced
  * before `respond` and unaffected.
  */
-export function statusOfError(tag: string): number {
-  // Malformed input is the caller's fault; everything else is on us.
-  return tag === 'BodyError' || tag === 'ParseError' ? 400 : 500;
+export function statusOfError(tag: string, error?: unknown): number {
+  // Malformed input is the caller's fault; everything else is on us —
+  // except a busy session, which is a conflict (409), not a server fault.
+  if (tag === 'BodyError' || tag === 'ParseError') return 400;
+  if (tag === 'AgentError' && error instanceof AgentError && error.reason === 'busy') return 409;
+  return 500;
 }
 
 /** fetch() rejected before any HTTP response (network down, DNS, abort). */
@@ -96,16 +99,13 @@ export class BodyError extends Data.TaggedError('BodyError')<{
   }
 }
 
-/** opencode agent contract violations. src/server/agentBridge.ts */
+/** Pi agent turn failures. src/server/agentBridge.ts */
 export class AgentError extends Data.TaggedError('AgentError')<{
-  readonly reason: 'no-session-id' | 'no-fill' | 'bad-reply' | 'busy' | 'turn-failed';
+  readonly reason: 'busy' | 'turn-failed';
   readonly detail?: string;
 }> {
   override get message(): string {
     const byReason: Record<AgentError['reason'], string> = {
-      'no-session-id': 'opencode session did not return an id',
-      'no-fill': 'agent returned no fill patch',
-      'bad-reply': 'the agent returned malformed output — try again or regenerate',
       busy: 'a turn is already running for this card — wait for it to finish',
       'turn-failed': this.detail ?? 'the agent turn failed — try again',
     };

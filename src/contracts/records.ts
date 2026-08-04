@@ -59,10 +59,10 @@ export const CardRecord = Schema.Struct({
   updatedAt: Timestamp,
   data: Schema.Record({ key: Schema.String, value: FieldValue }),
   /**
-   * The opencode session backing this card's chat (card chat panel, spec
+   * The pi session backing this card's chat (card chat panel, spec
    * 2026-08-03). Optional + absent-tolerant: pre-chat cards and copies decode
-   * fine and simply start a fresh conversation. Lives in gitignored
-   * cartis-data/; opencode owns the transcript, we persist only this pointer.
+   * fine and simply start a fresh conversation. The transcript lives in
+   * gitignored cartis-data/chats; we persist only this pointer.
    */
   chatSessionId: Schema.optional(SessionId),
 });

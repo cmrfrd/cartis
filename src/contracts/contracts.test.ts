@@ -23,7 +23,6 @@ import {
   StatusResponse,
   StorePutRequest,
 } from './api';
-import { PromptResult, SessionCreated } from './opencode';
 import {
   CardRecord,
   ExportFormat,
@@ -347,61 +346,6 @@ describe('Prediction', () => {
     expect(Option.isNone(decoded.output)).toBe(true);
     expect(Option.isNone(decoded.error)).toBe(true);
     expect(decoded.urls?.get).toContain('/predictions/');
-  });
-});
-
-// ---------------------------------------------------------------------------
-// opencode: SessionCreated + PromptResult
-// ---------------------------------------------------------------------------
-
-describe('SessionCreated', () => {
-  it('decodes flat shape { id }', () => {
-    const decoded = Schema.decodeUnknownSync(SessionCreated)({ id: 'sess-abc' });
-    expect((decoded as { id?: string }).id).toBe('sess-abc');
-  });
-
-  it('decodes wrapped shape { data: { id } }', () => {
-    const decoded = Schema.decodeUnknownSync(SessionCreated)({ data: { id: 'sess-xyz' } });
-    expect((decoded as { data?: { id?: string } }).data?.id).toBe('sess-xyz');
-  });
-});
-
-describe('PromptResult', () => {
-  it('decodes structured_output shape (direct)', () => {
-    const raw = {
-      data: {
-        structured_output: { code: 'export default function Card() { return null; }' },
-      },
-    };
-    const decoded = Schema.decodeUnknownSync(PromptResult)(raw);
-    expect(decoded.data?.structured_output?.code).toBe(
-      'export default function Card() { return null; }',
-    );
-  });
-
-  it('decodes nested info.structured_output shape', () => {
-    const raw = {
-      data: {
-        info: {
-          structured_output: { code: 'export default function Card2() { return null; }' },
-        },
-      },
-    };
-    const decoded = Schema.decodeUnknownSync(PromptResult)(raw);
-    expect(decoded.data?.info?.structured_output?.code).toContain('Card2');
-  });
-
-  it('decodes parts-with-text shape', () => {
-    const raw = {
-      data: {
-        parts: [
-          { type: 'text', text: '```tsx\nexport default function Card() { return null; }\n```' },
-        ],
-      },
-    };
-    const decoded = Schema.decodeUnknownSync(PromptResult)(raw);
-    expect(decoded.data?.parts?.[0]?.type).toBe('text');
-    expect(decoded.data?.parts?.[0]?.text).toContain('```tsx');
   });
 });
 

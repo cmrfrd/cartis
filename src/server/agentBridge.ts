@@ -607,7 +607,7 @@ export function cartisBridge(): Plugin {
           sres,
           Effect.gen(function* () {
             if (sessionId.length === 0) return { messages: [] as ThreadMessageT[] };
-            // Missing file → empty history (clean break for old opencode ids).
+            // Missing file → empty history (clean break for pre-migration ids).
             const messages = yield* Effect.tryPromise({
               try: async () => mapSessionEntries(await piRt.getSession(sessionId)),
               catch: (cause) => agentErrorOf(cause),

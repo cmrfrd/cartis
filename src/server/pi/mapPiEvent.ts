@@ -1,6 +1,6 @@
 /**
  * Pure reducer: pi AgentSessionEvents → ThreadEvents (migration spec §4.3).
- * Replaces the opencode `mapAgentEvent` watcher. Two event layers are
+ * The pi AgentEvent → ThreadEvent reducer. Two event layers are
  * handled: INNER AssistantMessageEvents carried by `message_update`
  * (text and toolcall variants — we render from the CUMULATIVE `partial` message), and
  * TOP-LEVEL `tool_execution_*` events. `TurnCompleted` is NOT emitted here —

@@ -56,7 +56,7 @@ export const StatusResponse = Schema.Struct({
 export type StatusResponseT = typeof StatusResponse.Type;
 
 // ---------------------------------------------------------------------------
-// Card chat panel (spec 2026-08-03) — session passthrough over opencode.
+// Card chat panel — session passthrough over the in-process pi runtime.
 // ---------------------------------------------------------------------------
 
 /** Lenient card-data record (patch shape when no field schema is available). */
@@ -80,15 +80,14 @@ export const DocContext = Schema.Struct({
 export type DocContextT = typeof DocContext.Type;
 
 // POST /api/chat/turn — one conversational card-editing turn.
-// Request mirrors the fill request (session-per-card, currentData snapshot,
-// optional vision attach); the response carries the raw assistant text (fed to
-// the SHARED materializer for display) plus the validated patch (applied to the
-// card) and an optional art action.
+// Request carries the session-per-card pointer, currentData snapshot, and
+// optional vision attach; the response is STRUCTURED (reply + validated tool
+// intents + authoritative entry ids — migration spec §3.2).
 /**
  * One user attachment riding a chat turn (spec 2026-08-03 chat-panel-maturity
- * §1). The data-URL doubles as the composer thumbnail src; on the wire it
- * becomes an opencode FilePartInput whose `filename` marks it as user-supplied
- * (the unnamed card-art context part stays invisible).
+ * §1). The data-URL doubles as the composer thumbnail src; on the wire images
+ * become pi image inputs and text files inline into the user content (their
+ * names persisted via the turn_meta entry).
  */
 export const ChatAttachment = Schema.Struct({
   name: FileName,
@@ -167,17 +166,15 @@ export const ChatHistoryResponse = Schema.Struct({
 });
 export type ChatHistoryResponseT = typeof ChatHistoryResponse.Type;
 
-// POST /api/chat/fork — branch a session; also the abort/revert/regenerate ack.
+// The switch/abort ack body.
 export const SessionRef = Schema.Struct({
   sessionId: SessionId,
 });
 export type SessionRefT = typeof SessionRef.Type;
 
-// POST /api/chat/abort|revert|regenerate — request bodies.
+// POST /api/chat/abort — request body.
 export const SessionAction = Schema.Struct({
   sessionId: SessionId,
-  /** revert target; regenerate/abort ignore it. */
-  messageId: Schema.optional(MessageId),
 });
 export type SessionActionT = typeof SessionAction.Type;
 

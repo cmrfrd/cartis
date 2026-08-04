@@ -36,7 +36,7 @@ export interface SaveCardInput {
   layoutId: LayoutIdT;
   data: CardData;
   holo: boolean;
-  /** The opencode chat session backing this card (card chat panel). */
+  /** The pi chat session backing this card (card chat panel). */
   chatSessionId?: SessionIdT;
 }
 

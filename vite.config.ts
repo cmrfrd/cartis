@@ -8,7 +8,12 @@ export default defineConfig(({ mode }) => {
   // The bridge reads process.env at request time; Vite only loads .env files
   // into import.meta.env. Bridge keys are copied over here — shell env wins.
   const fileEnv = loadEnv(mode, process.cwd(), '');
-  for (const key of ['REPLICATE_API_TOKEN', 'OPENCODE_MODEL']) {
+  for (const key of [
+    'REPLICATE_API_TOKEN',
+    'ANTHROPIC_API_KEY',
+    'OPENAI_API_KEY',
+    'CARTIS_MODEL',
+  ]) {
     if (!process.env[key] && fileEnv[key]) process.env[key] = fileEnv[key];
   }
   return {

@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { PassThrough } from 'node:stream';
 import { Effect, Layer, ManagedRuntime } from 'effect';
 import { describe, expect } from 'vitest';
-import { BodyError, StoreError, statusOfError } from '@/contracts/errors.ts';
+import { AgentError, BodyError, StoreError, statusOfError } from '@/contracts/errors.ts';
 import { it } from '../../test/effect.ts';
 import { readBody, respond } from './BridgeRuntime.ts';
 
@@ -70,11 +70,13 @@ describe('respond — typed errors survive the round-trip (spec §13)', () => {
       }, 50);
     }));
 
-  it('statusOfError: BodyError/ParseError → 400, everything else → 500', () => {
+  it('statusOfError: BodyError/ParseError → 400, busy AgentError → 409, everything else → 500', () => {
     expect(statusOfError('BodyError')).toBe(400);
     expect(statusOfError('ParseError')).toBe(400);
     expect(statusOfError('StoreError')).toBe(500);
     expect(statusOfError('AgentError')).toBe(500);
+    expect(statusOfError('AgentError', new AgentError({ reason: 'busy' }))).toBe(409);
+    expect(statusOfError('AgentError', new AgentError({ reason: 'turn-failed' }))).toBe(500);
     expect(statusOfError('Defect')).toBe(500);
   });
 });
@@ -82,16 +84,16 @@ describe('respond — typed errors survive the round-trip (spec §13)', () => {
 describe('respond — defect branch', () => {
   it('renders Error defects as message only (no "Error: " prefix) with tag Defect', () =>
     new Promise<void>((resolve) => {
-      // A never-failing Effect that immediately dies with an Error — this is the
-      // same path that agentClientLive takes when opencode is not installed.
-      const dying = Effect.die(new Error('spawn opencode ENOENT'));
+      // A never-failing Effect that immediately dies with an Error — the same
+      // path an unexpected throw inside a route handler takes.
+      const dying = Effect.die(new Error('spawn ENOENT'));
       const runtime = ManagedRuntime.make(Layer.empty);
       const { res, body } = fakeRes();
       respond(runtime, res, dying);
       // respond is fire-and-forget (void); settle after the micro-task queue drains.
       setTimeout(() => {
         const parsed = JSON.parse(body()) as { tag: string; error: string };
-        expect(parsed.error).toBe('spawn opencode ENOENT');
+        expect(parsed.error).toBe('spawn ENOENT');
         expect(parsed.tag).toBe('Defect');
         void runtime.dispose().then(resolve);
       }, 50);

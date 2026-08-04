@@ -17,7 +17,6 @@ import {
   MessageId,
   MimeType,
   NonEmptyString,
-  PermissionId,
   SessionId,
   type SessionIdT,
   Slug,
@@ -27,16 +26,7 @@ import {
 
 describe('nominal id brands', () => {
   it('construct from any string and round-trip decode', () => {
-    const brands = [
-      CardId,
-      ExportId,
-      ImageId,
-      ThemeId,
-      LayoutId,
-      SessionId,
-      MessageId,
-      PermissionId,
-    ];
+    const brands = [CardId, ExportId, ImageId, ThemeId, LayoutId, SessionId, MessageId];
     for (const brand of brands) {
       const made = brand.make('some-id-123');
       expect(made).toBe('some-id-123'); // brands are strings at runtime

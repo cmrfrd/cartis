@@ -106,7 +106,7 @@ export function respond<A, E extends { message: string }, R>(
     const failure = Cause.failureOption(exit.cause);
     if (Option.isSome(failure)) {
       const tag = tagOf(failure.value);
-      sendJson(res, statusOfError(tag), { tag, error: failure.value.message });
+      sendJson(res, statusOfError(tag, failure.value), { tag, error: failure.value.message });
       return;
     }
     const defect = Cause.dieOption(exit.cause);
