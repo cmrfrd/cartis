@@ -130,7 +130,10 @@ Send) before proceeding; when the objective is complete reply exactly
 
 ## v1 scenarios
 
-1. **`photo-card`** — stage a fixture photo; objective: attach it and ask for
+1. **`photo-card`** — stage the fixture photo (`e2e/fixtures/subject.png`,
+   an AI-generated face of a person who does not exist, downloaded once from
+   thispersondoesnotexist.com and committed — no real person's likeness in
+   the repo); objective: attach it and ask for
    a spell card called "Tinker", steampunk, funny caption, "no might/ward
    stuff" (the reproduced killer). Criteria: fs — none required (unsaved);
    page — name field = "Tinker"; chat panel contains NO `"reply"` raw-JSON
