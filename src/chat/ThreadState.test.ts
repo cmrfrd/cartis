@@ -339,6 +339,39 @@ describe('ThreadState streaming (SSE fold)', () => {
     state.set(null);
   });
 
+  it('an IDLE unbound thread drops replayed events (live-caught ghost after reload)', async () => {
+    const pubsub = await Effect.runPromise(PS.unbounded<ThreadEventT>());
+    const state = makeThread(threadStub(), chatEventsFromPubSub(pubsub));
+    // fresh card: no session bound, no turn running — SSE replay must NOT build ghosts
+    await Effect.runPromise(
+      PubSubPublish(pubsub, {
+        _tag: 'TurnStarted',
+        sessionId: SessionId.make('old-session'),
+        messageId: MessageId.make('m1'),
+      }),
+    );
+    await new Promise((r) => setTimeout(r, 20));
+    expect(state.messages).toHaveLength(0);
+    state.set(null);
+  });
+
+  it('an unbound thread WITH a turn running still accepts the first-turn stream', async () => {
+    const pubsub = await Effect.runPromise(PS.unbounded<ThreadEventT>());
+    const state = makeThread(threadStub(), chatEventsFromPubSub(pubsub));
+    state.running = true; // first turn in flight; session id not yet known
+    await vi.waitFor(async () => {
+      await Effect.runPromise(
+        PubSubPublish(pubsub, {
+          _tag: 'TurnStarted',
+          sessionId: SessionId.make('brand-new'),
+          messageId: MessageId.make('m1'),
+        }),
+      );
+      expect(state.messages.some((m) => m.id === 'm1')).toBe(true);
+    });
+    state.set(null);
+  });
+
   it('records a pending permission from the stream', async () => {
     const pubsub = await Effect.runPromise(PS.unbounded<ThreadEventT>());
     const state = makeThread(threadStub(), chatEventsFromPubSub(pubsub));

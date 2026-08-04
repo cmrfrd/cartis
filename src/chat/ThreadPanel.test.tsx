@@ -433,6 +433,10 @@ describe('ThreadPanel', () => {
       }),
     );
     const { unmount } = await mountApp();
+    // Bind the session first (a stale permission replayed onto a FRESH card is
+    // a ghost and is now correctly dropped by the idle-unbound filter).
+    await setInput(composer(), 'hi');
+    await click(document.querySelector('[data-testid="composer-send"]'));
     await vi.waitFor(async () => {
       await Effect.runPromise(
         PS.publish(pubsub, {

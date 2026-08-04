@@ -136,6 +136,12 @@ export class ThreadState extends State {
     if (this.get(null)) return; // destroyed
     const sid = Option.getOrUndefined(eventSessionId(event));
     if (sid !== undefined && this.sessionId !== undefined && sid !== this.sessionId) return;
+    // Unbound thread: accept unknown-session events ONLY while a turn is in
+    // flight (the first turn streams before the response captures its session
+    // id). An IDLE unbound thread must drop them — the SSE PubSub replays the
+    // last ~50 events to every new subscriber, and a fresh card would build
+    // ghost messages from an old session's replay (live-caught after reload).
+    if (sid !== undefined && this.sessionId === undefined && !this.running) return;
     if (event._tag === 'PermissionRequested') {
       this.pendingPermission = {
         sessionId: event.sessionId,
