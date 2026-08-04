@@ -140,6 +140,12 @@ export function readTurnTail(sessionManager: SessionManager): {
   return { userEntryId, assistantEntryId: last.id, reply, blockOrder, toolErrors };
 }
 
+/** Edit/regenerate variants (spec §4.1): navigate the tree, then re-prompt. */
+export type TurnMode =
+  | { kind: 'turn' }
+  | { kind: 'edit'; targetUserEntryId: string }
+  | { kind: 'regenerate' };
+
 export interface TurnIo {
   emit: (event: ThreadEventT) => void; // ThreadBus events (SSE)
   log: (message: string) => void; // console-lane notes (heartbeat etc.)
@@ -153,6 +159,7 @@ export async function runTurn(
   rt: PiRuntime,
   req: ChatTurnRequestT,
   io: TurnIo,
+  mode: TurnMode = { kind: 'turn' },
 ): Promise<TurnResult> {
   const sessionId: SessionIdT = req.sessionId ?? SessionId.make(crypto.randomUUID());
   if (rt.inFlight.has(sessionId)) throw new TurnBusyError();
@@ -212,12 +219,34 @@ export async function runTurn(
   }, WALL_CLOCK_TIMEOUT_MS);
 
   try {
+    // Tree navigation for edit/regenerate: leaf moves to the target user
+    // entry's PARENT (navigateTree semantics), the re-prompt becomes a
+    // sibling branch; the old branch stays in the tree.
+    let promptTextOverride: string | undefined;
+    if (mode.kind === 'edit') {
+      await session.navigateTree(mode.targetUserEntryId, {});
+    } else if (mode.kind === 'regenerate') {
+      const branch = sessionManager.getBranch() as unknown as Entry[];
+      const lastUser = [...branch]
+        .reverse()
+        .find((e) => e.type === 'message' && e.message?.role === 'user');
+      if (lastUser === undefined) throw new TurnFailedError('nothing to regenerate');
+      promptTextOverride = (lastUser.message?.content ?? [])
+        .filter((c: { type: string }) => c.type === 'text')
+        .map((c: { text?: string }) => c.text ?? '')
+        .join('');
+      if (typeof lastUser.message?.content === 'string') {
+        promptTextOverride = lastUser.message.content;
+      }
+      await session.navigateTree(lastUser.id, {});
+    }
+
     // User content: typed text (or the attachment stand-in) + inlined text
     // files; images = user image attachments, then preview snapshot, then
     // current-art context (spec §3.3 order).
     const attachments = req.attachments ?? [];
     const baseText = req.userPrompt.trim().length > 0 ? req.userPrompt : '(see attached files)';
-    const text = baseText + inlineTextFiles(attachments);
+    const text = promptTextOverride ?? baseText + inlineTextFiles(attachments);
     const images: ImageInput[] = [];
     for (const a of attachments) {
       if (!isImage(a)) continue;
