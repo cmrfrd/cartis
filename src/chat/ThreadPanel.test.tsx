@@ -295,6 +295,37 @@ describe('ThreadPanel', () => {
     unmount();
   });
 
+  it('renders doc-action chips and runs save through the builder (agent parity)', async () => {
+    setAppLayer(
+      testAppLayerWith({
+        thread: chatStub({
+          turn: () =>
+            Effect.succeed({
+              sessionId: SessionId.make('s1'),
+              assistantText:
+                '{"reply":"Saved it.","patch":{},"actions":[{"kind":"save"},{"kind":"export","target":"print"}]}',
+              patch: {},
+              actions: [{ kind: 'save' }, { kind: 'export', target: 'print' }],
+            }),
+        }),
+      }),
+    );
+    const { unmount, shell } = await mountApp();
+    await setInput(composer(), 'save it and export a print png');
+    await click(document.querySelector('[data-testid="composer-send"]'));
+    await vi.waitFor(() => {
+      const chips = document.querySelectorAll('[data-testid="tool-doc-action"]');
+      expect(chips).toHaveLength(2);
+      expect(chips[0]?.textContent).toContain('Save card');
+      expect(chips[1]?.textContent).toContain('export print');
+    });
+    // the save actually persisted through the archive (agent = user parity)
+    await vi.waitFor(() => {
+      expect(shell.archive.cards.length).toBeGreaterThan(0);
+    });
+    unmount();
+  });
+
   it('renders assistant text as markdown (user text stays plain)', async () => {
     setAppLayer(
       testAppLayerWith({

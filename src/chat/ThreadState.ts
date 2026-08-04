@@ -18,6 +18,7 @@ import type {
   ChatAttachmentT,
   ChatTurnRequestT,
   ChatTurnResponseT,
+  DocActionT,
 } from '@/contracts/api';
 import { noteFromCause } from '@/contracts/errors';
 import type { FieldSummaryT } from '@/contracts/fields';
@@ -53,10 +54,19 @@ export interface ChatContext {
   readonly currentArtFileName?: string;
   /** Apply the agent's field patch to the open document. */
   applyPatch(patch: CardDataT): void;
-  /** Delegate an art action to the builder's art run (phases arrive as Art events). */
-  runArt(action: ArtActionT): void;
+  /**
+   * Delegate an art action to the builder's art run (phases arrive as Art
+   * events). Returns the run's promise so doc actions can sequence after it.
+   */
+  runArt(action: ArtActionT): void | Promise<void>;
   /** Mark the document dirty (e.g. switching to a branch is a saved-state change). */
   markDirty(): void;
+  /** Persist the document (agent 'save' action) — false on failure. */
+  save(): Promise<boolean>;
+  /** Persist as a fresh copy (agent 'saveAsCopy' action) — false on failure. */
+  saveAsCopy(): Promise<boolean>;
+  /** Render + download + archive an export of the current preview. */
+  exportRender(target: 'png' | 'print' | 'sheet'): Promise<boolean>;
 }
 
 export interface PendingPermission {
@@ -279,7 +289,7 @@ export class ThreadState extends State {
       this.sessionId = res.sessionId;
       this.replaceMessage(placeholderId, materializeAssistantParts(res.assistantText), 'complete');
       if (Object.keys(res.patch).length > 0) ctx.applyPatch(res.patch);
-      if (res.artAction !== undefined) ctx.runArt(res.artAction);
+      void this.runPostTurn(ctx, res.artAction, res.actions ?? []);
     } else {
       const message = this.canceling
         ? 'Canceled.'
@@ -468,7 +478,8 @@ export class ThreadState extends State {
       this.sessionId = res.sessionId; // lazy-created session captured
       this.finalizeAssistant(userId, materializeAssistantParts(res.assistantText), 'complete');
       if (Object.keys(res.patch).length > 0) ctx.applyPatch(res.patch);
-      if (res.artAction !== undefined) ctx.runArt(res.artAction);
+      // Detached: the reply renders now; art then doc actions sequence behind it.
+      void this.runPostTurn(ctx, res.artAction, res.actions ?? []);
     } else if (this.canceling) {
       this.finalizeAssistant(userId, [{ _tag: 'Text', text: 'Canceled.' }], 'incomplete');
     } else {
@@ -478,6 +489,30 @@ export class ThreadState extends State {
     }
     this.canceling = false;
     this.running = false;
+  }
+
+  /**
+   * Post-turn side effects, sequenced: the art run first (so a same-turn save
+   * or export captures the NEW art), then each document action in order. A
+   * failed action surfaces in the note strip; the reply is already rendered.
+   */
+  private async runPostTurn(
+    ctx: ChatContext,
+    artAction: ArtActionT | undefined,
+    actions: readonly DocActionT[],
+  ): Promise<void> {
+    if (artAction !== undefined) await ctx.runArt(artAction);
+    for (const action of actions) {
+      if (this.get(null)) return;
+      const ok = await (action.kind === 'save'
+        ? ctx.save()
+        : action.kind === 'saveAsCopy'
+          ? ctx.saveAsCopy()
+          : ctx.exportRender(action.target));
+      if (!ok && !this.get(null)) {
+        this.note = action.kind === 'export' ? 'export failed' : 'save failed';
+      }
+    }
   }
 
   /**

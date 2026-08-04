@@ -17,11 +17,14 @@
  */
 
 import { Option, Schema } from 'effect';
+import { DocAction, type DocActionT } from './api.ts';
 import type { ThreadPartT } from './thread.ts';
 
 /** Tool-call ids/names for the v1 card actions, shared with the tool-UI registry. */
 export const CARD_PATCH_TOOL = 'card_patch';
 export const CARD_GENERATE_ART_TOOL = 'card_generate_art';
+export const CARD_SAVE_TOOL = 'card_save';
+export const CARD_EXPORT_TOOL = 'card_export';
 
 const ChatContract = Schema.Struct({
   reply: Schema.optional(Schema.String),
@@ -32,8 +35,20 @@ const ChatContract = Schema.Struct({
       editCurrentArt: Schema.optional(Schema.Boolean),
     }),
   ),
+  actions: Schema.optional(Schema.Array(Schema.Unknown)),
 });
 const decodeContract = Schema.decodeUnknownOption(ChatContract);
+const decodeDocAction = Schema.decodeUnknownOption(DocAction);
+
+/** Per-entry lenient action decode — a mistyped entry drops, valid ones survive. */
+export function decodeDocActions(raw: readonly unknown[] | undefined): DocActionT[] {
+  return (raw ?? []).flatMap((entry) =>
+    Option.match(decodeDocAction(entry), {
+      onNone: () => [] as DocActionT[],
+      onSome: (action) => [action],
+    }),
+  );
+}
 
 /**
  * Repair the model-JSON failure classes we have actually seen (live-caught
@@ -140,6 +155,13 @@ export function materializeAssistantParts(text: string): ThreadPartT[] {
   }
   if (contract.artAction !== undefined) {
     parts.push(toolChip(CARD_GENERATE_ART_TOOL, 'Generate art', contract.artAction));
+  }
+  for (const action of decodeDocActions(contract.actions)) {
+    parts.push(
+      action.kind === 'export'
+        ? toolChip(CARD_EXPORT_TOOL, 'Export render', action)
+        : toolChip(CARD_SAVE_TOOL, action.kind === 'save' ? 'Save card' : 'Save as copy', action),
+    );
   }
   // A parsed-but-empty contract still yields a (blank) message, never nothing.
   if (parts.length === 0) parts.push({ _tag: 'Text', text: '' });

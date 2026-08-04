@@ -337,6 +337,24 @@ describe('runChatTurn', () => {
     },
   );
 
+  it.effect('passes valid doc actions through and drops mistyped entries', () =>
+    Effect.gen(function* () {
+      const out = yield* runChatTurn(chatReq(), noArt);
+      expect(out.actions).toEqual([{ kind: 'save' }, { kind: 'export', target: 'print' }]);
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          chatStub(
+            '{"reply": "Saved.", "patch": {}, "actions": [{"kind": "save"}, {"kind": "export", "target": "pdf"}, {"kind": "export", "target": "print"}]}',
+            [],
+            [],
+          ),
+          threadBusTestLayer,
+        ),
+      ),
+    ),
+  );
+
   it.effect('a hopelessly mangled contract fails the turn with a typed error (no raw blob)', () =>
     Effect.gen(function* () {
       const err = yield* runChatTurn(chatReq(), noArt).pipe(Effect.flip);

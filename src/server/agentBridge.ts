@@ -25,6 +25,7 @@ import {
   ChatTurnRequest,
   type ChatTurnRequestT,
   type ChatTurnResponseT,
+  type DocActionT,
   ImageGenerateRequest,
   PermissionReply,
   SessionAction,
@@ -47,6 +48,7 @@ import {
   type SessionIdT,
 } from '../contracts/ids.ts';
 import {
+  decodeDocActions,
   extractJson,
   looksLikeContract,
   materializeAssistantParts,
@@ -760,6 +762,9 @@ const CHAT_GUIDE =
   '"reply" is a short natural-language message to the author (what you changed, or a clarifying question). ' +
   'Include "patch" only when you are changing fields, containing only those fields. ' +
   'Include "artAction" ONLY when the request calls for generating or editing the card art. ' +
+  'Include "actions" ONLY when the author asks to save or export the card: ' +
+  '"actions": [ {"kind": "save"} | {"kind": "saveAsCopy"} | {"kind": "export", "target": "png"|"print"|"sheet"} ] ' +
+  '(png = plain 300 DPI, print = 600 DPI with bleed and crop marks, sheet = a 3x3 A4 cut sheet). ' +
   'The JSON must be STRICT: escape any double quotes inside string values as \\" ' +
   '(e.g. "flavor": "\\"I meant to do that.\\"") and never leave trailing commas.';
 
@@ -832,7 +837,15 @@ function promptWithHeartbeat(
 function parseChatReply(
   raw: string,
   decodePatch: (u: unknown) => Effect.Effect<CardDataT, AgentError>,
-): Effect.Effect<{ assistantText: string; patch: CardDataT; artAction?: ArtActionT }, AgentError> {
+): Effect.Effect<
+  {
+    assistantText: string;
+    patch: CardDataT;
+    artAction?: ArtActionT;
+    actions?: readonly DocActionT[];
+  },
+  AgentError
+> {
   return Effect.gen(function* () {
     // Shared lenient extraction (repairs unescaped inner quotes + trailing
     // commas — the live-caught failure classes) so a typographic slip in
@@ -846,10 +859,18 @@ function parseChatReply(
       }
       return { assistantText: raw, patch: {} };
     }
-    const body = json.value as { patch?: unknown; artAction?: unknown };
+    const body = json.value as { patch?: unknown; artAction?: unknown; actions?: unknown };
     const patch = yield* decodePatch(body.patch ?? {});
     const artAction = Option.getOrUndefined(decodeArtActionOption(body.artAction));
-    return { assistantText: raw, patch, artAction };
+    // Document actions decode per-entry leniently: a mistyped entry drops,
+    // valid ones still run (unlike patch, where a mistype is a real error).
+    const actions = decodeDocActions(Array.isArray(body.actions) ? body.actions : undefined);
+    return {
+      assistantText: raw,
+      patch,
+      artAction,
+      ...(actions.length > 0 ? { actions } : {}),
+    };
   });
 }
 

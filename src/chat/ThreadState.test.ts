@@ -40,6 +40,9 @@ const contextOf = (over: Partial<ChatContext> = {}): ChatContext => ({
   applyPatch: () => {},
   runArt: () => {},
   markDirty: () => {},
+  save: () => Promise.resolve(true),
+  saveAsCopy: () => Promise.resolve(true),
+  exportRender: () => Promise.resolve(true),
   ...over,
 });
 
@@ -96,7 +99,9 @@ describe('ThreadState.send', () => {
       undefined,
       contextOf({
         applyPatch: (p) => applied.push(p),
-        runArt: (a) => arts.push(a),
+        runArt: (a) => {
+          arts.push(a);
+        },
       }),
     );
     await state.send('make art');
@@ -227,6 +232,66 @@ describe('ThreadState attachments', () => {
     await vi.waitFor(() => expect(state.running).toBe(false));
     const user = state.messages[0];
     expect(user?.parts.map((p) => p._tag)).toEqual(['File', 'Text']);
+    state.set(null);
+  });
+});
+
+describe('ThreadState doc actions', () => {
+  it('runs actions in order AFTER the art run, through the context appliers', async () => {
+    const order: string[] = [];
+    const state = makeThread(
+      threadStub({
+        turn: () =>
+          Effect.succeed({
+            sessionId: SessionId.make('s1'),
+            assistantText:
+              '{"reply":"done","artAction":{"brief":"b","editCurrentArt":false},"actions":[{"kind":"save"},{"kind":"export","target":"print"}]}',
+            patch: {},
+            artAction: { brief: 'b', editCurrentArt: false },
+            actions: [
+              { kind: 'save' as const },
+              { kind: 'export' as const, target: 'print' as const },
+            ],
+          }),
+      }),
+      undefined,
+      contextOf({
+        runArt: async () => {
+          await new Promise((r) => setTimeout(r, 10)); // art is slow — actions must wait
+          order.push('art');
+        },
+        save: async () => {
+          order.push('save');
+          return true;
+        },
+        exportRender: async (target) => {
+          order.push(`export:${target}`);
+          return true;
+        },
+      }),
+    );
+    await state.send('generate art, save it, export a print png');
+    await vi.waitFor(() => expect(order).toEqual(['art', 'save', 'export:print']));
+    expect(state.note).toBeUndefined();
+    state.set(null);
+  });
+
+  it('a failed action surfaces in the note strip', async () => {
+    const state = makeThread(
+      threadStub({
+        turn: () =>
+          Effect.succeed({
+            sessionId: SessionId.make('s1'),
+            assistantText: '{"reply":"saving","actions":[{"kind":"save"}]}',
+            patch: {},
+            actions: [{ kind: 'save' as const }],
+          }),
+      }),
+      undefined,
+      contextOf({ save: () => Promise.resolve(false) }),
+    );
+    await state.send('save it');
+    await vi.waitFor(() => expect(state.note).toBe('save failed'));
     state.set(null);
   });
 });

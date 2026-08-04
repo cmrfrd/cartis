@@ -69,6 +69,22 @@ export const ArtAction = Schema.Struct({
 });
 export type ArtActionT = typeof ArtAction.Type;
 
+/**
+ * A document-level action the agent may request (chat-doc-actions spec):
+ * save / save-as-copy / export the CURRENT card. Executed client-side by the
+ * BuilderView appliers, in order, after the patch and any art run.
+ */
+export const DocAction = Schema.Union(
+  Schema.Struct({ kind: Schema.Literal('save') }),
+  Schema.Struct({ kind: Schema.Literal('saveAsCopy') }),
+  Schema.Struct({
+    kind: Schema.Literal('export'),
+    /** png = 300 DPI plain, print = 600 DPI + bleed/marks, sheet = 3×3 A4. */
+    target: Schema.Literal('png', 'print', 'sheet'),
+  }),
+);
+export type DocActionT = typeof DocAction.Type;
+
 // POST /api/chat/turn — one conversational card-editing turn.
 // Request mirrors the fill request (session-per-card, currentData snapshot,
 // optional vision attach); the response carries the raw assistant text (fed to
@@ -105,6 +121,8 @@ export const ChatTurnResponse = Schema.Struct({
   /** Field-schema-validated patch, safe to apply to the card. */
   patch: CardDataSchema,
   artAction: Schema.optional(ArtAction),
+  /** Document actions (save/copy/export), decoded per-entry leniently. */
+  actions: Schema.optional(Schema.Array(DocAction)),
 });
 export type ChatTurnResponseT = typeof ChatTurnResponse.Type;
 

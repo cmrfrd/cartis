@@ -12,6 +12,7 @@ import { type ChatContext, ThreadState } from '@/chat/ThreadState';
 import { summarizeField } from '@/contracts/fields';
 import { type CardIdT, LayoutId, type LayoutIdT, ThemeId, type ThemeIdT } from '@/contracts/ids';
 import { ExportBar } from '@/export/ExportBar';
+import { downloadBlob, exportFileName, renderCardBlob, renderSheetBlob } from '@/export/exportCard';
 import { ImageProvider } from '@/images/ImageProvider';
 import type { StoredCard } from '@/storage/CardArchive';
 import { Button, Panel, PreviewStage, SelectInput, TextInput } from '@/ui';
@@ -72,13 +73,53 @@ export class BuilderView extends Component {
         this.data = { ...this.data, ...patch };
         this.dirty = true;
       },
-      runArt: (action) => {
-        void this.runArtAction(action.brief, action.editCurrentArt);
-      },
+      runArt: (action) => this.runArtAction(action.brief, action.editCurrentArt),
       markDirty: () => {
         this.dirty = true;
       },
+      save: () => this.saveCard(),
+      saveAsCopy: () => this.saveAsCopy(),
+      exportRender: (target) => this.exportRender(target),
     };
+  }
+
+  /**
+   * Agent-invoked export of the current preview (chat-doc-actions spec):
+   * `png` = plain 300 DPI, `print` = 600 DPI + bleed/marks, `sheet` = 3×3 A4.
+   * Same delivery as ExportBar: download + archive linked to the saved card.
+   */
+  async exportRender(target: 'png' | 'print' | 'sheet'): Promise<boolean> {
+    const node = this.previewEl.current;
+    const archive = this.shell?.archive;
+    if (!node || !archive) return false;
+    // Snapshot reactive fields before the effect (snapshot rule).
+    const cardName = String(this.data.name ?? 'Untitled');
+    const cardId = this.savedId;
+    const render =
+      target === 'sheet'
+        ? renderSheetBlob(node)
+        : renderCardBlob(node, 'png', {
+            dpi: target === 'print' ? 600 : 300,
+            bleed: target === 'print',
+          });
+    const exit = await runAppExit(render);
+    if (this.get(null) || Exit.isFailure(exit)) return false;
+    const blob = exit.value;
+    const suffix = target === 'sheet' ? '-sheet' : target === 'print' ? '-600dpi-bleed' : '';
+    const fileName = exportFileName(cardName + suffix, 'png');
+    try {
+      downloadBlob(blob, fileName);
+      await archive.saveExport({
+        name: fileName,
+        format: 'png',
+        bytes: await blob.arrayBuffer(),
+        type: blob.type,
+        cardId,
+      });
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   mount() {
@@ -223,11 +264,11 @@ export class BuilderView extends Component {
   }
 
   /** Fork the open card into a fresh record and rebind the document to it. */
-  async saveAsCopy() {
+  async saveAsCopy(): Promise<boolean> {
     const { shell } = this;
     if (!shell) {
       this.savedNote = 'Storage unavailable.';
-      return;
+      return false;
     }
     const name = `${String(this.data.name ?? 'Untitled')} copy`;
     try {
@@ -242,8 +283,10 @@ export class BuilderView extends Component {
       this.savedId = saved.id;
       this.savedNote = `Saved “${saved.name}” to the gallery.`;
       this.dirty = false;
+      return true;
     } catch (cause) {
       this.savedNote = cause instanceof Error ? cause.message : String(cause);
+      return false;
     }
   }
 
@@ -321,11 +364,12 @@ export class BuilderView extends Component {
     this.setField(artKey, stored.id);
   }
 
-  async saveCard() {
+  /** Returns success — the agent's 'save' doc action needs the verdict. */
+  async saveCard(): Promise<boolean> {
     const { shell } = this;
     if (!shell) {
       this.savedNote = 'Storage unavailable.';
-      return;
+      return false;
     }
     try {
       const saved = await shell.archive.saveCard({
@@ -341,8 +385,10 @@ export class BuilderView extends Component {
       this.savedId = saved.id;
       this.savedNote = `Saved “${saved.name}” to the gallery.`;
       this.dirty = false;
+      return true;
     } catch (cause) {
       this.savedNote = cause instanceof Error ? cause.message : String(cause);
+      return false;
     }
   }
 

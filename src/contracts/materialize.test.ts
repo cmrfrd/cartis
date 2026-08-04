@@ -6,7 +6,13 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { CARD_GENERATE_ART_TOOL, CARD_PATCH_TOOL, materializeAssistantParts } from './materialize';
+import {
+  CARD_EXPORT_TOOL,
+  CARD_GENERATE_ART_TOOL,
+  CARD_PATCH_TOOL,
+  CARD_SAVE_TOOL,
+  materializeAssistantParts,
+} from './materialize';
 import type { ThreadPartT } from './thread';
 
 const tags = (parts: readonly ThreadPartT[]) => parts.map((p) => p._tag);
@@ -71,6 +77,29 @@ describe('materializeAssistantParts', () => {
 
   it('yields a single empty text part for an empty contract (never a blank crash)', () => {
     expect(materializeAssistantParts('{}')).toEqual([{ _tag: 'Text', text: '' }]);
+  });
+
+  it('emits card_save / card_export chips for document actions, after patch/art', () => {
+    const parts = materializeAssistantParts(
+      '{"reply": "Saved and exported.", "patch": {"name": "X"}, ' +
+        '"actions": [{"kind": "save"}, {"kind": "export", "target": "print"}]}',
+    );
+    expect(parts.map((p) => (p._tag === 'ToolCall' ? p.name : 'text'))).toEqual([
+      'text',
+      CARD_PATCH_TOOL,
+      CARD_SAVE_TOOL,
+      CARD_EXPORT_TOOL,
+    ]);
+    const exportChip = parts[3];
+    expect(exportChip?._tag === 'ToolCall' ? exportChip.argsText : '').toContain('print');
+  });
+
+  it('drops mistyped action entries but keeps the valid ones', () => {
+    const parts = materializeAssistantParts(
+      '{"reply": "ok", "actions": [{"kind": "export", "target": "pdf"}, {"kind": "saveAsCopy"}]}',
+    );
+    const chips = parts.filter((p) => p._tag === 'ToolCall');
+    expect(chips.map((c) => (c._tag === 'ToolCall' ? c.name : ''))).toEqual([CARD_SAVE_TOOL]);
   });
 
   // Live-caught (2026-08-03 goblin-engineer turn): the model wrote flavor text

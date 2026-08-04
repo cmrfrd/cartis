@@ -11,7 +11,12 @@ import { Check, ChevronLeft, ChevronRight, Copy, Pencil, RefreshCw } from 'lucid
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { BuilderView } from '@/builder/BuilderView';
-import { CARD_GENERATE_ART_TOOL, CARD_PATCH_TOOL } from '@/contracts/materialize';
+import {
+  CARD_EXPORT_TOOL,
+  CARD_GENERATE_ART_TOOL,
+  CARD_PATCH_TOOL,
+  CARD_SAVE_TOOL,
+} from '@/contracts/materialize';
 import type { ThreadMessageT, ThreadPartT } from '@/contracts/thread';
 
 const iconButton =
@@ -226,9 +231,41 @@ function ToolUI(props: { part: Extract<ThreadPartT, { _tag: 'ToolCall' }> }) {
   const { part } = props;
   if (part.name === CARD_PATCH_TOOL) return <PatchChip part={part} />;
   if (part.name === CARD_GENERATE_ART_TOOL) return <ArtStrip part={part} />;
+  if (part.name === CARD_SAVE_TOOL || part.name === CARD_EXPORT_TOOL) {
+    return <DocActionChip part={part} />;
+  }
   return (
     <span className="rounded-base border border-edge bg-secondary-background px-2 py-1 font-mono text-[11px] text-ink-dim">
       {part.name} · {part.status}
+    </span>
+  );
+}
+
+/** Save / export receipt chip — the agent ran a document action this turn. */
+function DocActionChip(props: { part: Extract<ThreadPartT, { _tag: 'ToolCall' }> }) {
+  const { part } = props;
+  let label = part.title ?? part.name;
+  if (part.name === CARD_EXPORT_TOOL && part.argsText !== undefined) {
+    try {
+      const args: unknown = JSON.parse(part.argsText);
+      const target =
+        typeof args === 'object' && args !== null && 'target' in args
+          ? String((args as { target: unknown }).target)
+          : '';
+      if (target.length > 0) label = `export ${target}`;
+    } catch {
+      // keep the title
+    }
+  }
+  return (
+    <span
+      data-testid="tool-doc-action"
+      className="inline-flex items-center gap-1 rounded-base border border-accent/40 bg-accent/10 px-2 py-1 text-[11px] text-ink"
+    >
+      <span className="font-base uppercase tracking-wide text-accent">
+        {part.name === CARD_SAVE_TOOL ? 'saved' : 'exported'}
+      </span>
+      <span className="font-mono">{label}</span>
     </span>
   );
 }
