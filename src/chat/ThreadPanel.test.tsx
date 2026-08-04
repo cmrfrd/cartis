@@ -5,7 +5,7 @@ import type { ChatTurnResponseT } from '@/contracts/api';
 import { ChatRequestError } from '@/contracts/errors';
 import { PermissionId, SessionId } from '@/contracts/ids';
 import type { ThreadEventT } from '@/contracts/thread';
-import { click, mountApp, setInput } from '../../test/util';
+import { click, mountApp, setInput, tick } from '../../test/util';
 import { chatEventsFromPubSub } from './ChatEvents';
 import { ChatThread, type ChatThreadShape } from './ChatThread';
 
@@ -29,13 +29,103 @@ const chatStub = (over: Partial<ChatThreadShape> = {}): Layer.Layer<ChatThread> 
 
 const composer = () => document.querySelector('textarea[placeholder="Message the assistant…"]');
 
+const attachInput = (): HTMLInputElement => {
+  const input = document.querySelector('[data-testid="composer-attach"] input[type="file"]');
+  if (!(input instanceof HTMLInputElement)) throw new Error('attach input not found');
+  return input;
+};
+
+/** Simulate a file pick through the hidden input (React file onChange = 'change'). */
+async function pickFiles(...files: File[]): Promise<void> {
+  const input = attachInput();
+  Object.defineProperty(input, 'files', { value: files, configurable: true });
+  input.dispatchEvent(new Event('change', { bubbles: true }));
+  await tick();
+}
+
 describe('ThreadPanel', () => {
   it('shows the empty state and the composer send button by default', async () => {
     setAppLayer(testAppLayerWith({ thread: chatStub() }));
     const { unmount } = await mountApp();
-    expect(document.body.textContent).toContain('Ask the assistant');
+    expect(document.body.textContent).toContain('What should this card become?');
     expect(document.querySelector('[data-testid="composer-send"]')).not.toBeNull();
     expect(document.querySelector('[data-testid="composer-cancel"]')).toBeNull();
+    unmount();
+  });
+
+  it('disables Send until there is text or an attachment', async () => {
+    setAppLayer(testAppLayerWith({ thread: chatStub() }));
+    const { unmount } = await mountApp();
+    const send = () =>
+      document.querySelector('[data-testid="composer-send"]') as HTMLButtonElement | null;
+    expect(send()?.disabled).toBe(true);
+    await setInput(composer(), 'hello');
+    expect(send()?.disabled).toBe(false);
+    unmount();
+  });
+
+  it('the + button gates picked files into thumbs; × removes them', async () => {
+    setAppLayer(testAppLayerWith({ thread: chatStub() }));
+    const { unmount } = await mountApp();
+    expect(attachInput().accept).toBe('image/*,text/*,application/json,.md');
+    await pickFiles(new File(['x'], 'ref.png', { type: 'image/png' }));
+    await vi.waitFor(() => {
+      expect(document.querySelector('[data-testid="composer-attachment"]')).not.toBeNull();
+    });
+    // an attachment alone enables Send
+    const send = document.querySelector('[data-testid="composer-send"]') as HTMLButtonElement;
+    expect(send.disabled).toBe(false);
+    await click(document.querySelector('[data-testid="attachment-remove"]'));
+    await vi.waitFor(() => {
+      expect(document.querySelector('[data-testid="composer-attachment"]')).toBeNull();
+    });
+    unmount();
+  });
+
+  it('a rejected file surfaces the note strip; × dismisses it', async () => {
+    setAppLayer(testAppLayerWith({ thread: chatStub() }));
+    const { unmount } = await mountApp();
+    await pickFiles(new File(['x'], 'art.psd'));
+    await vi.waitFor(() => {
+      const strip = document.querySelector('[data-testid="note-strip"]');
+      expect(strip?.textContent).toContain('unsupported attachment type: art.psd');
+    });
+    await click(document.querySelector('[data-testid="note-strip"] button'));
+    await vi.waitFor(() => {
+      expect(document.querySelector('[data-testid="note-strip"]')).toBeNull();
+    });
+    unmount();
+  });
+
+  it('pasting files into the composer attaches them', async () => {
+    setAppLayer(testAppLayerWith({ thread: chatStub() }));
+    const { unmount } = await mountApp();
+    const el = composer();
+    if (!el) throw new Error('composer not found');
+    const evt = new Event('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(evt, 'clipboardData', {
+      value: { files: [new File(['x'], 'shot.png', { type: 'image/png' })] },
+    });
+    el.dispatchEvent(evt);
+    await vi.waitFor(() => {
+      expect(document.querySelector('[data-testid="composer-attachment"]')).not.toBeNull();
+    });
+    unmount();
+  });
+
+  it('dropping files on the panel attaches them', async () => {
+    setAppLayer(testAppLayerWith({ thread: chatStub() }));
+    const { unmount } = await mountApp();
+    const panel = document.querySelector('[data-testid="chat-panel"]');
+    if (!panel) throw new Error('chat panel not found');
+    const evt = new Event('drop', { bubbles: true, cancelable: true });
+    Object.defineProperty(evt, 'dataTransfer', {
+      value: { files: [new File(['x'], 'drop.png', { type: 'image/png' })] },
+    });
+    panel.dispatchEvent(evt);
+    await vi.waitFor(() => {
+      expect(document.querySelector('[data-testid="composer-attachment"]')).not.toBeNull();
+    });
     unmount();
   });
 

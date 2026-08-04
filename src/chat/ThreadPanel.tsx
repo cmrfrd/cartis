@@ -9,24 +9,98 @@
  */
 
 import { Match } from 'effect';
+import { ChevronDown } from 'lucide-react';
 import { BuilderView } from '@/builder/BuilderView';
 import { CARD_GENERATE_ART_TOOL, CARD_PATCH_TOOL } from '@/contracts/materialize';
 import type { ThreadMessageT, ThreadPartT, ThreadSummaryT } from '@/contracts/thread';
+import { Composer, NoteStrip } from './Composer';
+
+/** The one live viewport element (single panel instance; reassigned per mount). */
+let viewportEl: HTMLDivElement | null = null;
 
 export function ThreadPanel() {
   const { thread } = BuilderView.get();
-  const { messages, running, branches, pendingPermission } = thread;
+  const { messages, running, branches, pendingPermission, dropActive } = thread;
+  const empty = messages.length === 0;
   return (
-    <aside className="flex w-[400px] shrink-0 flex-col border-edge border-l bg-surface">
+    <aside
+      data-testid="chat-panel"
+      className="relative flex w-[400px] shrink-0 flex-col border-edge border-l bg-surface"
+      onDragOver={(e: { preventDefault(): void }) => {
+        e.preventDefault();
+        thread.dropActive = true;
+      }}
+      onDragLeave={() => {
+        thread.dropActive = false;
+      }}
+      onDrop={(e: { dataTransfer: { files: ArrayLike<File> } | null; preventDefault(): void }) => {
+        e.preventDefault();
+        thread.dropActive = false;
+        const files = e.dataTransfer?.files;
+        if (files !== undefined && files !== null && files.length > 0) {
+          void thread.addAttachments(Array.from(files));
+        }
+      }}
+    >
       <header className="flex items-center gap-2 border-edge border-b px-4 py-3">
         <span className="font-display text-accent text-sm tracking-widest">CHAT</span>
         <span className="text-[11px] text-ink-dim">edit this card by conversation</span>
       </header>
       {branches.length > 0 && <BranchPicker branches={branches} />}
-      <Viewport messages={messages} running={running} />
-      {pendingPermission !== undefined && <PermissionStrip title={pendingPermission.title} />}
-      <Composer />
+      {empty ? (
+        <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-5 p-4">
+          <h2 className="text-center font-display text-ink text-lg">
+            What should this card become?
+          </h2>
+          <div className="w-full">
+            {pendingPermission !== undefined && <PermissionStrip title={pendingPermission.title} />}
+            <NoteStrip />
+            <Composer />
+          </div>
+        </div>
+      ) : (
+        <>
+          <Viewport messages={messages} running={running} />
+          {pendingPermission !== undefined && <PermissionStrip title={pendingPermission.title} />}
+          <div className="relative border-edge border-t p-3">
+            <ScrollToBottom />
+            <NoteStrip />
+            <Composer />
+          </div>
+        </>
+      )}
+      {dropActive && (
+        <div
+          data-testid="drop-overlay"
+          className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-background/80"
+        >
+          <span className="rounded-base border-2 border-border border-dashed bg-secondary-background px-4 py-2 text-sm">
+            drop files to attach
+          </span>
+        </div>
+      )}
     </aside>
+  );
+}
+
+/** Floating chevron above the composer — hidden while the viewport is pinned. */
+function ScrollToBottom() {
+  const { thread } = BuilderView.get();
+  const { viewportPinned } = thread;
+  if (viewportPinned) return null;
+  return (
+    <button
+      type="button"
+      data-testid="scroll-bottom"
+      title="Scroll to bottom"
+      onClick={() => {
+        if (viewportEl) viewportEl.scrollTop = viewportEl.scrollHeight;
+        thread.viewportPinned = true;
+      }}
+      className="-top-5 absolute left-1/2 z-10 flex size-8 -translate-x-1/2 items-center justify-center rounded-full border-2 border-border bg-background shadow-shadow"
+    >
+      <ChevronDown className="size-4" />
+    </button>
   );
 }
 
@@ -80,22 +154,25 @@ function PermissionStrip(props: { title: string }) {
 }
 
 function Viewport(props: { messages: readonly ThreadMessageT[]; running: boolean }) {
+  const { thread } = BuilderView.get();
   const { messages } = props;
   return (
     <div
-      // stick-to-bottom: inline callback ref scrolls on every commit
+      // stick-to-bottom: autoscroll on commit ONLY while pinned; scrolling up
+      // unpins (so streaming can't yank the reader back down).
       ref={(el: HTMLDivElement | null) => {
-        if (el) el.scrollTop = el.scrollHeight;
+        viewportEl = el;
+        if (el && thread.viewportPinned) el.scrollTop = el.scrollHeight;
+      }}
+      onScroll={(e: { currentTarget: HTMLDivElement }) => {
+        const el = e.currentTarget;
+        thread.viewportPinned = el.scrollHeight - el.scrollTop - el.clientHeight < 16;
       }}
       className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4"
     >
-      {messages.length === 0 ? (
-        <p className="mt-8 text-center text-ink-dim text-xs">
-          Ask the assistant to change fields, rewrite text, or generate art.
-        </p>
-      ) : (
-        messages.map((message) => <MessageView key={message.id} message={message} />)
-      )}
+      {messages.map((message) => (
+        <MessageView key={message.id} message={message} />
+      ))}
     </div>
   );
 }
@@ -298,51 +375,5 @@ function ArtStrip(props: { part: Extract<ThreadPartT, { _tag: 'ToolCall' }> }) {
       )}
       {label}
     </span>
-  );
-}
-
-function Composer() {
-  const { thread } = BuilderView.get();
-  const { draft, running } = thread;
-  return (
-    <div className="border-edge border-t p-3">
-      <div className="flex items-end gap-2">
-        <textarea
-          value={draft}
-          disabled={running}
-          rows={2}
-          placeholder="Message the assistant…"
-          onChange={(e: { currentTarget: HTMLTextAreaElement }) => {
-            thread.draft = e.currentTarget.value;
-          }}
-          onKeyDown={(e: { key: string; shiftKey: boolean; preventDefault(): void }) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault();
-              thread.submitDraft();
-            }
-          }}
-          className="min-h-0 flex-1 resize-none rounded-base border-2 border-border bg-background p-2 text-sm outline-none disabled:opacity-60"
-        />
-        {running ? (
-          <button
-            type="button"
-            data-testid="composer-cancel"
-            onClick={() => void thread.cancel()}
-            className="shrink-0 rounded-base border-2 border-border bg-background px-3 py-2 text-sm shadow-shadow"
-          >
-            Stop
-          </button>
-        ) : (
-          <button
-            type="button"
-            data-testid="composer-send"
-            onClick={() => thread.submitDraft()}
-            className="shrink-0 rounded-base border-2 border-border bg-main px-3 py-2 text-main-foreground text-sm shadow-shadow"
-          >
-            Send
-          </button>
-        )}
-      </div>
-    </div>
   );
 }

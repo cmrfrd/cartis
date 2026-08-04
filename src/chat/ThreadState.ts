@@ -91,6 +91,10 @@ export class ThreadState extends State {
   siblingIds: SessionIdT[] = [];
   /** Where the ‹ n/m › arrows anchor: the divergence message + our position. */
   branchPoint?: { messageId: MessageIdT; index: number; count: number } = undefined;
+  /** Viewport is at (or near) the bottom — autoscroll follows new content. */
+  viewportPinned = true;
+  /** A drag-with-files is hovering the panel (drop overlay visible). */
+  dropActive = false;
   /** True between cancel() and the turn settling — makes the turn finalize incomplete. */
   canceling = false;
   /** The user message currently being inline-edited, and its working text. */
