@@ -239,32 +239,41 @@ describe('runChatTurn', () => {
     );
   });
 
-  it.effect('drops patch keys outside the field spec and rejects wrong types', () => {
-    const calls: PromptCall[] = [];
-    return Effect.gen(function* () {
-      // extra key silently dropped by the derived schema
-      const ok = yield* runChatTurn(chatReq(), noArt).pipe(
-        Effect.provide(
-          Layer.mergeAll(
-            chatStub('{"reply": "done", "patch": {"name": "Vorak", "hacker": "x"}}', calls, []),
-            threadBusTestLayer,
+  it.effect(
+    'drops mistyped/unknown patch fields PER-FIELD and keeps the rest (live-caught)',
+    () => {
+      const calls: PromptCall[] = [];
+      return Effect.gen(function* () {
+        // the reproduced turn-killer: "no might/ward stuff" → the model clears
+        // number fields with null; valid fields must still apply.
+        const ok = yield* runChatTurn(chatReq(), noArt).pipe(
+          Effect.provide(
+            Layer.mergeAll(
+              chatStub(
+                '{"reply": "done", "patch": {"name": "Tinker", "cost": null, "hacker": "x"}}',
+                calls,
+                [],
+              ),
+              threadBusTestLayer,
+            ),
           ),
-        ),
-      );
-      expect(ok.patch).toEqual({ name: 'Vorak' });
-      // wrong-typed value → typed AgentError (the model tried to patch but mistyped)
-      const err = yield* runChatTurn(chatReq(), noArt).pipe(
-        Effect.flip,
-        Effect.provide(
-          Layer.mergeAll(
-            chatStub('{"reply": "done", "patch": {"cost": "expensive"}}', [], []),
-            threadBusTestLayer,
+        );
+        expect(ok.patch).toEqual({ name: 'Tinker' });
+        expect(ok.droppedFields?.slice().sort()).toEqual(['cost', 'hacker']);
+        // a fully mistyped patch is STILL not a turn failure — just all-dropped
+        const allBad = yield* runChatTurn(chatReq(), noArt).pipe(
+          Effect.provide(
+            Layer.mergeAll(
+              chatStub('{"reply": "done", "patch": {"cost": "expensive"}}', [], []),
+              threadBusTestLayer,
+            ),
           ),
-        ),
-      );
-      expect(err._tag).toBe('AgentError');
-    });
-  });
+        );
+        expect(allBad.patch).toEqual({});
+        expect(allBad.droppedFields).toEqual(['cost']);
+      });
+    },
+  );
 
   it.effect('treats a plain-text reply (no JSON) as a conversational turn, not an error', () =>
     Effect.gen(function* () {

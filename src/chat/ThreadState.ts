@@ -157,6 +157,10 @@ export class ThreadState extends State {
     // last ~50 events to every new subscriber, and a fresh card would build
     // ghost messages from an old session's replay (live-caught after reload).
     if (sid !== undefined && this.sessionId === undefined && !this.running) return;
+    // Session-LESS events (Art/SessionError) replayed onto an idle EMPTY
+    // thread are ghosts too (live-caught: "art generated" strip on a fresh
+    // card). During a turn or an existing conversation they flow as usual.
+    if (sid === undefined && !this.running && this.messages.length === 0) return;
     if (event._tag === 'PermissionRequested') {
       this.pendingPermission = {
         sessionId: event.sessionId,
@@ -511,6 +515,9 @@ export class ThreadState extends State {
       this.sessionId = res.sessionId; // lazy-created session captured
       this.finalizeAssistant(userId, materializeAssistantParts(res.assistantText), 'complete');
       if (Object.keys(res.patch).length > 0) ctx.applyPatch(res.patch);
+      if (res.droppedFields !== undefined && res.droppedFields.length > 0) {
+        this.note = `ignored invalid field values: ${res.droppedFields.join(', ')}`;
+      }
       // Settings knobs apply SYNCHRONOUSLY, before art starts (spec ordering:
       // "switch to fullart and generate art" must render at the new aspect).
       this.applySettings(ctx, res.actions ?? []);

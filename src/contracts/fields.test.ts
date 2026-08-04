@@ -9,8 +9,10 @@ import { describe, expect, it } from 'vitest';
 import {
   AspectRatio,
   CardDataSchema,
+  decodePatchLenient,
   FieldKind,
   FieldSpecSchema,
+  type FieldSummaryT,
   FieldValue,
   schemaFromFields,
   summarizeField,
@@ -37,6 +39,44 @@ describe('FieldValue', () => {
   it('CardDataSchema decodes a mixed record', () => {
     const data = { name: 'Nyra', cost: 3, holo: true, flavor: undefined };
     expect(Schema.decodeUnknownSync(CardDataSchema)(data)).toEqual(data);
+  });
+});
+
+describe('decodePatchLenient', () => {
+  const fields: FieldSummaryT[] = [
+    { kind: 'text', key: 'name', label: 'Name' },
+    { kind: 'number', key: 'might', label: 'Might', min: 0, max: 20 },
+    { kind: 'toggle', key: 'showStats', label: 'Stats' },
+    { kind: 'select', key: 'rarity', label: 'Rarity', options: ['common', 'rare'] },
+  ];
+
+  it('keeps valid fields and DROPS invalid ones instead of failing (live-caught)', () => {
+    // The reproduced turn-killer: the model "clears" might/ward with null when
+    // asked for "no might/ward stuff" — one bad value must not nuke the turn.
+    const { patch, dropped } = decodePatchLenient(fields, {
+      name: 'Tinker',
+      showStats: false,
+      might: null,
+      rarity: 'banana',
+      hacker: 'x',
+    });
+    expect(patch).toEqual({ name: 'Tinker', showStats: false });
+    expect(dropped.sort()).toEqual(['hacker', 'might', 'rarity']);
+  });
+
+  it('a fully valid patch passes through with nothing dropped', () => {
+    const { patch, dropped } = decodePatchLenient(fields, {
+      name: 'X',
+      might: 5,
+      rarity: 'rare',
+    });
+    expect(patch).toEqual({ name: 'X', might: 5, rarity: 'rare' });
+    expect(dropped).toEqual([]);
+  });
+
+  it('non-object input yields an empty patch', () => {
+    expect(decodePatchLenient(fields, null)).toEqual({ patch: {}, dropped: [] });
+    expect(decodePatchLenient(fields, 'nope')).toEqual({ patch: {}, dropped: [] });
   });
 });
 

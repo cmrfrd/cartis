@@ -142,6 +142,8 @@ export const ChatTurnResponse = Schema.Struct({
   artAction: Schema.optional(ArtAction),
   /** Document actions (save/copy/export), decoded per-entry leniently. */
   actions: Schema.optional(Schema.Array(DocAction)),
+  /** Patch keys IGNORED by the per-field lenient decode (mistyped/unknown). */
+  droppedFields: Schema.optional(Schema.Array(Schema.String)),
 });
 export type ChatTurnResponseT = typeof ChatTurnResponse.Type;
 

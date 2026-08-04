@@ -37,7 +37,7 @@ import {
   NetworkError,
   ReplicateError,
 } from '../contracts/errors.ts';
-import { type AspectRatioT, schemaFromFields } from '../contracts/fields.ts';
+import { type AspectRatioT, decodePatchLenient } from '../contracts/fields.ts';
 import {
   type DataUrlT,
   MessageId,
@@ -847,13 +847,14 @@ function promptWithHeartbeat(
  */
 function parseChatReply(
   raw: string,
-  decodePatch: (u: unknown) => Effect.Effect<CardDataT, AgentError>,
+  decodePatch: (u: unknown) => { patch: CardDataT; dropped: readonly string[] },
 ): Effect.Effect<
   {
     assistantText: string;
     patch: CardDataT;
     artAction?: ArtActionT;
     actions?: readonly DocActionT[];
+    droppedFields?: readonly string[];
   },
   AgentError
 > {
@@ -871,16 +872,19 @@ function parseChatReply(
       return { assistantText: raw, patch: {} };
     }
     const body = json.value as { patch?: unknown; artAction?: unknown; actions?: unknown };
-    const patch = yield* decodePatch(body.patch ?? {});
+    // PER-FIELD lenient patch decode (live-caught: the model clears fields
+    // with null when told "no might/ward" — one bad value must cost only that
+    // field, never the whole turn).
+    const { patch, dropped } = decodePatch(body.patch ?? {});
     const artAction = Option.getOrUndefined(decodeArtActionOption(body.artAction));
-    // Document actions decode per-entry leniently: a mistyped entry drops,
-    // valid ones still run (unlike patch, where a mistype is a real error).
+    // Document actions decode per-entry leniently too.
     const actions = decodeDocActions(Array.isArray(body.actions) ? body.actions : undefined);
     return {
       assistantText: raw,
       patch,
       artAction,
       ...(actions.length > 0 ? { actions } : {}),
+      ...(dropped.length > 0 ? { droppedFields: dropped } : {}),
     };
   });
 }
@@ -925,11 +929,12 @@ export function runChatTurn(
       chatPromptText(req),
       files.length > 0 ? files : undefined,
     );
-    const decodePatch = (u: unknown): Effect.Effect<CardDataT, AgentError> =>
-      Schema.decodeUnknown(schemaFromFields(req.fields))(u).pipe(
-        Effect.mapError(() => new AgentError({ reason: 'no-fill' })),
-      );
-    const parsed = yield* parseChatReply(promptText(result), decodePatch);
+    const parsed = yield* parseChatReply(promptText(result), (u) =>
+      decodePatchLenient(req.fields, u),
+    );
+    if (parsed.droppedFields !== undefined) {
+      yield* bus.log('agent', `patch fields ignored (invalid): ${parsed.droppedFields.join(', ')}`);
+    }
     yield* bus.log('agent', 'chat turn ready');
     return { sessionId, ...parsed };
   });
@@ -956,9 +961,11 @@ export function runRegenerate(
     }
     yield* bus.log('agent', 'regenerate: replaying last turn');
     const result = yield* promptWithHeartbeat(agent, bus, sessionId, userText);
-    const decodePatch = (u: unknown): Effect.Effect<CardDataT, AgentError> =>
-      Effect.succeed(Option.getOrElse(decodeCardData(u), () => ({}) as CardDataT));
-    const parsed = yield* parseChatReply(promptText(result), decodePatch);
+    // Regenerate has no field spec — decode leniently against plain CardData.
+    const parsed = yield* parseChatReply(promptText(result), (u) => ({
+      patch: Option.getOrElse(decodeCardData(u), () => ({}) as CardDataT),
+      dropped: [],
+    }));
     return { sessionId, ...parsed };
   });
 }

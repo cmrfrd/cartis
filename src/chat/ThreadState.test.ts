@@ -468,6 +468,17 @@ describe('ThreadState streaming (SSE fold)', () => {
     state.set(null);
   });
 
+  it('session-less Art replays are dropped on an idle EMPTY thread (ghost strip)', async () => {
+    const pubsub = await Effect.runPromise(PS.unbounded<ThreadEventT>());
+    const state = makeThread(threadStub(), chatEventsFromPubSub(pubsub));
+    await Effect.runPromise(
+      PubSubPublish(pubsub, { _tag: 'Art', phase: 'downloaded', detail: 'output downloaded' }),
+    );
+    await new Promise((r) => setTimeout(r, 20));
+    expect(state.messages).toHaveLength(0); // no "art generated" ghost
+    state.set(null);
+  });
+
   it('an unbound thread WITH a turn running still accepts the first-turn stream', async () => {
     const pubsub = await Effect.runPromise(PS.unbounded<ThreadEventT>());
     const state = makeThread(threadStub(), chatEventsFromPubSub(pubsub));

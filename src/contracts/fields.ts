@@ -11,7 +11,7 @@
  * contract vocabulary, shared by client and server.
  */
 
-import { Schema } from 'effect';
+import { Option, Schema } from 'effect';
 
 // ---------------------------------------------------------------------------
 // FieldValue / CardData
@@ -173,4 +173,41 @@ export function schemaFromFields(fields: readonly FieldSummaryT[]) {
     shape[field.key] = Schema.optional(patchValueFor(field));
   }
   return Schema.Struct(shape);
+}
+
+/**
+ * PER-FIELD lenient patch decode (live-caught 2026-08-03): asked for "no
+ * might/ward stuff", the model cleared number fields with null — and the
+ * all-or-nothing struct decode failed the ENTIRE turn. One mistyped value
+ * must cost only that field: valid entries apply, invalid/unknown keys are
+ * DROPPED and reported so the caller can surface them.
+ */
+export function decodePatchLenient(
+  fields: readonly FieldSummaryT[],
+  raw: unknown,
+): { patch: Record<string, FieldValueT>; dropped: string[] } {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    return { patch: {}, dropped: [] };
+  }
+  const byKey = new Map(fields.map((f) => [f.key, f]));
+  const patch: Record<string, FieldValueT> = {};
+  const dropped: string[] = [];
+  for (const [key, value] of Object.entries(raw)) {
+    const field = byKey.get(key);
+    if (field === undefined) {
+      dropped.push(key);
+      continue;
+    }
+    // Sound widening: every PatchValue constituent is Schema<X, X> with X in
+    // string | number | boolean — TS can't join the union members itself.
+    const schema = patchValueFor(field) as Schema.Schema<string | number | boolean>;
+    const decoded = Schema.decodeUnknownOption(schema)(value);
+    Option.match(decoded, {
+      onNone: () => dropped.push(key),
+      onSome: (v) => {
+        patch[key] = v;
+      },
+    });
+  }
+  return { patch, dropped };
 }
