@@ -45,7 +45,13 @@ already serves index.html for extensionless paths — no server change.
   from `location.pathname`: tab switches and card opens → `pushState`; the
   FIRST save of a new card (openCardId undefined → defined while already on
   `/builder`) → `replaceState` (saving is not a navigation).
-  `document.title` syncs to `Cartis — <card name>` / `Cartis — Card Studio`.
+  **Writes are coalesced in a microtask: one user action = ONE history
+  entry.** (A gallery card-open changes `view` AND `openCardId` — two
+  listener firings; naive per-change writes would leave a stale `/builder`
+  entry that Back lands on. The sync collects changes and projects once per
+  tick.) `document.title` syncs to `Cartis — <card name>` /
+  `Cartis — Card Studio` on route changes and saves (a rename-in-place
+  updates the title at save time, not per keystroke).
 - **URL → state:** `popstate` parses the path and applies it through the SAME
   guard paths the UI uses: view flips directly; a different cardId resolves
   the card from the archive and goes through `requestOpen` (dirty-guard
@@ -54,7 +60,9 @@ already serves index.html for extensionless paths — no server change.
 - **Boot:** parse `location.pathname`; `/builder/<id>` waits for
   `archive.ready`, resolves the card, and hands it through the existing
   `pendingCard` seam (which also rehydrates the chat); missing/unknown id →
-  normalize to `/builder`.
+  normalize to `/builder`. Refreshing on a DELETED card's URL is the unknown-id
+  case — it normalizes to `/builder` (same data-loss semantics as any refresh
+  of unsaved work, now explicit).
 
 **Out of scope (user-scoped):** gallery sub-state in the URL, unsaved-draft
 autosave (an unsaved new card does not survive refresh).
@@ -63,8 +71,9 @@ autosave (an unsaved new card does not survive refresh).
 
 Pure codec table (parse/format round-trips, unknown paths). Mounted
 (happy-dom supports the History API): tab switch pushes `/gallery`; opening a
-card pushes `/builder/<id>`; first save replaces; `popstate` flips tabs;
-boot with `/builder/<id>` reopens the card; unknown path normalizes.
+card from the gallery produces exactly ONE new history entry at
+`/builder/<id>` (the coalescing rule); first save replaces; `popstate` flips
+tabs; boot with `/builder/<id>` reopens the card; unknown path normalizes.
 
 ## 2. Agent document knobs — setLayout / setTheme / setHolo
 
@@ -94,6 +103,8 @@ knob set.
 - **Display:** new `CARD_SETTINGS_TOOL = 'card_settings'` chip
   ("layout: fullart" / "theme: arcane" / "holo: on") via the shared
   materializer + DocActionChip.
+- Regenerating a turn re-applies its knobs (idempotent; re-marks dirty) —
+  the same accepted replay semantics as save/export.
 
 ## 3. Card vision — the agent sees the rendered card
 
@@ -109,6 +120,12 @@ Every turn auto-attaches a downscaled snapshot of the live preview
   bridge attaches it as an UNNAMED `PromptFile` (invisible in history, same
   contract as the art context), ordered after user attachments, before the
   art context.
+- **Ordering vs. latency:** the snapshot is taken AFTER the optimistic user
+  bubble renders (bubble → snapshot → request) so the ~100-300ms render never
+  delays perceived send.
+- **The snapshot is literal:** it captures whatever the preview shows — if
+  `showBack` is on, the agent sees the card back. "See the current rendered
+  view" means exactly that; stated, not accidental.
 - CHAT_GUIDE: "An image of the CURRENT rendered card is attached to every
   turn — use it to judge the visual state before deciding on changes."
 
