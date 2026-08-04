@@ -128,6 +128,8 @@ export const ChatTurnRequest = Schema.Struct({
   userPrompt: Schema.String,
   attachments: Schema.optional(Schema.Array(ChatAttachment)),
   docContext: Schema.optional(DocContext),
+  /** Downscaled snapshot of the rendered preview — attached UNNAMED (vision). */
+  previewDataUrl: Schema.optional(DataUrl),
 });
 export type ChatTurnRequestT = typeof ChatTurnRequest.Type;
 

@@ -395,6 +395,30 @@ describe('runChatTurn', () => {
     ),
   );
 
+  it.effect('the preview snapshot rides UNNAMED between user attachments and art context', () => {
+    const calls: PromptCall[] = [];
+    return Effect.gen(function* () {
+      yield* runChatTurn(
+        chatReq({
+          currentArtFileName: 'nyra-abc123.png',
+          previewDataUrl: dataUrl('image/jpeg'),
+          attachments: [
+            { name: fileName('ref.png'), mime: mime('image/png'), dataUrl: dataUrl('image/png') },
+          ],
+        }),
+        () =>
+          Effect.succeed(Option.some({ mime: 'image/png', dataUrl: 'data:image/png;base64,QQ==' })),
+      );
+      expect(calls[0]?.files).toEqual([
+        { mime: 'image/png', url: dataUrl('image/png'), filename: 'ref.png' }, // user
+        { mime: 'image/jpeg', url: dataUrl('image/jpeg') }, // preview snapshot (unnamed)
+        { mime: 'image/png', url: 'data:image/png;base64,QQ==' }, // art context (unnamed)
+      ]);
+    }).pipe(
+      Effect.provide(Layer.mergeAll(chatStub('{"reply":"ok"}', calls, []), threadBusTestLayer)),
+    );
+  });
+
   it.effect('an attachment-only turn sends the stand-in request text', () => {
     const calls: PromptCall[] = [];
     return Effect.gen(function* () {

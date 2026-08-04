@@ -12,7 +12,13 @@ import { type ChatContext, ThreadState } from '@/chat/ThreadState';
 import { summarizeField } from '@/contracts/fields';
 import { type CardIdT, LayoutId, type LayoutIdT, ThemeId, type ThemeIdT } from '@/contracts/ids';
 import { ExportBar } from '@/export/ExportBar';
-import { downloadBlob, exportFileName, renderCardBlob, renderSheetBlob } from '@/export/exportCard';
+import {
+  downloadBlob,
+  exportFileName,
+  renderCardBlob,
+  renderPreviewSnapshot,
+  renderSheetBlob,
+} from '@/export/exportCard';
 import { ImageProvider } from '@/images/ImageProvider';
 import type { StoredCard } from '@/storage/CardArchive';
 import { Button, Panel, PreviewStage, SelectInput, TextInput } from '@/ui';
@@ -104,7 +110,17 @@ export class BuilderView extends Component {
         layoutOptions: theme.layouts.map((l) => l.id),
         holo: this.holo,
       },
+      snapshotPreview: () => this.snapshotPreview(),
     };
+  }
+
+  /** Downscaled JPEG of the live preview for agent vision (literal what-you-see). */
+  async snapshotPreview(): Promise<{ mime: string; dataUrl: string } | undefined> {
+    const node = this.previewEl.current;
+    if (!node) return undefined;
+    const exit = await runAppExit(renderPreviewSnapshot(node));
+    if (this.get(null) || Exit.isFailure(exit)) return undefined;
+    return { mime: 'image/jpeg', dataUrl: exit.value };
   }
 
   /**

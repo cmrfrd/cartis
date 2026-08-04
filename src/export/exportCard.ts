@@ -178,6 +178,24 @@ function encode(
 }
 
 /** Rasterize a card DOM node at print resolution and encode to the requested format. */
+/**
+ * Small JPEG snapshot of the live preview for the chat agent's per-turn
+ * vision (awareness spec §3): literal what-you-see, downscaled.
+ */
+export function renderPreviewSnapshot(node: HTMLElement): Effect.Effect<string, ExportError> {
+  return Effect.gen(function* () {
+    clearInteractiveVars(node);
+    const canvas = yield* Effect.tryPromise({
+      try: () => toCanvas(node, { pixelRatio: 0.5 }),
+      catch: (cause) =>
+        new ExportError({
+          detail: cause instanceof Error ? cause.message : 'could not rasterize preview',
+        }),
+    });
+    return canvas.toDataURL('image/jpeg', 0.7);
+  });
+}
+
 export function renderCardBlob(
   node: HTMLElement,
   format: ExportFormat,

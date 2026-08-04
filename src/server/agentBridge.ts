@@ -767,6 +767,7 @@ const CHAT_GUIDE =
   '| {"kind": "setLayout", "layoutId": string} | {"kind": "setTheme", "themeId": string} | {"kind": "setHolo", "value": boolean} ] ' +
   '(png = plain 300 DPI, print = 600 DPI with bleed and crop marks, sheet = a 3x3 A4 cut sheet; ' +
   'setLayout/setTheme accept ONLY the ids listed under Layouts/Themes below; settings apply before any artAction runs). ' +
+  'An image of the CURRENT rendered card is attached to every turn - use it to judge the visual state before deciding on changes. ' +
   'The JSON must be STRICT: escape any double quotes inside string values as \\" ' +
   '(e.g. "flavor": "\\"I meant to do that.\\"") and never leave trailing commas.';
 
@@ -909,6 +910,11 @@ export function runChatTurn(
     // unnamed card-art context (invisible), then the text prompt.
     const files: PromptFile[] = [
       ...(req.attachments ?? []).map((a) => ({ mime: a.mime, url: a.dataUrl, filename: a.name })),
+      // The rendered-preview snapshot and the current art ride UNNAMED —
+      // vision context only, invisible in history (no filename).
+      ...(req.previewDataUrl !== undefined
+        ? [{ mime: 'image/jpeg', url: req.previewDataUrl }]
+        : []),
       ...(image !== undefined ? [{ mime: image.mime, url: image.dataUrl }] : []),
     ];
     yield* bus.log('agent', `chat: “${req.userPrompt.slice(0, 60)}”`);

@@ -46,6 +46,7 @@ const contextOf = (over: Partial<ChatContext> = {}): ChatContext => ({
   setLayout: () => true,
   setTheme: () => true,
   setHolo: () => true,
+  snapshotPreview: () => Promise.resolve(undefined),
   ...over,
 });
 
@@ -354,6 +355,56 @@ describe('ThreadState doc actions', () => {
     );
     await state.send('save it');
     await vi.waitFor(() => expect(state.note).toBe('save failed'));
+    state.set(null);
+  });
+});
+
+describe('ThreadState card vision', () => {
+  it('the request carries previewDataUrl when the context provides a snapshot', async () => {
+    const seen: unknown[] = [];
+    const state = makeThread(
+      threadStub({
+        turn: (req) => {
+          seen.push(req);
+          return Effect.succeed({
+            sessionId: SessionId.make('s1'),
+            assistantText: '{"reply":"ok"}',
+            patch: {},
+          } satisfies ChatTurnResponseT);
+        },
+      }),
+      undefined,
+      contextOf({
+        snapshotPreview: () =>
+          Promise.resolve({ mime: 'image/jpeg', dataUrl: 'data:image/jpeg;base64,QQ==' }),
+      }),
+    );
+    await state.send('look at this');
+    const req = seen[0] as { previewDataUrl?: string };
+    expect(req.previewDataUrl).toBe('data:image/jpeg;base64,QQ==');
+    state.set(null);
+  });
+
+  it('a failed snapshot degrades to a normal turn (field absent)', async () => {
+    const seen: unknown[] = [];
+    const state = makeThread(
+      threadStub({
+        turn: (req) => {
+          seen.push(req);
+          return Effect.succeed({
+            sessionId: SessionId.make('s1'),
+            assistantText: '{"reply":"ok"}',
+            patch: {},
+          } satisfies ChatTurnResponseT);
+        },
+      }),
+      undefined,
+      contextOf({ snapshotPreview: () => Promise.reject(new Error('no canvas')) }),
+    );
+    await state.send('hi');
+    expect((seen[0] as { previewDataUrl?: string }).previewDataUrl).toBeUndefined();
+    // and the optimistic bubble appended BEFORE the snapshot resolved
+    expect(state.messages[0]?.parts).toEqual([{ _tag: 'Text', text: 'hi' }]);
     state.set(null);
   });
 });

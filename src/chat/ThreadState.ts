@@ -74,6 +74,8 @@ export interface ChatContext {
   setLayout(layoutId: string): boolean;
   setTheme(themeId: string): boolean;
   setHolo(value: boolean): boolean;
+  /** Downscaled snapshot of the rendered preview (agent vision); undefined on failure. */
+  snapshotPreview(): Promise<{ mime: string; dataUrl: string } | undefined>;
 }
 
 /** The synchronous settings knobs, applied BEFORE art (spec ordering rule). */
@@ -476,6 +478,11 @@ export class ThreadState extends State {
     this.running = true;
     this.note = undefined;
 
+    // The preview snapshot renders AFTER the optimistic bubble (spec: the
+    // ~100-300ms rasterize must never delay perceived send); failure → none.
+    const snapshot = await ctx.snapshotPreview().catch(() => undefined);
+    if (this.get(null)) return;
+
     // Snapshot the request before crossing into the effect.
     const req: ChatTurnRequestT = {
       sessionId: this.sessionId,
@@ -486,6 +493,7 @@ export class ThreadState extends State {
       userPrompt: text,
       ...(attachments.length > 0 ? { attachments } : {}),
       ...(ctx.docContext !== undefined ? { docContext: ctx.docContext } : {}),
+      ...(snapshot !== undefined ? { previewDataUrl: DataUrl.make(snapshot.dataUrl) } : {}),
     };
     const exit = await runAppExit(Effect.flatMap(ChatThread, (c) => c.turn(req)));
     if (this.get(null)) return; // destroyed mid-turn
