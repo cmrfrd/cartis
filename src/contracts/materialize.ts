@@ -1,185 +1,54 @@
 /**
- * The shared v1-transport materializer (spec §Future-proofing 1).
+ * partsFromTurn — the display builder for the pi tool transport (migration
+ * spec §3.2). The wire carries STRUCTURED data ({ reply, toolCalls }); this
+ * turns it into thread parts for live turns. History rehydration maps
+ * persisted entries server-side (src/server/pi/entries.ts) — chips render
+ * identically because both go through the same ThreadPart vocabulary.
  *
- * Under the v1 JSON transport, the assistant's opencode-side message TEXT is
- * the raw `{ reply, patch, artAction? }` blob. This one pure function turns
- * that text into display parts, and it is called in BOTH places that surface
- * assistant content:
- *   - the live turn path (client, ThreadState.send) — on the turn's assistantText
- *   - server history mapping (/api/chat/history) — on each stored assistant text
- * so history and live render identically, and raw JSON never reaches the UI.
- *
- * After the P4 MCP inversion this stays on as the fallback parser: old sessions
- * carry JSON-contract turns, new ones carry plain-text replies + real tool
- * parts. A non-conforming/plain-text reply falls through to a single Text part.
- *
- * Imports thread contracts ONLY — never opencode/server shapes.
+ * The old v1 JSON-transport parser (extractJson/repairJson/contract decode)
+ * is GONE: the provider validates tool arguments, so no model output is ever
+ * parsed as JSON again.
  */
 
-import { Option, Schema } from 'effect';
-import { DocAction, type DocActionT } from './api.ts';
+import type { ToolCallIntentT } from './api.ts';
 import type { ThreadPartT } from './thread.ts';
 
-/** Tool-call ids/names for the v1 card actions, shared with the tool-UI registry. */
+/** Tool-call ids/names for the card actions, shared with the tool-UI registry. */
 export const CARD_PATCH_TOOL = 'card_patch';
 export const CARD_GENERATE_ART_TOOL = 'card_generate_art';
 export const CARD_SAVE_TOOL = 'card_save';
 export const CARD_SAVE_COPY_TOOL = 'card_save_copy';
 export const CARD_EXPORT_TOOL = 'card_export';
-export const CARD_SETTINGS_TOOL = 'card_settings';
 export const CARD_SET_LAYOUT_TOOL = 'card_set_layout';
 export const CARD_SET_THEME_TOOL = 'card_set_theme';
 export const CARD_SET_HOLO_TOOL = 'card_set_holo';
 
-const ChatContract = Schema.Struct({
-  reply: Schema.optional(Schema.String),
-  patch: Schema.optional(Schema.Record({ key: Schema.String, value: Schema.Unknown })),
-  artAction: Schema.optional(
-    Schema.Struct({
-      brief: Schema.optional(Schema.String),
-      editCurrentArt: Schema.optional(Schema.Boolean),
-    }),
-  ),
-  actions: Schema.optional(Schema.Array(Schema.Unknown)),
-});
-const decodeContract = Schema.decodeUnknownOption(ChatContract);
-const decodeDocAction = Schema.decodeUnknownOption(DocAction);
+const TITLES: Record<string, string> = {
+  [CARD_PATCH_TOOL]: 'Edit card fields',
+  [CARD_GENERATE_ART_TOOL]: 'Generate art',
+  [CARD_SAVE_TOOL]: 'Save card',
+  [CARD_SAVE_COPY_TOOL]: 'Save as copy',
+  [CARD_EXPORT_TOOL]: 'Export render',
+  [CARD_SET_LAYOUT_TOOL]: 'Switch layout',
+  [CARD_SET_THEME_TOOL]: 'Switch theme',
+  [CARD_SET_HOLO_TOOL]: 'Toggle holo',
+};
 
-/** Per-entry lenient action decode — a mistyped entry drops, valid ones survive. */
-export function decodeDocActions(raw: readonly unknown[] | undefined): DocActionT[] {
-  return (raw ?? []).flatMap((entry) =>
-    Option.match(decodeDocAction(entry), {
-      onNone: () => [] as DocActionT[],
-      onSome: (action) => [action],
-    }),
-  );
-}
-
-/**
- * Repair the model-JSON failure classes we have actually seen (live-caught
- * 2026-08-03: flavor text with UNESCAPED inner double quotes broke the whole
- * turn). A `"` inside a string is treated as the CLOSING quote only when the
- * next non-whitespace character is a JSON delimiter (`,:}]` or end); any other
- * `"` is escaped in place. Also strips trailing commas. Valid JSON round-trips
- * unchanged through this by construction.
- */
-export function repairJson(raw: string): string {
-  let out = '';
-  let inString = false;
-  for (let i = 0; i < raw.length; i++) {
-    const ch = raw[i] as string;
-    if (!inString) {
-      out += ch;
-      if (ch === '"') inString = true;
-      continue;
-    }
-    if (ch === '\\') {
-      out += ch + (raw[i + 1] ?? '');
-      i += 1;
-      continue;
-    }
-    if (ch === '"') {
-      let j = i + 1;
-      while (j < raw.length && /\s/.test(raw[j] as string)) j++;
-      const next = raw[j];
-      if (next === undefined || next === ',' || next === ':' || next === '}' || next === ']') {
-        out += ch;
-        inString = false;
-      } else {
-        out += '\\"'; // an inner quote the model forgot to escape
-      }
-      continue;
-    }
-    out += ch;
-  }
-  return out.replace(/,\s*([}\]])/g, '$1');
-}
-
-/** First balanced-ish `{ … }` block out of a reply (fences/preamble tolerated). */
-export function extractJson(raw: string): Option.Option<unknown> {
-  const start = raw.indexOf('{');
-  const end = raw.lastIndexOf('}');
-  if (start < 0 || end <= start) return Option.none();
-  const block = raw.slice(start, end + 1);
-  try {
-    return Option.some(JSON.parse(block));
-  } catch {
-    try {
-      return Option.some(JSON.parse(repairJson(block)));
-    } catch {
-      return Option.none();
-    }
-  }
-}
-
-/**
- * Does this text LOOK like an attempted v1 contract? Distinguishes "the model
- * tried the JSON transport and mangled it" from genuine plain-text replies.
- */
-export function looksLikeContract(raw: string): boolean {
-  const trimmed = raw.trim();
-  return (trimmed.startsWith('{') || trimmed.includes('```')) && trimmed.includes('"reply"');
-}
-
-/** Last-ditch reply extraction off a broken contract (regex over the reply field). */
-function replyOf(raw: string): Option.Option<string> {
-  const match = /"reply"\s*:\s*"((?:[^"\\]|\\.)*)"/.exec(raw);
-  return match?.[1] !== undefined
-    ? Option.some(match[1].replace(/\\"/g, '"').replace(/\\n/g, '\n'))
-    : Option.none();
-}
-
-const toolChip = (id: string, title: string, args: unknown): ThreadPartT => ({
-  _tag: 'ToolCall',
-  callId: id,
-  name: id,
-  title,
-  status: 'completed',
-  argsText: JSON.stringify(args),
-});
-
-/** Parse assistant text into ordered display parts (reply text, then action chips). */
-export function materializeAssistantParts(text: string): ThreadPartT[] {
-  const decoded = extractJson(text).pipe(Option.flatMap(decodeContract));
-  if (Option.isNone(decoded)) {
-    // A mangled contract must NEVER render as a raw JSON blob: surface the
-    // reply text alone (actions were unrecoverable — history of broken turns).
-    if (looksLikeContract(text)) {
-      const reply = Option.getOrElse(replyOf(text), () => '(reply could not be parsed)');
-      return [{ _tag: 'Text', text: reply }];
-    }
-    // No contract at all — plain-text fallback (P4 replies, non-conforming output).
-    return [{ _tag: 'Text', text: text.trim() }];
-  }
-  const contract = decoded.value;
+/** Build a turn's display parts: reply text, then one chip per tool intent. */
+export function partsFromTurn(reply: string, toolCalls: readonly ToolCallIntentT[]): ThreadPartT[] {
   const parts: ThreadPartT[] = [];
-  const reply = (contract.reply ?? '').trim();
-  if (reply.length > 0) parts.push({ _tag: 'Text', text: reply });
-  if (contract.patch !== undefined && Object.keys(contract.patch).length > 0) {
-    parts.push(toolChip(CARD_PATCH_TOOL, 'Edit card fields', contract.patch));
-  }
-  if (contract.artAction !== undefined) {
-    parts.push(toolChip(CARD_GENERATE_ART_TOOL, 'Generate art', contract.artAction));
-  }
-  for (const action of decodeDocActions(contract.actions)) {
-    switch (action.kind) {
-      case 'export':
-        parts.push(toolChip(CARD_EXPORT_TOOL, 'Export render', action));
-        break;
-      case 'save':
-      case 'saveAsCopy':
-        parts.push(
-          toolChip(CARD_SAVE_TOOL, action.kind === 'save' ? 'Save card' : 'Save as copy', action),
-        );
-        break;
-      case 'setLayout':
-      case 'setTheme':
-      case 'setHolo':
-        parts.push(toolChip(CARD_SETTINGS_TOOL, 'Card settings', action));
-        break;
-    }
-  }
-  // A parsed-but-empty contract still yields a (blank) message, never nothing.
+  const text = reply.trim();
+  if (text.length > 0) parts.push({ _tag: 'Text', text });
+  toolCalls.forEach((call, i) => {
+    parts.push({
+      _tag: 'ToolCall',
+      callId: `intent-${String(i)}`,
+      name: call.name,
+      title: TITLES[call.name] ?? call.name,
+      status: 'completed',
+      argsText: JSON.stringify(call.args),
+    });
+  });
   if (parts.length === 0) parts.push({ _tag: 'Text', text: '' });
   return parts;
 }

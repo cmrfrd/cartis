@@ -9,7 +9,7 @@
 
 import { Schema } from 'effect';
 import { describe, expect, it } from 'vitest';
-import { MessageId, PermissionId, SessionId } from './ids';
+import { MessageId, SessionId } from './ids';
 import {
   ThreadEvent,
   ThreadEventJson,
@@ -17,7 +17,6 @@ import {
   ThreadMessage,
   ThreadPart,
   type ThreadPartT,
-  ThreadSummary,
 } from './thread';
 
 const decodePart = Schema.decodeUnknownSync(ThreadPart);
@@ -124,12 +123,6 @@ describe('ThreadEvent', () => {
     { _tag: 'Art', phase: 'generating', detail: 'prediction p1 created' },
     { _tag: 'Art', phase: 'composing' },
     { _tag: 'SessionError', message: 'boom' },
-    {
-      _tag: 'PermissionRequested',
-      sessionId: SessionId.make('s1'),
-      permissionId: PermissionId.make('p1'),
-      title: 'Run bash?',
-    },
   ];
 
   it('decodes every variant', () => {
@@ -162,23 +155,5 @@ describe('ThreadEvent', () => {
   it('rejects malformed JSON frames', () => {
     expect(() => Schema.decodeUnknownSync(ThreadEventJson)('not json')).toThrow();
     expect(() => Schema.decodeUnknownSync(ThreadEventJson)('{"_tag":"Nope"}')).toThrow();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// ThreadSummary
-// ---------------------------------------------------------------------------
-
-describe('ThreadSummary', () => {
-  it('decodes with and without optional fields', () => {
-    expect(Schema.decodeUnknownSync(ThreadSummary)({ sessionId: SessionId.make('s1') })).toEqual({
-      sessionId: SessionId.make('s1'),
-    });
-    const full = {
-      sessionId: SessionId.make('s2'),
-      title: 'branch of s1',
-      parentId: SessionId.make('s1'),
-    };
-    expect(Schema.decodeUnknownSync(ThreadSummary)(full)).toEqual(full);
   });
 });

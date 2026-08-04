@@ -469,11 +469,15 @@ describe('ChatTurnRequest / Response + history + session refs', () => {
     expect(req.sessionId).toBe('card-1');
     const res = Schema.decodeUnknownSync(ChatTurnResponse)({
       sessionId: 'card-1',
-      assistantText: '{"reply":"done","patch":{"name":"Vorak"}}',
-      patch: { name: 'Vorak' },
+      reply: 'done',
+      toolCalls: [{ name: 'card_patch', args: { name: 'Vorak' } }],
+      userEntryId: 'u1',
+      assistantEntryId: 'a1',
     });
-    expect(res.assistantText).toContain('reply');
-    expect(res.patch.name).toBe('Vorak');
+    expect(res.reply).toBe('done');
+    expect(res.toolCalls[0]?.args.name).toBe('Vorak');
+    expect(res.userEntryId).toBe('u1');
+    expect(res.assistantEntryId).toBe('a1');
   });
 
   it('decodes a history response of thread messages', () => {

@@ -1,29 +1,31 @@
-import { Effect, Layer, PubSub as PS } from 'effect';
+import { Effect, Layer } from 'effect';
 import { describe, expect, it, vi } from 'vitest';
 import { setAppLayer, testAppLayerWith } from '@/app/runtime';
 import type { ChatTurnResponseT } from '@/contracts/api';
 import { ChatRequestError } from '@/contracts/errors';
-import { MessageId, PermissionId, SessionId } from '@/contracts/ids';
-import type { ThreadEventT } from '@/contracts/thread';
+import { MessageId, SessionId } from '@/contracts/ids';
 import { click, mountApp, setInput, tick } from '../../test/util';
-import { chatEventsFromPubSub } from './ChatEvents';
 import { ChatThread, type ChatThreadShape } from './ChatThread';
+
+/** A canned v2 turn response ({ reply, toolCalls, entry ids } — spec §3.2). */
+const resp = (over: Partial<ChatTurnResponseT> = {}): ChatTurnResponseT => ({
+  sessionId: SessionId.make('s1'),
+  reply: 'ok',
+  toolCalls: [],
+  userEntryId: MessageId.make('ue-1'),
+  assistantEntryId: MessageId.make('ae-1'),
+  ...over,
+});
 
 const chatStub = (over: Partial<ChatThreadShape> = {}): Layer.Layer<ChatThread> =>
   Layer.succeed(ChatThread, {
-    turn: () =>
-      Effect.succeed({
-        sessionId: SessionId.make('s1'),
-        assistantText: '{"reply":"ok"}',
-        patch: {},
-      } satisfies ChatTurnResponseT),
-    history: () => Effect.succeed([]),
-    siblings: () => Effect.succeed([]),
-    cancel: () => Effect.void,
-    revert: () => Effect.void,
+    turn: () => Effect.succeed(resp()),
+    edit: () => Effect.succeed(resp()),
     regenerate: () => Effect.fail(new ChatRequestError({ status: 0, detail: 'x' })),
-    fork: () => Effect.succeed(SessionId.make('fork-1')),
-    replyPermission: () => Effect.void,
+    history: () => Effect.succeed([]),
+    tree: () => Effect.succeed([]),
+    switch: () => Effect.void,
+    cancel: () => Effect.void,
     ...over,
   });
 
@@ -134,11 +136,12 @@ describe('ThreadPanel', () => {
       testAppLayerWith({
         thread: chatStub({
           turn: () =>
-            Effect.succeed({
-              sessionId: SessionId.make('s1'),
-              assistantText: '{"reply":"Renamed him to Vorak.","patch":{"name":"Vorak"}}',
-              patch: { name: 'Vorak' },
-            }),
+            Effect.succeed(
+              resp({
+                reply: 'Renamed him to Vorak.',
+                toolCalls: [{ name: 'card_patch', args: { name: 'Vorak' } }],
+              }),
+            ),
         }),
       }),
     );
@@ -147,7 +150,7 @@ describe('ThreadPanel', () => {
     await click(document.querySelector('[data-testid="composer-send"]'));
     await vi.waitFor(() => {
       expect(document.body.textContent).toContain('rename him'); // user bubble
-      expect(document.body.textContent).toContain('Renamed him to Vorak.'); // materialized reply
+      expect(document.body.textContent).toContain('Renamed him to Vorak.'); // structured reply
       const chip = document.querySelector('[data-testid="tool-card-patch"]');
       expect(chip?.textContent).toContain('name'); // patched key on the chip
     });
@@ -159,12 +162,7 @@ describe('ThreadPanel', () => {
       testAppLayerWith({
         thread: chatStub({
           // a slow turn keeps `running` true long enough to observe the swap
-          turn: () =>
-            Effect.succeed({
-              sessionId: SessionId.make('s1'),
-              assistantText: '{"reply":"ok"}',
-              patch: {},
-            }).pipe(Effect.delay('400 millis')),
+          turn: () => Effect.succeed(resp()).pipe(Effect.delay('400 millis')),
         }),
       }),
     );
@@ -183,7 +181,7 @@ describe('ThreadPanel', () => {
     setAppLayer(
       testAppLayerWith({
         thread: chatStub({
-          turn: () => Effect.fail(new ChatRequestError({ status: 503, detail: 'opencode down' })),
+          turn: () => Effect.fail(new ChatRequestError({ status: 503, detail: 'agent down' })),
         }),
       }),
     );
@@ -191,7 +189,7 @@ describe('ThreadPanel', () => {
     await setInput(composer(), 'hi');
     await click(document.querySelector('[data-testid="composer-send"]'));
     await vi.waitFor(() => {
-      expect(document.body.textContent).toContain('opencode down');
+      expect(document.body.textContent).toContain('agent down');
     });
     unmount();
   });
@@ -201,19 +199,12 @@ describe('ThreadPanel', () => {
     setAppLayer(
       testAppLayerWith({
         thread: chatStub({
-          turn: () =>
-            Effect.succeed({
-              sessionId: SessionId.make('s1'),
-              assistantText: '{"reply":"first answer"}',
-              patch: {},
-            }),
+          turn: () => Effect.succeed(resp({ reply: 'first answer' })),
           regenerate: () => {
             regen += 1;
-            return Effect.succeed({
-              sessionId: SessionId.make('s1'),
-              assistantText: '{"reply":"second answer"}',
-              patch: {},
-            });
+            return Effect.succeed(
+              resp({ reply: 'second answer', assistantEntryId: MessageId.make('ae-2') }),
+            );
           },
         }),
       }),
@@ -231,36 +222,47 @@ describe('ThreadPanel', () => {
     unmount();
   });
 
-  it('edit forks + resends and reveals ‹ n/m › arrows at the divergence point', async () => {
-    const calls = { fork: 0, revert: 0 };
+  it('edit creates a sibling branch and reveals ‹ n/m › arrows from the tree anchors', async () => {
+    let edits = 0;
+    let switchedTo = '';
     setAppLayer(
       testAppLayerWith({
         thread: chatStub({
-          turn: (req) =>
-            Effect.succeed({
-              sessionId: req.sessionId ?? SessionId.make('fork-1'),
-              assistantText: '{"reply":"answer"}',
-              patch: {},
-            }),
-          fork: () => {
-            calls.fork += 1;
-            return Effect.succeed(SessionId.make('fork-1'));
+          turn: () => Effect.succeed(resp({ reply: 'answer' })),
+          edit: (_req, targetMessageId) => {
+            edits += 1;
+            expect(targetMessageId).toBe('ue-1'); // the re-keyed user entry id
+            return Effect.succeed(
+              resp({
+                reply: 'edited answer',
+                userEntryId: MessageId.make('ue-2'),
+                assistantEntryId: MessageId.make('ae-2'),
+              }),
+            );
           },
-          revert: () => {
-            calls.revert += 1;
-            return Effect.void;
-          },
-          siblings: () =>
-            Effect.succeed([
-              { sessionId: SessionId.make('orig-a'), title: 'original' },
-              { sessionId: SessionId.make('fork-1'), parentId: SessionId.make('orig-a') },
-            ]),
-          history: (sid) =>
+          tree: () =>
             Effect.succeed(
-              sid === 'orig-a'
+              edits > 0
                 ? [
                     {
-                      id: MessageId.make('h1'),
+                      messageId: MessageId.make('ue-2'),
+                      index: 2,
+                      count: 2,
+                      siblingLeafIds: ['leaf-orig', 'leaf-edit'],
+                    },
+                  ]
+                : [],
+            ),
+          switch: (_sid, leafId) => {
+            switchedTo = leafId;
+            return Effect.void;
+          },
+          history: () =>
+            Effect.succeed(
+              switchedTo === 'leaf-orig'
+                ? [
+                    {
+                      id: MessageId.make('ue-1'),
                       role: 'user' as const,
                       status: 'complete' as const,
                       parts: [{ _tag: 'Text' as const, text: 'first message' }],
@@ -282,16 +284,18 @@ describe('ThreadPanel', () => {
     await setInput(document.querySelector('[data-testid="edit-box"] textarea'), 'edited message');
     await click(document.querySelector('[data-testid="edit-submit"]'));
     await vi.waitFor(() => {
-      expect(calls.fork).toBe(1);
-      expect(calls.revert).toBe(1);
-      expect(document.body.textContent).toContain('edited message'); // resent user text
-      // the fork is the 2nd of 2 siblings; arrows anchor the divergent message
+      expect(edits).toBe(1); // ONE route call — no fork/revert dance
+      expect(document.body.textContent).toContain('edited message'); // new branch's user text
+      // the edit is the 2nd of 2 siblings; arrows anchor its user message
       expect(document.querySelector('[data-testid="branch-next"]')).not.toBeNull();
       expect(document.body.textContent).toContain('2/2');
     });
-    // stepping back rehydrates the original branch
+    // stepping back switches durably and rehydrates the original branch
     await click(document.querySelector('[data-testid="branch-prev"]'));
-    await vi.waitFor(() => expect(document.body.textContent).toContain('first message'));
+    await vi.waitFor(() => {
+      expect(switchedTo).toBe('leaf-orig');
+      expect(document.body.textContent).toContain('first message');
+    });
     unmount();
   });
 
@@ -300,13 +304,15 @@ describe('ThreadPanel', () => {
       testAppLayerWith({
         thread: chatStub({
           turn: () =>
-            Effect.succeed({
-              sessionId: SessionId.make('s1'),
-              assistantText:
-                '{"reply":"Saved it.","patch":{},"actions":[{"kind":"save"},{"kind":"export","target":"print"}]}',
-              patch: {},
-              actions: [{ kind: 'save' }, { kind: 'export', target: 'print' }],
-            }),
+            Effect.succeed(
+              resp({
+                reply: 'Saved it.',
+                toolCalls: [
+                  { name: 'card_save', args: {} },
+                  { name: 'card_export', args: { target: 'print' } },
+                ],
+              }),
+            ),
         }),
       }),
     );
@@ -330,12 +336,7 @@ describe('ThreadPanel', () => {
     setAppLayer(
       testAppLayerWith({
         thread: chatStub({
-          turn: () =>
-            Effect.succeed({
-              sessionId: SessionId.make('s1'),
-              assistantText: '{"reply":"a **bold** move"}',
-              patch: {},
-            }),
+          turn: () => Effect.succeed(resp({ reply: 'a **bold** move' })),
         }),
       }),
     );
@@ -363,11 +364,13 @@ describe('ThreadPanel', () => {
         thread: chatStub({
           turn: () => {
             n += 1;
-            return Effect.succeed({
-              sessionId: SessionId.make('s1'),
-              assistantText: `{"reply":"answer ${String(n)}"}`,
-              patch: {},
-            });
+            return Effect.succeed(
+              resp({
+                reply: `answer ${String(n)}`,
+                userEntryId: MessageId.make(`ue-${String(n)}`),
+                assistantEntryId: MessageId.make(`ae-${String(n)}`),
+              }),
+            );
           },
         }),
       }),
@@ -415,44 +418,6 @@ describe('ThreadPanel', () => {
     handle.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
     await tick();
     expect(panel.style.width).toBe('400px'); // double-click resets
-    unmount();
-  });
-
-  it('surfaces a permission request and answers Allow', async () => {
-    const pubsub = await Effect.runPromise(PS.unbounded<ThreadEventT>());
-    let replied = false;
-    setAppLayer(
-      testAppLayerWith({
-        thread: chatStub({
-          replyPermission: () => {
-            replied = true;
-            return Effect.void;
-          },
-        }),
-        threadEvents: chatEventsFromPubSub(pubsub),
-      }),
-    );
-    const { unmount } = await mountApp();
-    // Bind the session first (a stale permission replayed onto a FRESH card is
-    // a ghost and is now correctly dropped by the idle-unbound filter).
-    await setInput(composer(), 'hi');
-    await click(document.querySelector('[data-testid="composer-send"]'));
-    await vi.waitFor(async () => {
-      await Effect.runPromise(
-        PS.publish(pubsub, {
-          _tag: 'PermissionRequested',
-          sessionId: SessionId.make('s1'),
-          permissionId: PermissionId.make('p1'),
-          title: 'Run bash?',
-        }),
-      );
-      expect(document.querySelector('[data-testid="permission-strip"]')).not.toBeNull();
-    });
-    await click(document.querySelector('[data-testid="permission-allow"]'));
-    await vi.waitFor(() => {
-      expect(replied).toBe(true);
-      expect(document.querySelector('[data-testid="permission-strip"]')).toBeNull();
-    });
     unmount();
   });
 });

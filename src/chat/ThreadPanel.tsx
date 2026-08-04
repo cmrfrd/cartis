@@ -1,9 +1,9 @@
 /**
  * ThreadPanel — the ChatGPT-style chat sidebar shell (maturity spec §2),
  * hand-rolled on our tokens. Anatomy: resizable aside → header → empty state
- * OR (stick-to-bottom viewport → permission strip → sticky footer with
- * scroll-to-bottom chevron + note strip + pill composer), plus a drag-drop
- * overlay. Messages render via MessageView; ‹ n/m › arrows live there too.
+ * OR (stick-to-bottom viewport → sticky footer with scroll-to-bottom chevron
+ * + note strip + pill composer), plus a drag-drop overlay. Messages render
+ * via MessageView; ‹ n/m › arrows live there too.
  */
 
 import { ChevronDown } from 'lucide-react';
@@ -22,7 +22,7 @@ const DEFAULT_WIDTH = 400;
 export function ThreadPanel() {
   const view = BuilderView.get();
   const { thread, chatWidth } = view;
-  const { messages, running, pendingPermission, dropActive } = thread;
+  const { messages, running, dropActive } = thread;
   const empty = messages.length === 0;
   return (
     <aside
@@ -54,7 +54,6 @@ export function ThreadPanel() {
         <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-5 p-4">
           <h2 className="text-center text-ink text-lg">What should this card become?</h2>
           <div className="w-full">
-            {pendingPermission !== undefined && <PermissionStrip title={pendingPermission.title} />}
             <NoteStrip />
             <Composer />
           </div>
@@ -62,7 +61,6 @@ export function ThreadPanel() {
       ) : (
         <>
           <Viewport messages={messages} running={running} />
-          {pendingPermission !== undefined && <PermissionStrip title={pendingPermission.title} />}
           <div className="relative border-edge border-t p-3">
             <ScrollToBottom />
             <NoteStrip />
@@ -138,33 +136,6 @@ function ScrollToBottom() {
     >
       <ChevronDown className="size-4" />
     </button>
-  );
-}
-
-function PermissionStrip(props: { title: string }) {
-  const { thread } = BuilderView.get();
-  return (
-    <div
-      data-testid="permission-strip"
-      className="flex items-center gap-2 border-edge border-t bg-accent/10 px-4 py-2"
-    >
-      <span className="min-w-0 flex-1 truncate text-xs">{props.title}</span>
-      <button
-        type="button"
-        data-testid="permission-allow"
-        onClick={() => void thread.replyPermission(true)}
-        className="rounded-base border-2 border-border bg-main px-2 py-0.5 text-main-foreground text-xs shadow-shadow"
-      >
-        Allow
-      </button>
-      <button
-        type="button"
-        onClick={() => void thread.replyPermission(false)}
-        className="rounded-base border-2 border-border bg-background px-2 py-0.5 text-xs shadow-shadow"
-      >
-        Deny
-      </button>
-    </div>
   );
 }
 

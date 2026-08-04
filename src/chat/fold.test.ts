@@ -5,7 +5,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { MessageId, PermissionId, SessionId } from '@/contracts/ids';
+import { MessageId, SessionId } from '@/contracts/ids';
 import { CARD_GENERATE_ART_TOOL } from '@/contracts/materialize';
 import type { ThreadEventT, ThreadMessageT } from '@/contracts/thread';
 import { foldThreadEvent } from './fold';
@@ -88,16 +88,10 @@ describe('foldThreadEvent', () => {
     expect(out[0]?.status).toBe('complete');
   });
 
-  it('TurnCompleted materializes contract-looking raw text (SSE-only viewers, live-caught)', () => {
-    // A viewer fed ONLY by the stream (second tab / replay) never gets the
-    // turn response — the raw v1 JSON must still materialize at completion.
+  it('TurnCompleted keeps streamed parts as-is (pi streams real prose, no JSON transport)', () => {
     const out = fold([
       started('m1'),
-      textDelta(
-        'm1',
-        0,
-        '{"reply":"Renamed him.","patch":{"name":"Vorak"},"actions":[{"kind":"save"}]}',
-      ),
+      textDelta('m1', 0, 'Renamed him.'),
       {
         _tag: 'TurnCompleted',
         sessionId: SessionId.make('s1'),
@@ -105,10 +99,7 @@ describe('foldThreadEvent', () => {
         status: 'complete',
       },
     ]);
-    const parts = out[0]?.parts ?? [];
-    expect(parts[0]).toEqual({ _tag: 'Text', text: 'Renamed him.' });
-    expect(parts.some((p) => p._tag === 'ToolCall')).toBe(true);
-    expect(JSON.stringify(parts)).not.toContain('"patch"'); // no raw JSON survives
+    expect(out[0]?.parts).toEqual([{ _tag: 'Text', text: 'Renamed him.' }]);
   });
 
   it('Art upserts a card_generate_art tool part on the LAST assistant message', () => {
@@ -160,16 +151,5 @@ describe('foldThreadEvent', () => {
     const out = fold([started('m1'), { _tag: 'SessionError', message: 'boom' }]);
     expect(out[0]?.status).toBe('incomplete');
     expect(out[0]?.parts.at(-1)).toEqual({ _tag: 'Text', text: 'boom' });
-  });
-
-  it('PermissionRequested does not change the message list (ThreadState tracks it)', () => {
-    const before = fold([started('m1')]);
-    const after = foldThreadEvent(before, {
-      _tag: 'PermissionRequested',
-      sessionId: SessionId.make('s1'),
-      permissionId: PermissionId.make('p1'),
-      title: 'Run bash?',
-    });
-    expect(after).toBe(before);
   });
 });

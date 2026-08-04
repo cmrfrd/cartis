@@ -4,13 +4,12 @@
  *
  * assistant-ui's presentation vocabulary (messages of ordered parts, tool
  * calls with status, streaming deltas) expressed as effect Schema tagged
- * unions. The server bridge maps opencode wire shapes INTO these; the client
- * consumes ONLY these. This module must never import contracts/opencode.ts
- * (dependency direction is law — spec §Future-proofing 4).
+ * unions. The server bridge maps pi runtime events INTO these; the client
+ * consumes ONLY these (dependency direction is law — spec §Future-proofing 4).
  */
 
 import { Schema } from 'effect';
-import { MessageId, PermissionId, SessionId } from './ids.ts';
+import { MessageId, SessionId } from './ids.ts';
 
 // ---------------------------------------------------------------------------
 // ThreadPart — the ordered content units of a message
@@ -42,7 +41,7 @@ export const ImagePart = Schema.TaggedStruct('Image', {
   url: Schema.String,
 });
 
-/** A non-image user attachment (name + mime chip; bytes live in opencode). */
+/** A non-image user attachment (name + mime chip; bytes live in the session file). */
 export const FilePart = Schema.TaggedStruct('File', {
   name: Schema.String,
   mime: Schema.String,
@@ -124,32 +123,14 @@ export const SessionErrorEvent = Schema.TaggedStruct('SessionError', {
   message: Schema.String,
 });
 
-export const PermissionRequested = Schema.TaggedStruct('PermissionRequested', {
-  sessionId: SessionId,
-  permissionId: PermissionId,
-  title: Schema.String,
-});
-
 export const ThreadEvent = Schema.Union(
   TurnStarted,
   PartDelta,
   TurnCompleted,
   ArtEvent,
   SessionErrorEvent,
-  PermissionRequested,
 );
 export type ThreadEventT = typeof ThreadEvent.Type;
 
 /** One codec both directions: SSE frame string ⇄ ThreadEvent. */
 export const ThreadEventJson = Schema.parseJson(ThreadEvent);
-
-// ---------------------------------------------------------------------------
-// ThreadSummary — thread list / branch tree entry
-// ---------------------------------------------------------------------------
-
-export const ThreadSummary = Schema.Struct({
-  sessionId: SessionId,
-  title: Schema.optional(Schema.String),
-  parentId: Schema.optional(SessionId),
-});
-export type ThreadSummaryT = typeof ThreadSummary.Type;

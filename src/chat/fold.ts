@@ -7,17 +7,13 @@
  * portable to any store. `ThreadState` merely applies it and returns the new
  * array (new references throughout, for expressive reactivity).
  *
- * Session filtering and the pendingPermission field live in ThreadState; this
- * fold is total over ThreadEvent and leaves PermissionRequested untouched.
+ * Session filtering lives in ThreadState; this fold is total over
+ * ThreadEvent.
  */
 
 import { Match } from 'effect';
 import { MessageId, type MessageIdT } from '@/contracts/ids';
-import {
-  CARD_GENERATE_ART_TOOL,
-  looksLikeContract,
-  materializeAssistantParts,
-} from '@/contracts/materialize';
+import { CARD_GENERATE_ART_TOOL } from '@/contracts/materialize';
 import type { ArtPhaseT, ThreadEventT, ThreadMessageT, ThreadPartT } from '@/contracts/thread';
 
 const runningAssistant = (id: MessageIdT, parts: ThreadPartT[] = []): ThreadMessageT => ({
@@ -82,15 +78,7 @@ export function foldThreadEvent(messages: ThreadMessageT[], event: ThreadEventT)
       if (index < 0) return [...messages];
       const message = messages[index];
       if (message === undefined) return [...messages];
-      // A stream-only viewer (second tab, replay) never receives the turn
-      // response that normally swaps in materialized parts — materialize any
-      // contract-looking raw text here so the v1 JSON never renders.
-      const parts = message.parts.flatMap((part) =>
-        part._tag === 'Text' && looksLikeContract(part.text)
-          ? materializeAssistantParts(part.text)
-          : [part],
-      );
-      return replaceAt(messages, index, { ...message, status: e.status, parts });
+      return replaceAt(messages, index, { ...message, status: e.status });
     }),
 
     Match.tag('Art', (e) => {
@@ -145,10 +133,6 @@ export function foldThreadEvent(messages: ThreadMessageT[], event: ThreadEventT)
         parts: [...message.parts, { _tag: 'Text', text: e.message }],
       });
     }),
-
-    // Not a message mutation — same reference back (ThreadState records it
-    // as pendingPermission; identity lets expressive skip the re-render).
-    Match.tag('PermissionRequested', () => messages),
 
     Match.exhaustive,
   );

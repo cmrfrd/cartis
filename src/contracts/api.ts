@@ -8,10 +8,10 @@
 
 import { Schema } from 'effect';
 import { AspectRatio, CardDataSchema, FieldSummary } from './fields.ts';
-import { DataUrl, FileName, MessageId, MimeType, PermissionId, SessionId } from './ids.ts';
+import { DataUrl, FileName, MessageId, MimeType, SessionId } from './ids.ts';
 import { StoredRecord } from './records.ts';
 import { ThemeContext } from './theme.ts';
-import { ThreadMessage, ThreadSummary } from './thread.ts';
+import { ThreadMessage } from './thread.ts';
 
 // ---------------------------------------------------------------------------
 // Shared error body
@@ -69,28 +69,6 @@ export const ArtAction = Schema.Struct({
 });
 export type ArtActionT = typeof ArtAction.Type;
 
-/**
- * A document-level action the agent may request (chat-doc-actions spec):
- * save / save-as-copy / export the CURRENT card. Executed client-side by the
- * BuilderView appliers, in order, after the patch and any art run.
- */
-export const DocAction = Schema.Union(
-  Schema.Struct({ kind: Schema.Literal('save') }),
-  Schema.Struct({ kind: Schema.Literal('saveAsCopy') }),
-  Schema.Struct({
-    kind: Schema.Literal('export'),
-    /** png = 300 DPI plain, print = 600 DPI + bleed/marks, sheet = 3×3 A4. */
-    target: Schema.Literal('png', 'print', 'sheet'),
-  }),
-  // Settings knobs (routing+awareness spec §2): ids are plain strings on the
-  // wire — the CLIENT validates against the theme registry (the bridge has
-  // none). These apply FIRST, before art, so a same-turn art run uses them.
-  Schema.Struct({ kind: Schema.Literal('setLayout'), layoutId: Schema.String }),
-  Schema.Struct({ kind: Schema.Literal('setTheme'), themeId: Schema.String }),
-  Schema.Struct({ kind: Schema.Literal('setHolo'), value: Schema.Boolean }),
-);
-export type DocActionT = typeof DocAction.Type;
-
 /** Current + available document knobs, rendered into the turn prompt. */
 export const DocContext = Schema.Struct({
   themeId: Schema.String,
@@ -133,31 +111,61 @@ export const ChatTurnRequest = Schema.Struct({
 });
 export type ChatTurnRequestT = typeof ChatTurnRequest.Type;
 
+/** One validated tool intent (pi tool transport, migration spec §3.2). */
+export const ToolCallIntent = Schema.Struct({
+  name: Schema.String,
+  args: Schema.Record({ key: Schema.String, value: Schema.Unknown }),
+});
+export type ToolCallIntentT = typeof ToolCallIntent.Type;
+
 export const ChatTurnResponse = Schema.Struct({
   sessionId: SessionId,
-  /** Raw model output — the client runs it through materializeAssistantParts. */
-  assistantText: Schema.String,
-  /** Field-schema-validated patch, safe to apply to the card. */
-  patch: CardDataSchema,
-  artAction: Schema.optional(ArtAction),
-  /** Document actions (save/copy/export), decoded per-entry leniently. */
-  actions: Schema.optional(Schema.Array(DocAction)),
-  /** Patch keys IGNORED by the per-field lenient decode (mistyped/unknown). */
-  droppedFields: Schema.optional(Schema.Array(Schema.String)),
+  /** Assistant prose — plain text, no transport JSON to parse. */
+  reply: Schema.String,
+  /** Validated tool intents in canonical (persisted block) order. */
+  toolCalls: Schema.Array(ToolCallIntent),
+  /** Tool-argument validation failures the model hit (note strip). */
+  toolErrors: Schema.optional(
+    Schema.Array(Schema.Struct({ name: Schema.String, message: Schema.String })),
+  ),
+  /** Authoritative pi entry ids — the client RE-KEYS its bubbles to these. */
+  userEntryId: MessageId,
+  assistantEntryId: MessageId,
 });
 export type ChatTurnResponseT = typeof ChatTurnResponse.Type;
+
+// POST /api/chat/edit — edit an earlier user message (tree sibling branch).
+export const ChatEditRequest = Schema.Struct({
+  ...ChatTurnRequest.fields,
+  targetMessageId: MessageId,
+});
+export type ChatEditRequestT = typeof ChatEditRequest.Type;
+
+// GET /api/chat/tree?sessionId=… — ‹ n/m › anchors from the session tree.
+export const ChatTreeResponse = Schema.Struct({
+  anchors: Schema.Array(
+    Schema.Struct({
+      messageId: MessageId,
+      index: Schema.Number,
+      count: Schema.Number,
+      siblingLeafIds: Schema.Array(Schema.String),
+    }),
+  ),
+});
+export type ChatTreeResponseT = typeof ChatTreeResponse.Type;
+
+// POST /api/chat/switch — durable branch switch (leaf_switch entry).
+export const ChatSwitchRequest = Schema.Struct({
+  sessionId: SessionId,
+  leafId: Schema.String,
+});
+export type ChatSwitchRequestT = typeof ChatSwitchRequest.Type;
 
 // GET /api/chat/history?sessionId=… — rehydrate a card's conversation.
 export const ChatHistoryResponse = Schema.Struct({
   messages: Schema.Array(ThreadMessage),
 });
 export type ChatHistoryResponseT = typeof ChatHistoryResponse.Type;
-
-// GET /api/chat/siblings?sessionId=… — parent-first branch set for ‹ n/m ›.
-export const ChatBranchesResponse = Schema.Struct({
-  branches: Schema.Array(ThreadSummary),
-});
-export type ChatBranchesResponseT = typeof ChatBranchesResponse.Type;
 
 // POST /api/chat/fork — branch a session; also the abort/revert/regenerate ack.
 export const SessionRef = Schema.Struct({
@@ -172,14 +180,6 @@ export const SessionAction = Schema.Struct({
   messageId: Schema.optional(MessageId),
 });
 export type SessionActionT = typeof SessionAction.Type;
-
-// POST /api/chat/permission — reply to a requires-action prompt (Task 5).
-export const PermissionReply = Schema.Struct({
-  sessionId: SessionId,
-  permissionId: PermissionId,
-  granted: Schema.Boolean,
-});
-export type PermissionReplyT = typeof PermissionReply.Type;
 
 // schemaFromFields lives in ./fields.ts (constraint-honoring; spec §6).
 

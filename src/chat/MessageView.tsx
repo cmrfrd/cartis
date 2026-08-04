@@ -2,8 +2,8 @@
  * Message rendering (maturity spec §2; reference: docs/reference/xulux-chatgpt/
  * chatgpt.tsx L205–405): user = attachments above a right-aligned bubble;
  * assistant = bubble-less markdown; hover icon action bars (Copy ✓ swap, Edit,
- * Regenerate on the LAST assistant only); ‹ n/m › arrows on the branchPoint
- * message; the EditBox soft inline editor.
+ * Regenerate on the LAST assistant only); ‹ n/m › arrows on tree-anchor
+ * messages; the EditBox soft inline editor.
  */
 
 import { Match } from 'effect';
@@ -15,8 +15,11 @@ import {
   CARD_EXPORT_TOOL,
   CARD_GENERATE_ART_TOOL,
   CARD_PATCH_TOOL,
+  CARD_SAVE_COPY_TOOL,
   CARD_SAVE_TOOL,
-  CARD_SETTINGS_TOOL,
+  CARD_SET_HOLO_TOOL,
+  CARD_SET_LAYOUT_TOOL,
+  CARD_SET_THEME_TOOL,
 } from '@/contracts/materialize';
 import type { ThreadMessageT, ThreadPartT } from '@/contracts/thread';
 
@@ -94,31 +97,31 @@ function ActionBar(props: { message: ThreadMessageT; isLastAssistant: boolean })
   );
 }
 
-/** ‹ n/m › on the divergence message — ChatGPT-style sibling navigation. */
+/** ‹ n/m › on a tree-anchor message — ChatGPT-style sibling navigation. */
 function BranchArrows(props: { messageId: string }) {
   const { thread } = BuilderView.get();
-  const { branchPoint } = thread;
-  if (branchPoint === undefined || branchPoint.messageId !== props.messageId) return null;
-  if (branchPoint.count < 2) return null;
+  const { anchors } = thread;
+  const anchor = anchors.find((a) => a.messageId === props.messageId);
+  if (anchor === undefined || anchor.count < 2) return null;
   return (
     <span className="flex items-center text-[11px] text-ink-dim">
       <button
         type="button"
         data-testid="branch-prev"
         title="Previous branch"
-        disabled={branchPoint.index <= 1}
-        onClick={() => void thread.switchSibling(-1)}
+        disabled={anchor.index <= 1}
+        onClick={() => void thread.switchSibling(anchor, -1)}
         className={`${iconButton} disabled:opacity-30`}
       >
         <ChevronLeft className="size-3.5" />
       </button>
-      {branchPoint.index}/{branchPoint.count}
+      {anchor.index}/{anchor.count}
       <button
         type="button"
         data-testid="branch-next"
         title="Next branch"
-        disabled={branchPoint.index >= branchPoint.count}
-        onClick={() => void thread.switchSibling(1)}
+        disabled={anchor.index >= anchor.count}
+        onClick={() => void thread.switchSibling(anchor, 1)}
         className={`${iconButton} disabled:opacity-30`}
       >
         <ChevronRight className="size-3.5" />
@@ -127,7 +130,7 @@ function BranchArrows(props: { messageId: string }) {
   );
 }
 
-/** Soft inline editor for a user message (fork-on-edit resends on submit). */
+/** Soft inline editor for a user message (submit → sibling branch in the tree). */
 function EditBox() {
   const { thread } = BuilderView.get();
   const { editDraft } = thread;
@@ -175,9 +178,9 @@ function PartView(props: {
   // Match.exhaustive (spec §Match): a new ThreadPart variant fails tsc here.
   return Match.value(part).pipe(
     Match.tag('Text', (p) => {
-      // A running assistant's text is the raw JSON blob mid-stream — show a
-      // writing indicator instead (materialization replaces it at turn end).
-      if (running && role === 'assistant') {
+      // A running assistant streams cumulative partial text; show it live,
+      // with a writing indicator until the first delta lands.
+      if (running && role === 'assistant' && p.text.trim().length === 0) {
         return <span className="animate-pulse text-ink-dim text-xs">writing response…</span>;
       }
       if (role === 'user') {
@@ -234,8 +237,11 @@ function ToolUI(props: { part: Extract<ThreadPartT, { _tag: 'ToolCall' }> }) {
   if (part.name === CARD_GENERATE_ART_TOOL) return <ArtStrip part={part} />;
   if (
     part.name === CARD_SAVE_TOOL ||
+    part.name === CARD_SAVE_COPY_TOOL ||
     part.name === CARD_EXPORT_TOOL ||
-    part.name === CARD_SETTINGS_TOOL
+    part.name === CARD_SET_LAYOUT_TOOL ||
+    part.name === CARD_SET_THEME_TOOL ||
+    part.name === CARD_SET_HOLO_TOOL
   ) {
     return <DocActionChip part={part} />;
   }
@@ -246,11 +252,12 @@ function ToolUI(props: { part: Extract<ThreadPartT, { _tag: 'ToolCall' }> }) {
   );
 }
 
-/** Save / export receipt chip — the agent ran a document action this turn. */
+/** Save / export / settings receipt chip — the agent ran a document action. */
 function DocActionChip(props: { part: Extract<ThreadPartT, { _tag: 'ToolCall' }> }) {
   const { part } = props;
   let label = part.title ?? part.name;
-  let verb = part.name === CARD_SAVE_TOOL ? 'saved' : 'exported';
+  let verb =
+    part.name === CARD_SAVE_TOOL || part.name === CARD_SAVE_COPY_TOOL ? 'saved' : 'exported';
   if (part.argsText !== undefined) {
     try {
       const args: unknown = JSON.parse(part.argsText);
@@ -258,14 +265,15 @@ function DocActionChip(props: { part: Extract<ThreadPartT, { _tag: 'ToolCall' }>
       if (part.name === CARD_EXPORT_TOOL && typeof a.target === 'string') {
         label = `export ${a.target}`;
       }
-      if (part.name === CARD_SETTINGS_TOOL) {
+      if (part.name === CARD_SET_LAYOUT_TOOL) {
         verb = 'set';
-        label =
-          a.kind === 'setLayout'
-            ? `layout: ${String(a.layoutId ?? '')}`
-            : a.kind === 'setTheme'
-              ? `theme: ${String(a.themeId ?? '')}`
-              : `holo: ${a.value === true ? 'on' : 'off'}`;
+        label = `layout: ${String(a.layoutId ?? '')}`;
+      } else if (part.name === CARD_SET_THEME_TOOL) {
+        verb = 'set';
+        label = `theme: ${String(a.themeId ?? '')}`;
+      } else if (part.name === CARD_SET_HOLO_TOOL) {
+        verb = 'set';
+        label = `holo: ${a.value === true ? 'on' : 'off'}`;
       }
     } catch {
       // keep the title

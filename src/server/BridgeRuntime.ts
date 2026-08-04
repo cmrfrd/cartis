@@ -3,8 +3,6 @@ import { Cause, Effect, Layer, ManagedRuntime, Option } from 'effect';
 import { BodyError, statusOfError } from '../contracts/errors.ts';
 import { AppHttpLive } from '../lib/http.ts';
 import {
-  type AgentClient,
-  agentClientLive,
   type ReplicateClient,
   type ReplicateSdk,
   replicateClientLive,
@@ -23,21 +21,21 @@ import { type LogSink, type ThreadBus, threadBusLive } from './threadBus.ts';
 export function bridgeLive(
   root: string,
   sink?: LogSink,
-): Layer.Layer<ThreadBus | FileStore | ReplicateSdk | ReplicateClient | AgentClient> {
+): Layer.Layer<ThreadBus | FileStore | ReplicateSdk | ReplicateClient> {
   // Leaf services shared across the runtime (one ThreadBus, one ReplicateSdk).
+  // The chat agent is NOT an Effect service anymore: pi runs in-process via
+  // makePiRuntime (plain object) wired directly in the vite plugin.
   const leaves = Layer.mergeAll(threadBusLive(sink), fileStoreLayer(root), replicateSdkLive);
-  // AgentClient's thread watcher emits on the SHARED bus (from `leaves`).
-  const agentClient = agentClientLive.pipe(Layer.provide(leaves));
   // ReplicateClient needs ReplicateSdk + ThreadBus (from `leaves`) + HttpClient.
   const replicateClient = replicateClientLive.pipe(
     Layer.provide(leaves),
     Layer.provide(AppHttpLive),
   );
-  return Layer.mergeAll(leaves, agentClient, replicateClient);
+  return Layer.mergeAll(leaves, replicateClient);
 }
 
 export type BridgeRuntime = ManagedRuntime.ManagedRuntime<
-  ThreadBus | FileStore | ReplicateSdk | ReplicateClient | AgentClient,
+  ThreadBus | FileStore | ReplicateSdk | ReplicateClient,
   never
 >;
 

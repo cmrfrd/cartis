@@ -1,6 +1,6 @@
 import { Chunk, Effect, Fiber, Option, Stream } from 'effect';
 import { describe, expect } from 'vitest';
-import { MessageId, PermissionId, SessionId } from '@/contracts/ids';
+import { MessageId, SessionId } from '@/contracts/ids';
 import type { ThreadEventT, ThreadPartT } from '@/contracts/thread.ts';
 import { it } from '../../test/effect.ts';
 import { renderThreadEvent, ThreadBus, threadBusLive, threadBusTestLayer } from './threadBus.ts';
@@ -206,13 +206,5 @@ describe('renderThreadEvent', () => {
     expect(render({ _tag: 'SessionError', message: 'boom' })).toBe(
       '[cartis:agent] agent error: boom',
     );
-    expect(
-      render({
-        _tag: 'PermissionRequested',
-        sessionId: SessionId.make('s1'),
-        permissionId: PermissionId.make('p1'),
-        title: 'Run bash?',
-      }),
-    ).toBe('[cartis:agent] permission requested: Run bash?');
   });
 });

@@ -4,7 +4,7 @@ import { setAppLayer, testAppLayerWith } from '@/app/runtime';
 import { ChatThread, type ChatThreadShape } from '@/chat/ChatThread';
 import type { ChatTurnRequestT, ChatTurnResponseT } from '@/contracts/api';
 import { ChatRequestError, StoreError } from '@/contracts/errors';
-import { CardId, LayoutId, SessionId, ThemeId, Timestamp } from '@/contracts/ids';
+import { CardId, LayoutId, MessageId, SessionId, ThemeId, Timestamp } from '@/contracts/ids';
 import { type GenerationInput, ImageProvider } from '@/images/ImageProvider';
 import type { StoredCard } from '@/storage/CardArchive';
 import { StoreClient } from '@/storage/StoreClient';
@@ -13,22 +13,26 @@ import { BuilderView } from './BuilderView';
 
 const bytesOf = (text: string): ArrayBuffer => new TextEncoder().encode(text).buffer as ArrayBuffer;
 
+/** A canned v2 turn response ({ reply, toolCalls, entry ids } — spec §3.2). */
+const resp = (over: Partial<ChatTurnResponseT> = {}): ChatTurnResponseT => ({
+  sessionId: SessionId.make('s1'),
+  reply: 'ok',
+  toolCalls: [],
+  userEntryId: MessageId.make('ue-1'),
+  assistantEntryId: MessageId.make('ae-1'),
+  ...over,
+});
+
 /** A ChatThread fake — turn defaults to a canned reply; the rest are inert. */
 const chatStub = (over: Partial<ChatThreadShape> = {}): Layer.Layer<ChatThread> =>
   Layer.succeed(ChatThread, {
-    turn: () =>
-      Effect.succeed({
-        sessionId: SessionId.make('s1'),
-        assistantText: '{"reply":"ok"}',
-        patch: {},
-      } satisfies ChatTurnResponseT),
-    history: () => Effect.succeed([]),
-    siblings: () => Effect.succeed([]),
-    cancel: () => Effect.void,
-    revert: () => Effect.void,
+    turn: () => Effect.succeed(resp()),
+    edit: () => Effect.succeed(resp()),
     regenerate: () => Effect.fail(new ChatRequestError({ status: 0, detail: 'x' })),
-    fork: () => Effect.succeed(SessionId.make('fork-1')),
-    replyPermission: () => Effect.void,
+    history: () => Effect.succeed([]),
+    tree: () => Effect.succeed([]),
+    switch: () => Effect.void,
+    cancel: () => Effect.void,
     ...over,
   });
 
@@ -179,11 +183,13 @@ describe('BuilderView', () => {
       testAppLayerWith({
         thread: chatStub({
           turn: () =>
-            Effect.succeed({
-              sessionId: SessionId.make('ses-1'),
-              assistantText: '{"reply":"Renamed him.","patch":{"name":"Vorak"}}',
-              patch: { name: 'Vorak' },
-            }),
+            Effect.succeed(
+              resp({
+                sessionId: SessionId.make('ses-1'),
+                reply: 'Renamed him.',
+                toolCalls: [{ name: 'card_patch', args: { name: 'Vorak' } }],
+              }),
+            ),
         }),
       }),
     );
@@ -204,11 +210,7 @@ describe('BuilderView', () => {
         thread: chatStub({
           turn: (req) => {
             seen.push(req);
-            return Effect.succeed({
-              sessionId: SessionId.make('s1'),
-              assistantText: '{"reply":"ok"}',
-              patch: {},
-            });
+            return Effect.succeed(resp());
           },
         }),
       }),
@@ -227,12 +229,7 @@ describe('BuilderView', () => {
     setAppLayer(
       testAppLayerWith({
         thread: chatStub({
-          turn: () =>
-            Effect.succeed({
-              sessionId: SessionId.make('s1'),
-              assistantText: '{"reply":"ok"}',
-              patch: {},
-            }),
+          turn: () => Effect.succeed(resp()),
         }),
       }),
     );
@@ -260,13 +257,18 @@ describe('BuilderView', () => {
       testAppLayerWith({
         thread: chatStub({
           turn: () =>
-            Effect.succeed({
-              sessionId: SessionId.make('s1'),
-              assistantText:
-                '{"reply":"Making art.","patch":{"name":"Vorak"},"artAction":{"brief":"a phoenix companion","editCurrentArt":true}}',
-              patch: { name: 'Vorak' },
-              artAction: { brief: 'a phoenix companion', editCurrentArt: true },
-            }),
+            Effect.succeed(
+              resp({
+                reply: 'Making art.',
+                toolCalls: [
+                  { name: 'card_patch', args: { name: 'Vorak' } },
+                  {
+                    name: 'card_generate_art',
+                    args: { brief: 'a phoenix companion', editCurrentArt: true },
+                  },
+                ],
+              }),
+            ),
         }),
         image: Layer.succeed(ImageProvider, ImageProvider.of({ generate })),
       }),

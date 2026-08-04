@@ -18,16 +18,10 @@ import {
 } from 'effect';
 import { createLogger, type Logger, type Plugin } from 'vite';
 import {
-  ArtAction,
-  type ArtActionT,
-  CardData,
-  type CardDataT,
+  ChatEditRequest,
+  ChatSwitchRequest,
   ChatTurnRequest,
-  type ChatTurnRequestT,
-  type ChatTurnResponseT,
-  type DocActionT,
   ImageGenerateRequest,
-  PermissionReply,
   SessionAction,
   StorePutRequest,
 } from '../contracts/api.ts';
@@ -37,32 +31,9 @@ import {
   NetworkError,
   ReplicateError,
 } from '../contracts/errors.ts';
-import { type AspectRatioT, decodePatchLenient } from '../contracts/fields.ts';
-import {
-  type DataUrlT,
-  MessageId,
-  type MessageIdT,
-  PermissionId,
-  type PermissionIdT,
-  SessionId,
-  type SessionIdT,
-} from '../contracts/ids.ts';
-import {
-  decodeDocActions,
-  extractJson,
-  looksLikeContract,
-  materializeAssistantParts,
-} from '../contracts/materialize.ts';
-import {
-  AgentEvent,
-  PromptResult,
-  SessionCreated,
-  SessionInfo,
-  type SessionInfoT,
-  type SessionMessagePartT,
-  SessionMessages,
-  type SessionMessagesT,
-} from '../contracts/opencode.ts';
+import type { AspectRatioT } from '../contracts/fields.ts';
+import { type DataUrlT, SessionId } from '../contracts/ids.ts';
+
 import { Prediction, type PredictionT } from '../contracts/replicate.ts';
 import type { ThemeContextT } from '../contracts/theme.ts';
 import {
@@ -70,72 +41,16 @@ import {
   ThreadEventJson,
   type ThreadEventT,
   type ThreadMessageT,
-  type ThreadPartT,
-  type ThreadSummaryT,
 } from '../contracts/thread.ts';
 import { bytesToDataUrl } from '../images/codec.ts';
 import { makeBridgeRuntime, readBody, respond, sendJson } from './BridgeRuntime.ts';
 import { FileStore, type StoreName } from './fileStore.ts';
+import { computeAnchors, mapSessionEntries, switchBranch } from './pi/entries.ts';
+import { makePiRuntime, type PiRuntime as PiRuntimeT, parseModelRef } from './pi/runtime.ts';
+import { runTurn, TurnBusyError, type TurnResult } from './pi/turn.ts';
 import { type LogScope, type LogSink, ThreadBus } from './threadBus.ts';
 
-// ---------- opencode ----------
-
-/** The slice of the opencode SDK client the bridge drives. */
-export interface OpencodeClient {
-  session: {
-    create(input: { body: { title: string } }): Promise<unknown>;
-    prompt(input: unknown): Promise<unknown>;
-    messages(input: unknown): Promise<unknown>;
-    get(input: unknown): Promise<unknown>;
-    abort(input: unknown): Promise<unknown>;
-    revert(input: unknown): Promise<unknown>;
-    fork(input: unknown): Promise<unknown>;
-    children(input: unknown): Promise<unknown>;
-  };
-  /** Top-level on the SDK client: postSessionIdPermissionsPermissionId. */
-  permission(input: unknown): Promise<unknown>;
-  event: {
-    /** Returns a lazy { stream } async iterable — events flow only while drained. */
-    subscribe(options: { signal?: AbortSignal }): Promise<unknown>;
-  };
-}
-
-/** Unwrap the hey-api `{ data, error }` envelope (SDK calls) → the inner value. */
-function unwrapData(result: unknown): unknown {
-  if (typeof result === 'object' && result !== null && 'data' in result) {
-    return (result as { data: unknown }).data;
-  }
-  return result;
-}
-
-/** The structural surface the real SDK client exposes (permission lives under its generated name). */
-export interface OpencodeSdkSurface {
-  session: OpencodeClient['session'];
-  postSessionIdPermissionsPermissionId(input: unknown): Promise<unknown>;
-  event: OpencodeClient['event'];
-}
-
-/**
- * Adapt the raw SDK client to our OpencodeClient WITHOUT casts. The SDK's
- * permission reply is `postSessionIdPermissionsPermissionId` — the previous
- * `as unknown as OpencodeClient` claimed a `permission` method that did not
- * exist at runtime (a TypeError on every permission reply). The adapter is the
- * one place that knows the generated name.
- */
-export function opencodeClientOf(sdk: OpencodeSdkSurface): OpencodeClient {
-  return {
-    session: sdk.session,
-    event: sdk.event,
-    permission: (input) => sdk.postSessionIdPermissionsPermissionId(input),
-  };
-}
-
-/**
- * Env-at-request-time variable read. Empty string counts as absent — parity
- * with today's `process.env.X ?` truthiness checks. Config.option never
- * reports a missing value, but its type still carries ConfigError; a genuinely
- * malformed source is a defect.
- */
+/** Env-at-request-time read; empty values treated as unset. */
 function envOption(name: string): Effect.Effect<Option.Option<string>> {
   return Effect.orDie(Config.option(Config.string(name))).pipe(
     Effect.map(Option.filter((value) => value.length > 0)),
@@ -152,948 +67,60 @@ function envRedacted(name: string): Effect.Effect<Option.Option<Redacted.Redacte
   );
 }
 
-const decodeSessionOption = Schema.decodeUnknownOption(SessionCreated);
-const decodeSessionMessages = Schema.decodeUnknownOption(SessionMessages);
-const decodeSessionInfo = Schema.decodeUnknownOption(SessionInfo);
-const decodeSessionInfoList = Schema.decodeUnknownOption(Schema.Array(SessionInfo));
-
-// ---------- session thread watcher ----------
-
-const decodeAgentEvent = Schema.decodeUnknownOption(AgentEvent);
-
-interface TextTrack {
-  readonly tag: 'Text' | 'Reasoning';
-  readonly text: string;
-  readonly lastEmitAt: number;
-  readonly dirty: boolean;
-}
+// ---------- pi runtime (in-process agent; migration spec) ----------
 
 /**
- * Reducer state for the thread watcher: message roles (assistant parts stream,
- * the user's prompt echo is skipped), turn start/completion dedupe, stable
- * part indexes per message, tool-state transition dedupe, and the cumulative
- * text throttle with its unflushed tail.
+ * One-shot art-prompt composition via pi's completeSimple — no session, no
+ * watcher (spec §4.4). Falls back to the raw lookAndFeel when the model
+ * returns nothing usable.
  */
-export interface WatchState {
-  readonly roles: ReadonlyMap<string, 'user' | 'assistant'>;
-  readonly started: ReadonlySet<string>;
-  readonly completed: ReadonlySet<string>;
-  readonly partIndexByKey: ReadonlyMap<string, number>;
-  readonly partCountByMessage: ReadonlyMap<string, number>;
-  readonly toolStatusByCall: ReadonlyMap<string, string>;
-  readonly textByKey: ReadonlyMap<string, TextTrack>;
-}
-
-export const initialWatchState: WatchState = {
-  roles: new Map(),
-  started: new Set(),
-  completed: new Set(),
-  partIndexByKey: new Map(),
-  partCountByMessage: new Map(),
-  toolStatusByCall: new Map(),
-  textByKey: new Map(),
-};
-
-const TEXT_DELTA_INTERVAL_MS = 2000;
-
-const mapSet = <K, V>(map: ReadonlyMap<K, V>, key: K, value: V): ReadonlyMap<K, V> =>
-  new Map([...map, [key, value]]);
-const setAdd = <A>(set: ReadonlySet<A>, value: A): ReadonlySet<A> => new Set([...set, value]);
-
-function sessionErrorMessage(error: unknown): string {
-  if (typeof error === 'object' && error !== null && 'message' in error) {
-    const m = (error as { message?: unknown }).message;
-    if (typeof m === 'string') return m;
-  }
-  return 'unknown';
-}
-
-/** Stable part index for `key` within `messageId`, assigning the next slot on first sight. */
-function assignIndex(
-  state: WatchState,
-  messageId: string,
-  key: string,
-): { index: number; state: WatchState } {
-  const fullKey = `${messageId}/${key}`;
-  const existing = state.partIndexByKey.get(fullKey);
-  if (existing !== undefined) return { index: existing, state };
-  const index = state.partCountByMessage.get(messageId) ?? 0;
-  return {
-    index,
-    state: {
-      ...state,
-      partIndexByKey: mapSet(state.partIndexByKey, fullKey, index),
-      partCountByMessage: mapSet(state.partCountByMessage, messageId, index + 1),
-    },
-  };
-}
-
-const partDelta = (
-  sessionId: SessionIdT,
-  messageId: MessageIdT,
-  partIndex: number,
-  part: ThreadPartT,
-): ThreadEventT => ({ _tag: 'PartDelta', sessionId, messageId, partIndex, part });
-
-/** Cumulative text/reasoning delta, throttled to one emission per 2s per part. */
-function textDelta(
-  state: WatchState,
-  sessionId: SessionIdT,
-  messageId: MessageIdT,
-  key: string,
-  tag: 'Text' | 'Reasoning',
-  text: string,
-  now: number,
-): { events: readonly ThreadEventT[]; state: WatchState } {
-  const assigned = assignIndex(state, messageId, key);
-  const fullKey = `${messageId}/${key}`;
-  const track = assigned.state.textByKey.get(fullKey);
-  if (track !== undefined && now - track.lastEmitAt < TEXT_DELTA_INTERVAL_MS) {
-    return {
-      events: [],
-      state: {
-        ...assigned.state,
-        textByKey: mapSet(assigned.state.textByKey, fullKey, {
-          tag,
-          text,
-          lastEmitAt: track.lastEmitAt,
-          dirty: true,
-        }),
-      },
-    };
-  }
-  const part: ThreadPartT = tag === 'Text' ? { _tag: 'Text', text } : { _tag: 'Reasoning', text };
-  return {
-    events: [partDelta(sessionId, messageId, assigned.index, part)],
-    state: {
-      ...assigned.state,
-      textByKey: mapSet(assigned.state.textByKey, fullKey, {
-        tag,
-        text,
-        lastEmitAt: now,
-        dirty: false,
-      }),
-    },
-  };
-}
-
-/** Unthrottled final deltas for every dirty text part of `messageId` (spec: final flush). */
-function flushDirtyText(
-  state: WatchState,
-  sessionId: SessionIdT,
-  messageId: MessageIdT,
-): { events: readonly ThreadEventT[]; state: WatchState } {
-  const events: ThreadEventT[] = [];
-  let textByKey = state.textByKey;
-  const prefix = `${messageId}/`;
-  for (const [fullKey, track] of state.textByKey) {
-    if (!fullKey.startsWith(prefix) || !track.dirty) continue;
-    const index = state.partIndexByKey.get(fullKey);
-    if (index === undefined) continue;
-    const part: ThreadPartT =
-      track.tag === 'Text'
-        ? { _tag: 'Text', text: track.text }
-        : { _tag: 'Reasoning', text: track.text };
-    events.push(partDelta(sessionId, messageId, index, part));
-    textByKey = mapSet(textByKey, fullKey, { ...track, dirty: false });
-  }
-  return { events, state: { ...state, textByKey } };
-}
-
-const TOOL_STATUSES = ['pending', 'running', 'completed', 'error'] as const;
-type ToolStatus = (typeof TOOL_STATUSES)[number];
-const toolStatusOf = (raw: string | undefined): ToolStatus =>
-  TOOL_STATUSES.find((s) => s === raw) ?? 'pending';
-
-/**
- * Pure per-event reducer: raw opencode events → typed ThreadEvents for the
- * watched session. TurnStarted/TurnCompleted derive from `message.updated`
- * (real message ids end to end); assistant parts become PartDeltas at stable
- * indexes; the user's prompt echo is skipped; unknown event/part kinds map to
- * NO event — dropped, never a decode crash (spec: tolerant boundaries).
- */
-export function mapAgentEvent(
-  raw: unknown,
-  sessionId: SessionIdT,
-  state: WatchState,
-  now: number,
-): { events: readonly ThreadEventT[]; state: WatchState } {
-  const decoded = decodeAgentEvent(raw);
-  if (Option.isNone(decoded)) return { events: [], state };
-  const event = decoded.value;
-
-  if (event.type === 'session.error') {
-    return {
-      events: [{ _tag: 'SessionError', message: sessionErrorMessage(event.properties?.error) }],
-      state,
-    };
-  }
-
-  if (event.type === 'permission.updated') {
-    const props = event.properties;
-    if (props?.sessionID !== sessionId) return { events: [], state };
-    return {
-      events: [
-        {
-          _tag: 'PermissionRequested',
-          sessionId,
-          permissionId: PermissionId.make(props.id ?? ''),
-          title: props.title ?? 'permission requested',
-        },
-      ],
-      state,
-    };
-  }
-
-  if (event.type === 'message.updated') {
-    const info = event.properties?.info;
-    if (!info || info.sessionID !== sessionId) return { events: [], state };
-    // Brand the external opencode id at its decode boundary.
-    const id = MessageId.make(info.id ?? '');
-    const role =
-      info.role === 'assistant' ? 'assistant' : info.role === 'user' ? 'user' : undefined;
-    if (id.length === 0 || role === undefined) return { events: [], state };
-    let next: WatchState =
-      state.roles.get(id) === role ? state : { ...state, roles: mapSet(state.roles, id, role) };
-    if (role !== 'assistant') return { events: [], state: next };
-    const events: ThreadEventT[] = [];
-    if (!next.started.has(id)) {
-      events.push({ _tag: 'TurnStarted', sessionId, messageId: id });
-      next = { ...next, started: setAdd(next.started, id) };
-    }
-    if (info.time?.completed !== undefined && !next.completed.has(id)) {
-      const flushed = flushDirtyText(next, sessionId, id);
-      events.push(...flushed.events);
-      events.push({ _tag: 'TurnCompleted', sessionId, messageId: id, status: 'complete' });
-      next = { ...flushed.state, completed: setAdd(flushed.state.completed, id) };
-    }
-    return { events, state: next };
-  }
-
-  if (event.type !== 'message.part.updated') return { events: [], state };
-  const part = event.properties?.part;
-  if (!part || part.sessionID !== sessionId) return { events: [], state };
-  const messageId = MessageId.make(part.messageID ?? '');
-  if (messageId.length === 0 || state.roles.get(messageId) !== 'assistant') {
-    return { events: [], state };
-  }
-
-  switch (part.type) {
-    case 'step-start': {
-      const assigned = assignIndex(state, messageId, part.id ?? 'step');
-      return {
-        events: [partDelta(sessionId, messageId, assigned.index, { _tag: 'Step' })],
-        state: assigned.state,
-      };
-    }
-    case 'tool': {
-      const callId = part.callID ?? part.id ?? 'tool';
-      const status = toolStatusOf(part.state?.status);
-      if (state.toolStatusByCall.get(callId) === status) return { events: [], state };
-      const assigned = assignIndex(state, messageId, part.id ?? callId);
-      const st = part.state;
-      const secs =
-        status === 'completed'
-          ? ((st?.time?.end ?? now) - (st?.time?.start ?? now)) / 1000
-          : undefined;
-      const result = status === 'error' ? (st?.error ?? 'unknown') : st?.output;
-      const toolPart: ThreadPartT = {
-        _tag: 'ToolCall',
-        callId,
-        name: part.tool ?? 'tool',
-        ...(st?.title !== undefined ? { title: st.title } : {}),
-        status,
-        ...(st?.input !== undefined ? { argsText: JSON.stringify(st.input) } : {}),
-        ...(result !== undefined ? { result } : {}),
-        ...(status === 'error' ? { isError: true } : {}),
-        ...(secs !== undefined ? { secs } : {}),
-      };
-      return {
-        events: [partDelta(sessionId, messageId, assigned.index, toolPart)],
-        state: {
-          ...assigned.state,
-          toolStatusByCall: mapSet(assigned.state.toolStatusByCall, callId, status),
-        },
-      };
-    }
-    case 'reasoning':
-      return textDelta(
-        state,
-        sessionId,
-        messageId,
-        part.id ?? 'reasoning',
-        'Reasoning',
-        part.text ?? '',
-        now,
-      );
-    case 'text':
-      return textDelta(
-        state,
-        sessionId,
-        messageId,
-        part.id ?? 'text',
-        'Text',
-        part.text ?? '',
-        now,
-      );
-    default:
-      return { events: [], state };
-  }
-}
-
-/**
- * One file riding a prompt as an SDK FilePartInput. `filename` present marks a
- * USER attachment (visible in history); absent marks the auto-attached card-art
- * context (invisible — history mapping skips unnamed file parts).
- */
-export interface PromptFile {
-  readonly mime: string;
-  readonly url: string;
-  readonly filename?: string;
-}
-
-export class AgentClient extends Context.Tag('cartis/AgentClient')<
-  AgentClient,
-  {
-    createSession(title: string): Effect.Effect<SessionIdT, AgentError>;
-    /** `files` attach as SDK FilePartInputs, in order, before the text part. */
-    prompt(
-      sessionId: SessionIdT,
-      text: string,
-      files?: readonly PromptFile[],
-    ): Effect.Effect<unknown, AgentError>;
-    /**
-     * Run `effect` with the session's activity watcher forked in scope (live:
-     * SDK event stream → ThreadBus events; stubs: identity).
-     */
-    withActivity<A, E>(sessionId: SessionIdT, effect: Effect.Effect<A, E>): Effect.Effect<A, E>;
-    /** Decoded message list for a session (history rehydration + regenerate). */
-    messages(sessionId: SessionIdT): Effect.Effect<SessionMessagesT, AgentError>;
-    /** Session envelope — carries the revert marker + parent/title. */
-    info(sessionId: SessionIdT): Effect.Effect<SessionInfoT, AgentError>;
-    /** Interrupt the running turn (cancel). */
-    abort(sessionId: SessionIdT): Effect.Effect<void, AgentError>;
-    /** Revert the session to (and undoing) `messageId` — edit/regenerate basis. */
-    revert(sessionId: SessionIdT, messageId: MessageIdT): Effect.Effect<void, AgentError>;
-    /** Branch the session; resolves the new session's id. */
-    fork(sessionId: SessionIdT): Effect.Effect<SessionIdT, AgentError>;
-    /** Child (branch) sessions of `sessionId`. */
-    children(sessionId: SessionIdT): Effect.Effect<readonly SessionInfoT[], AgentError>;
-    /** Reply to a pending permission request (Task 5 prompts). */
-    replyPermission(
-      sessionId: SessionIdT,
-      permissionId: PermissionIdT,
-      granted: boolean,
-    ): Effect.Effect<void, AgentError>;
-  }
->() {}
-
-/** Live wiring the watcher needs: the bus to emit on + a runtime for the SSE callback. */
-export interface AgentActivityWiring {
-  readonly bus: Context.Tag.Service<ThreadBus>;
-  readonly runtime: Runtime.Runtime<never>;
-}
-
-/** Structurally narrow the SDK's subscribe result to its async event stream. */
-function eventStreamOf(result: unknown): AsyncIterable<unknown> | undefined {
-  if (typeof result !== 'object' || result === null || !('stream' in result)) return undefined;
-  const stream = (result as { stream: unknown }).stream;
-  if (typeof stream !== 'object' || stream === null || !(Symbol.asyncIterator in stream)) {
-    return undefined;
-  }
-  return stream as AsyncIterable<unknown>;
-}
-
-/** Build an AgentClient over a raw opencode SDK client. */
-export function agentClientFromSdk(
-  client: OpencodeClient,
-  activity?: AgentActivityWiring,
-): Context.Tag.Service<AgentClient> {
-  const withActivity = <A, E>(
-    sessionId: SessionIdT,
-    effect: Effect.Effect<A, E>,
-  ): Effect.Effect<A, E> => {
-    if (!activity) return effect;
-    return Effect.scoped(
-      Effect.gen(function* () {
-        yield* Effect.acquireRelease(
-          Effect.sync(() => {
-            const controller = new AbortController();
-            const state = { current: initialWatchState };
-            // Best-effort: a failed subscription must never break the prompt.
-            // The SDK's SSE result is a LAZY async generator — events only
-            // flow while the stream is drained, so we pump it here.
-            void (async () => {
-              const result = await client.event.subscribe({ signal: controller.signal });
-              const stream = eventStreamOf(result);
-              if (!stream) return;
-              for await (const data of stream) {
-                const out = mapAgentEvent(data, sessionId, state.current, Date.now());
-                state.current = out.state;
-                for (const event of out.events) {
-                  Runtime.runSync(activity.runtime)(activity.bus.emit(event));
-                }
-              }
-            })().catch(() => undefined);
-            return controller;
-          }),
-          (controller) => Effect.sync(() => controller.abort()),
-        );
-        return yield* effect;
-      }),
-    );
-  };
-  return {
-    withActivity,
-    createSession: (title) =>
-      Effect.gen(function* () {
-        const created = yield* Effect.promise(() => client.session.create({ body: { title } }));
-        const decoded = decodeSessionOption(created);
-        const id = Option.isSome(decoded)
-          ? (decoded.value.data?.id ?? decoded.value.id)
-          : undefined;
-        if (typeof id !== 'string' || id.length === 0) {
-          return yield* Effect.fail(new AgentError({ reason: 'no-session-id' }));
-        }
-        return SessionId.make(id); // brand at the opencode decode boundary
-      }),
-    prompt: (sessionId, text, files) =>
-      Effect.promise(() =>
-        client.session.prompt({
-          path: { id: sessionId },
-          body: {
-            parts: [
-              ...(files ?? []).map((f) => ({
-                type: 'file' as const,
-                mime: f.mime,
-                url: f.url,
-                ...(f.filename !== undefined ? { filename: f.filename } : {}),
-              })),
-              { type: 'text', text },
-            ],
-          },
-        }),
-      ),
-    messages: (sessionId) =>
-      Effect.promise(() => client.session.messages({ path: { id: sessionId } })).pipe(
-        Effect.map(unwrapData),
-        Effect.flatMap((raw) =>
-          Option.match(decodeSessionMessages(raw), {
-            onNone: () => Effect.succeed([] as SessionMessagesT),
-            onSome: (msgs) => Effect.succeed(msgs),
-          }),
-        ),
-      ),
-    info: (sessionId) =>
-      Effect.promise(() => client.session.get({ path: { id: sessionId } })).pipe(
-        Effect.map(unwrapData),
-        Effect.flatMap((raw) =>
-          Option.match(decodeSessionInfo(raw), {
-            onNone: () => Effect.fail(new AgentError({ reason: 'no-session-id' })),
-            onSome: (info) => Effect.succeed(info),
-          }),
-        ),
-      ),
-    abort: (sessionId) =>
-      Effect.promise(() => client.session.abort({ path: { id: sessionId } })).pipe(Effect.asVoid),
-    revert: (sessionId, messageId) =>
-      Effect.promise(() =>
-        client.session.revert({ path: { id: sessionId }, body: { messageID: messageId } }),
-      ).pipe(Effect.asVoid),
-    fork: (sessionId) =>
-      Effect.promise(() => client.session.fork({ path: { id: sessionId } })).pipe(
-        Effect.map(unwrapData),
-        Effect.flatMap((raw) => {
-          const decoded = decodeSessionInfo(raw);
-          const id = Option.isSome(decoded) ? decoded.value.id : undefined;
-          return typeof id === 'string' && id.length > 0
-            ? Effect.succeed(SessionId.make(id))
-            : Effect.fail(new AgentError({ reason: 'no-session-id' }));
-        }),
-      ),
-    children: (sessionId) =>
-      Effect.promise(() => client.session.children({ path: { id: sessionId } })).pipe(
-        Effect.map(unwrapData),
-        Effect.map((raw) =>
-          Option.getOrElse(decodeSessionInfoList(raw), () => [] as SessionInfoT[]),
-        ),
-      ),
-    replyPermission: (sessionId, permissionId, granted) =>
-      Effect.promise(() =>
-        client.permission({
-          path: { id: sessionId, permissionID: permissionId },
-          body: { response: granted ? 'once' : 'reject' },
-        }),
-      ).pipe(Effect.asVoid),
-  };
-}
-
-/**
- * Live layer: lazy dynamic import of the opencode SDK on first use, cached so
- * `bun run dev` startup stays fast when the agent is never invoked.
- * `OPENCODE_MODEL` via Config.option.
- */
-export const agentClientLive: Layer.Layer<AgentClient, never, ThreadBus> = Layer.scoped(
-  AgentClient,
-  Effect.gen(function* () {
-    const bus = yield* ThreadBus;
-    const runtime = yield* Effect.runtime<never>();
-    const wiring: AgentActivityWiring = { bus, runtime };
-    const model = yield* envOption('OPENCODE_MODEL');
-    const scope = yield* Effect.scope;
-    const acquire = Effect.promise(async () => {
-      const sdk = await import('@opencode-ai/sdk');
-      // port 0 = OS-assigned: a stale/leaked opencode can never block the spawn
-      // (the old fixed default 4096 caused "Failed to start server. Is port
-      // 4096 in use?" after a vite restart leaked the previous child).
-      const { client, server } = await sdk.createOpencode({
-        port: 0,
-        ...(Option.isSome(model) ? { config: { model: model.value } } : {}),
-      });
-      return { client: opencodeClientOf(client), server };
-    }).pipe(
-      // The spawned child dies with the runtime (vite restart/close) — no leaks.
-      Effect.tap(({ server }) =>
-        Scope.addFinalizer(
-          scope,
-          Effect.sync(() => server.close()),
-        ),
-      ),
-      Effect.map(({ client }) => client),
-    );
-    const cached = yield* Effect.cached(acquire);
-    // Delegate to a per-call client resolved from the cached SDK handle.
-    const svc = (client: OpencodeClient) => agentClientFromSdk(client, wiring);
-    return AgentClient.of({
-      createSession: (title) =>
-        cached.pipe(Effect.flatMap((client) => svc(client).createSession(title))),
-      prompt: (sessionId, text, files) =>
-        cached.pipe(Effect.flatMap((client) => svc(client).prompt(sessionId, text, files))),
-      withActivity: (sessionId, effect) =>
-        cached.pipe(Effect.flatMap((client) => svc(client).withActivity(sessionId, effect))),
-      messages: (sessionId) =>
-        cached.pipe(Effect.flatMap((client) => svc(client).messages(sessionId))),
-      info: (sessionId) => cached.pipe(Effect.flatMap((client) => svc(client).info(sessionId))),
-      abort: (sessionId) => cached.pipe(Effect.flatMap((client) => svc(client).abort(sessionId))),
-      revert: (sessionId, messageId) =>
-        cached.pipe(Effect.flatMap((client) => svc(client).revert(sessionId, messageId))),
-      fork: (sessionId) => cached.pipe(Effect.flatMap((client) => svc(client).fork(sessionId))),
-      children: (sessionId) =>
-        cached.pipe(Effect.flatMap((client) => svc(client).children(sessionId))),
-      replyPermission: (sessionId, permissionId, granted) =>
-        cached.pipe(
-          Effect.flatMap((client) => svc(client).replyPermission(sessionId, permissionId, granted)),
-        ),
-    });
-  }),
-);
-
-// ---------- art-prompt composition ----------
-
-const decodePromptText = Schema.decodeUnknownOption(PromptResult);
-
-/** Concatenate the text parts of a prompt result (no fence extraction — plain prose). */
-function promptText(result: unknown): string {
-  const decoded = decodePromptText(result);
-  if (Option.isNone(decoded)) return '';
-  const value = decoded.value;
-  const data = value.data ?? value;
-  const parts = data.parts ?? value.parts ?? [];
-  let text = '';
-  for (const part of parts) {
-    if (part.type === 'text' && typeof part.text === 'string') text += `\n${part.text}`;
-  }
-  return text.trim();
-}
-
-const ART_COMPOSER_GUIDE =
-  'You are writing a single image-generation prompt for a trading-card art slot. ' +
-  'Return ONLY the prompt text — no preamble, no markdown, one paragraph.';
-
-/**
- * LLM art-prompt composition (spec §AI pipelines): one-shot session fed the
- * theme context + the layout's argument values (+ an optional brief from a
- * fill turn). Falls back to the raw lookAndFeel if the model returns nothing.
- */
-export function composeArtPrompt(
+async function composeArtPromptPi(
+  rt: PiRuntimeT,
   themeContext: ThemeContextT,
   argumentValues: Record<string, string>,
   brief?: string,
-): Effect.Effect<string, AgentError, AgentClient | ThreadBus> {
-  return Effect.gen(function* () {
-    const agent = yield* AgentClient;
-    const bus = yield* ThreadBus;
-    yield* bus.emit({
-      _tag: 'Art',
-      phase: 'composing',
-      detail: 'composing art prompt from theme + arguments',
+): Promise<string> {
+  const { modelRuntime } = await rt.deps();
+  const ref = parseModelRef(process.env.CARTIS_MODEL);
+  const model = modelRuntime.getModel(ref.provider, ref.modelId);
+  if (model === undefined) return themeContext.lookAndFeel;
+  const argLines = Object.entries(argumentValues)
+    .map(([k, v]) => `- ${k}: ${v}`)
+    .join('\n');
+  const instruction = [
+    'You are writing a single image-generation prompt for a trading-card art slot. ' +
+      'Return ONLY the prompt text — no preamble, no markdown, one paragraph.',
+    `Look and feel: ${themeContext.lookAndFeel}`,
+    themeContext.palette.length > 0 ? `Palette: ${themeContext.palette}` : '',
+    argLines.length > 0 ? `Card arguments:\n${argLines}` : '',
+    brief !== undefined && brief.length > 0 ? `Author brief: ${brief}` : '',
+  ]
+    .filter((l) => l.length > 0)
+    .join('\n\n');
+  try {
+    const message = await modelRuntime.completeSimple(model as never, {
+      messages: [{ role: 'user', content: instruction, timestamp: Date.now() } as never],
     });
-    const id = yield* agent.createSession('cartis art compose');
-    const argLines = Object.entries(argumentValues)
-      .map(([k, v]) => `- ${k}: ${v}`)
-      .join('\n');
-    const instruction = [
-      ART_COMPOSER_GUIDE,
-      `Look and feel: ${themeContext.lookAndFeel}`,
-      themeContext.palette.length > 0 ? `Palette: ${themeContext.palette}` : '',
-      argLines.length > 0 ? `Card arguments:\n${argLines}` : '',
-      brief !== undefined && brief.length > 0 ? `Requested emphasis: ${brief}` : '',
-    ]
-      .filter((s) => s.length > 0)
-      .join('\n\n');
-    const result = yield* agent.withActivity(id, agent.prompt(id, instruction));
-    const composed = promptText(result);
-    const final = composed.length > 0 ? composed : themeContext.lookAndFeel;
-    yield* bus.emit({
-      _tag: 'Art',
-      phase: 'composing',
-      detail: `art prompt composed (${String(final.length)} chars)`,
-    });
-    return final;
-  });
-}
-
-// ---------- conversational chat turn ----------
-
-const CHAT_GUIDE =
-  'You are editing a trading-card record through a conversation with its author. ' +
-  'Reply with ONLY a JSON object ' +
-  '{ "reply": string, "patch"?: { ...only changed fields... }, "artAction"?: { "brief": string, "editCurrentArt": boolean } }. ' +
-  '"reply" is a short natural-language message to the author (what you changed, or a clarifying question). ' +
-  'Include "patch" only when you are changing fields, containing only those fields. ' +
-  'Include "artAction" ONLY when the request calls for generating or editing the card art. ' +
-  'Include "actions" ONLY when the author asks for a document operation: ' +
-  '"actions": [ {"kind": "save"} | {"kind": "saveAsCopy"} | {"kind": "export", "target": "png"|"print"|"sheet"} ' +
-  '| {"kind": "setLayout", "layoutId": string} | {"kind": "setTheme", "themeId": string} | {"kind": "setHolo", "value": boolean} ] ' +
-  '(png = plain 300 DPI, print = 600 DPI with bleed and crop marks, sheet = a 3x3 A4 cut sheet; ' +
-  'setLayout/setTheme accept ONLY the ids listed under Layouts/Themes below; settings apply before any artAction runs). ' +
-  'An image of the CURRENT rendered card is attached to every turn - use it to judge the visual state before deciding on changes. ' +
-  'The JSON must be STRICT: escape any double quotes inside string values as \\" ' +
-  '(e.g. "flavor": "\\"I meant to do that.\\"") and never leave trailing commas.';
-
-const decodeArtActionOption = Schema.decodeUnknownOption(ArtAction);
-const decodeCardData = Schema.decodeUnknownOption(CardData);
-
-/**
- * Marker separating the rich turn scaffold (guide + theme + fields + snapshot)
- * from the user's actual request. History mapping strips everything up to and
- * including it, so a rehydrated user bubble shows the typed request, not the
- * whole system prompt (opencode stores the full text we sent).
- */
-const USER_REQUEST_MARKER = 'Author request: ';
-
-/**
- * The rich prompt for one chat turn (guide + theme + fields + snapshot + ask).
- * An attachment-only turn (empty prompt) stores a stand-in request so the
- * rehydrated user bubble is never empty (spec chat-panel-maturity §1).
- */
-function chatPromptText(req: ChatTurnRequestT): string {
-  const request = req.userPrompt.trim().length > 0 ? req.userPrompt : '(see attached files)';
-  const doc = req.docContext;
-  return [
-    CHAT_GUIDE,
-    `Look and feel: ${req.themeContext.lookAndFeel}`,
-    ...(doc !== undefined
-      ? [
-          `Layouts: ${doc.layoutOptions.join(', ')} (current: ${doc.layoutId})`,
-          `Themes: ${doc.themeOptions.join(', ')} (current: ${doc.themeId})`,
-          `Holo: ${doc.holo ? 'on' : 'off'}`,
-        ]
-      : []),
-    `Fields: ${req.fields.map((f) => `${f.key} (${f.kind})`).join(', ')}`,
-    `Current values (respect these; the author may have hand-edited): ${JSON.stringify(req.currentData)}`,
-    `${USER_REQUEST_MARKER}${request}`,
-  ].join('\n\n');
-}
-
-/** Recover the user's typed request from a stored prompt (drops the scaffold). */
-function userRequestOf(text: string): string {
-  const at = text.lastIndexOf(USER_REQUEST_MARKER);
-  return at >= 0 ? text.slice(at + USER_REQUEST_MARKER.length).trim() : text;
-}
-
-/** Run one prompt under the activity watcher with a 5s console heartbeat. */
-function promptWithHeartbeat(
-  agent: Context.Tag.Service<AgentClient>,
-  bus: Context.Tag.Service<ThreadBus>,
-  sessionId: SessionIdT,
-  text: string,
-  files?: readonly PromptFile[],
-): Effect.Effect<unknown, AgentError> {
-  return Effect.gen(function* () {
-    const startedAt = yield* Clock.currentTimeMillis;
-    const elapsed = Clock.currentTimeMillis.pipe(
-      Effect.map((now) => Math.round((now - startedAt) / 1000)),
-    );
-    return yield* Effect.scoped(
-      Effect.gen(function* () {
-        yield* Effect.forkScoped(
-          elapsed.pipe(
-            Effect.flatMap((secs) => bus.log('agent', `still working… (${String(secs)}s)`)),
-            Effect.delay('5 seconds'),
-            Effect.forever,
-          ),
-        );
-        return yield* agent.withActivity(sessionId, agent.prompt(sessionId, text, files));
-      }),
-    );
-  });
-}
-
-/**
- * Parse a chat reply into { assistantText, patch, artAction }. Conversational:
- * a reply with NO JSON is valid (a question/acknowledgement) → empty patch.
- * A JSON reply whose patch mistypes a field is a genuine error (AgentError).
- */
-function parseChatReply(
-  raw: string,
-  decodePatch: (u: unknown) => { patch: CardDataT; dropped: readonly string[] },
-): Effect.Effect<
-  {
-    assistantText: string;
-    patch: CardDataT;
-    artAction?: ArtActionT;
-    actions?: readonly DocActionT[];
-    droppedFields?: readonly string[];
-  },
-  AgentError
-> {
-  return Effect.gen(function* () {
-    // Shared lenient extraction (repairs unescaped inner quotes + trailing
-    // commas — the live-caught failure classes) so a typographic slip in
-    // flavor text no longer drops the whole patch.
-    const json = extractJson(raw);
-    if (Option.isNone(json)) {
-      // The model TRIED the JSON transport and mangled it beyond repair —
-      // failing the turn honestly beats showing the author a raw blob.
-      if (looksLikeContract(raw)) {
-        return yield* Effect.fail(new AgentError({ reason: 'bad-reply' }));
-      }
-      return { assistantText: raw, patch: {} };
+    if (message.stopReason === 'error' || message.stopReason === 'aborted') {
+      return themeContext.lookAndFeel;
     }
-    const body = json.value as { patch?: unknown; artAction?: unknown; actions?: unknown };
-    // PER-FIELD lenient patch decode (live-caught: the model clears fields
-    // with null when told "no might/ward" — one bad value must cost only that
-    // field, never the whole turn).
-    const { patch, dropped } = decodePatch(body.patch ?? {});
-    const artAction = Option.getOrUndefined(decodeArtActionOption(body.artAction));
-    // Document actions decode per-entry leniently too.
-    const actions = decodeDocActions(Array.isArray(body.actions) ? body.actions : undefined);
-    return {
-      assistantText: raw,
-      patch,
-      artAction,
-      ...(actions.length > 0 ? { actions } : {}),
-      ...(dropped.length > 0 ? { droppedFields: dropped } : {}),
-    };
-  });
-}
-
-/**
- * One conversational chat turn (card chat panel, spec 2026-08-03): reuse the
- * card's session (create on the first turn), snapshot currentData so hand edits
- * win, attach the current art for vision when present. TurnStarted/PartDelta/
- * TurnCompleted stream live from the watcher; this returns the structured
- * result the client applies + materializes for display.
- */
-export function runChatTurn(
-  req: ChatTurnRequestT,
-  readArt: (
-    fileName: string,
-  ) => Effect.Effect<Option.Option<{ mime: string; dataUrl: string }>, FileStoreError>,
-): Effect.Effect<ChatTurnResponseT, AgentError | FileStoreError, AgentClient | ThreadBus> {
-  return Effect.gen(function* () {
-    const agent = yield* AgentClient;
-    const bus = yield* ThreadBus;
-    const sessionId = req.sessionId ?? (yield* agent.createSession('cartis card chat'));
-    const image =
-      req.currentArtFileName !== undefined
-        ? Option.getOrUndefined(yield* readArt(req.currentArtFileName))
-        : undefined;
-    // User attachments first (filename'd → visible in history), then the
-    // unnamed card-art context (invisible), then the text prompt.
-    const files: PromptFile[] = [
-      ...(req.attachments ?? []).map((a) => ({ mime: a.mime, url: a.dataUrl, filename: a.name })),
-      // The rendered-preview snapshot and the current art ride UNNAMED —
-      // vision context only, invisible in history (no filename).
-      ...(req.previewDataUrl !== undefined
-        ? [{ mime: 'image/jpeg', url: req.previewDataUrl }]
-        : []),
-      ...(image !== undefined ? [{ mime: image.mime, url: image.dataUrl }] : []),
-    ];
-    yield* bus.log('agent', `chat: “${req.userPrompt.slice(0, 60)}”`);
-    const result = yield* promptWithHeartbeat(
-      agent,
-      bus,
-      sessionId,
-      chatPromptText(req),
-      files.length > 0 ? files : undefined,
-    );
-    const parsed = yield* parseChatReply(promptText(result), (u) =>
-      decodePatchLenient(req.fields, u),
-    );
-    if (parsed.droppedFields !== undefined) {
-      yield* bus.log('agent', `patch fields ignored (invalid): ${parsed.droppedFields.join(', ')}`);
-    }
-    yield* bus.log('agent', 'chat turn ready');
-    return { sessionId, ...parsed };
-  });
-}
-
-/**
- * Regenerate the last assistant turn (Task 5): revert it, then re-send the
- * stored last user text (the full rich prompt) so the reproduction is faithful.
- * Without the field spec, the new patch is decoded leniently against CardData.
- */
-export function runRegenerate(
-  sessionId: SessionIdT,
-): Effect.Effect<ChatTurnResponseT, AgentError, AgentClient | ThreadBus> {
-  return Effect.gen(function* () {
-    const agent = yield* AgentClient;
-    const bus = yield* ThreadBus;
-    const messages = yield* agent.messages(sessionId);
-    const lastUser = [...messages].reverse().find((m) => m.info?.role === 'user');
-    const lastAssistant = [...messages].reverse().find((m) => m.info?.role === 'assistant');
-    const userText = lastUser ? textOfParts(lastUser.parts ?? []) : '';
-    if (userText.length === 0) return yield* Effect.fail(new AgentError({ reason: 'no-fill' }));
-    if (lastAssistant?.info?.id !== undefined) {
-      yield* agent.revert(sessionId, MessageId.make(lastAssistant.info.id));
-    }
-    yield* bus.log('agent', 'regenerate: replaying last turn');
-    const result = yield* promptWithHeartbeat(agent, bus, sessionId, userText);
-    // Regenerate has no field spec — decode leniently against plain CardData.
-    const parsed = yield* parseChatReply(promptText(result), (u) => ({
-      patch: Option.getOrElse(decodeCardData(u), () => ({}) as CardDataT),
-      dropped: [],
-    }));
-    return { sessionId, ...parsed };
-  });
-}
-
-/** Map a session envelope to a thread summary (branch picker). */
-export function sessionSummary(info: SessionInfoT): ThreadSummaryT {
-  return {
-    sessionId: SessionId.make(info.id ?? ''),
-    ...(info.title !== undefined ? { title: info.title } : {}),
-    ...(info.parentID !== undefined ? { parentId: SessionId.make(info.parentID) } : {}),
-  };
-}
-
-/**
- * Parent-first sibling set for the ‹ n/m › picker (maturity spec §2): resolve
- * the session's root (its parent, or itself when unforked), then list the root
- * followed by all its forks. The root is marked by an ABSENT parentId. The
- * client cannot compute this — nothing else exposes parentID to it.
- */
-export function siblingSet(
-  sessionId: SessionIdT,
-): Effect.Effect<readonly ThreadSummaryT[], never, AgentClient> {
-  return Effect.gen(function* () {
-    const agent = yield* AgentClient;
-    const info = yield* agent.info(sessionId).pipe(
-      Effect.map(Option.some),
-      Effect.orElseSucceed(() => Option.none<SessionInfoT>()),
-    );
-    // Unknown session: opencode's error body decodes to an ID-LESS SessionInfo
-    // (all fields optional — live-caught) — treat it the same as a failure.
-    if (Option.isNone(info) || info.value.id === undefined || info.value.id.length === 0) {
-      return [];
-    }
-    const rootId =
-      info.value.parentID !== undefined ? SessionId.make(info.value.parentID) : sessionId;
-    const root =
-      rootId === sessionId
-        ? info.value
-        : yield* agent.info(rootId).pipe(Effect.orElseSucceed(() => info.value));
-    const children = yield* agent
-      .children(rootId)
-      .pipe(Effect.orElseSucceed(() => [] as readonly SessionInfoT[]));
-    return [sessionSummary(root), ...children.map(sessionSummary)];
-  });
-}
-
-// ---------- history mapping (opencode messages → thread messages) ----------
-
-/** Concatenate the non-synthetic text parts of a message. */
-function textOfParts(parts: readonly SessionMessagePartT[]): string {
-  let text = '';
-  for (const part of parts) {
-    if (part.type === 'text' && part.synthetic !== true && typeof part.text === 'string') {
-      text += part.text;
-    }
+    const text = (message.content ?? [])
+      .map((c) => ('text' in c && c.type === 'text' ? c.text : ''))
+      .join('')
+      .trim();
+    return text.length > 0 ? text : themeContext.lookAndFeel;
+  } catch {
+    return themeContext.lookAndFeel;
   }
-  return text.trim();
 }
 
-/**
- * Map an opencode message list to thread messages (history route). Real tool
- * parts map directly; the assistant's text runs through the SHARED
- * materializer so the v1 JSON contract renders as reply + card chips (never raw
- * JSON) — both transports handled indefinitely. Messages at/after
- * `revertMessageId` are excluded (no ghosts after edit/regenerate).
- */
-export function mapSessionMessages(
-  messages: SessionMessagesT,
-  revertMessageId?: string,
-): ThreadMessageT[] {
-  const cut =
-    revertMessageId !== undefined ? messages.findIndex((m) => m.info?.id === revertMessageId) : -1;
-  const live = cut >= 0 ? messages.slice(0, cut) : messages;
-  const out: ThreadMessageT[] = [];
-  for (const message of live) {
-    const role = message.info?.role === 'assistant' ? 'assistant' : 'user';
-    const id = MessageId.make(message.info?.id ?? '');
-    if (id.length === 0) continue;
-    const parts = message.parts ?? [];
-    if (role === 'user') {
-      // Named file parts are user attachments (thumbs/chips); unnamed file
-      // parts are the invisible auto-attached card-art context — skipped.
-      const fileParts: ThreadPartT[] = [];
-      for (const part of parts) {
-        if (part.type !== 'file' || part.filename === undefined) continue;
-        fileParts.push(
-          part.mime?.startsWith('image/') === true
-            ? { _tag: 'Image', url: part.url ?? '' }
-            : { _tag: 'File', name: part.filename, mime: part.mime ?? '' },
-        );
-      }
-      // Strip the turn scaffold so the bubble shows the typed request, not the prompt.
-      const text = userRequestOf(textOfParts(parts));
-      out.push({ id, role, status: 'complete', parts: [...fileParts, { _tag: 'Text', text }] });
-      continue;
-    }
-    // assistant: real tool/reasoning parts in order, then materialized card actions.
-    const threadParts: ThreadPartT[] = [];
-    for (const part of parts) {
-      if (part.type === 'tool') {
-        const st = part.state;
-        const status = toolStatusOf(st?.status);
-        const secs =
-          st?.time?.start !== undefined && st?.time?.end !== undefined
-            ? (st.time.end - st.time.start) / 1000
-            : undefined;
-        const result = status === 'error' ? (st?.error ?? 'unknown') : st?.output;
-        threadParts.push({
-          _tag: 'ToolCall',
-          callId: part.callID ?? part.id ?? 'tool',
-          name: part.tool ?? 'tool',
-          ...(st?.title !== undefined ? { title: st.title } : {}),
-          status,
-          ...(st?.input !== undefined ? { argsText: JSON.stringify(st.input) } : {}),
-          ...(result !== undefined ? { result } : {}),
-          ...(status === 'error' ? { isError: true } : {}),
-          ...(secs !== undefined ? { secs } : {}),
-        });
-      } else if (part.type === 'reasoning' && typeof part.text === 'string') {
-        threadParts.push({ _tag: 'Reasoning', text: part.text });
-      }
-    }
-    const answer = textOfParts(parts);
-    if (answer.length > 0) threadParts.push(...materializeAssistantParts(answer));
-    const status = message.info?.error !== undefined ? 'incomplete' : 'complete';
-    out.push({ id, role, status, parts: threadParts });
-  }
-  return out;
+/** Turn errors → the typed catalog (spec §3.2). */
+function agentErrorOf(cause: unknown): AgentError {
+  if (cause instanceof TurnBusyError) return new AgentError({ reason: 'busy' });
+  return new AgentError({
+    reason: 'turn-failed',
+    detail: cause instanceof Error ? cause.message : String(cause),
+  });
 }
 
 // ---------- replicate ----------
@@ -1347,8 +374,9 @@ function parseStorePath(url: string): { store: StoreName; rest: string } | undef
 
 const decodeStorePut = Schema.decodeUnknown(StorePutRequest);
 const decodeChatTurn = Schema.decodeUnknown(ChatTurnRequest);
+const decodeChatEdit = Schema.decodeUnknown(ChatEditRequest);
+const decodeChatSwitch = Schema.decodeUnknown(ChatSwitchRequest);
 const decodeSessionAction = Schema.decodeUnknown(SessionAction);
-const decodePermissionReply = Schema.decodeUnknown(PermissionReply);
 const decodeImageGenerate = Schema.decodeUnknown(ImageGenerateRequest);
 const encodeThreadEvent = Schema.encode(ThreadEventJson);
 
@@ -1381,6 +409,14 @@ export function cartisBridge(): Plugin {
       const viteSink: LogSink = (scope, message) =>
         loggers[scope].info(message, { timestamp: true });
       const runtime = makeBridgeRuntime(DATA_ROOT, viteSink);
+      // In-process pi agent runtime (migration spec §2) — lazy heavy import.
+      const piRt = makePiRuntime(DATA_ROOT);
+      if (process.env.ANTHROPIC_API_KEY === undefined && process.env.OPENAI_API_KEY === undefined) {
+        loggers.agent.info(
+          'no ANTHROPIC_API_KEY / OPENAI_API_KEY set — chat turns will fail until one is configured in .env',
+          { timestamp: true },
+        );
+      }
       server.httpServer?.once('close', () => {
         void runtime.dispose();
       });
@@ -1489,6 +525,28 @@ export function cartisBridge(): Plugin {
         });
       });
 
+      // ----- pi turn plumbing: ThreadBus io + FileStore art reader -----
+      const turnIo = {
+        emit: (event: ThreadEventT) => {
+          void runtime.runPromise(Effect.flatMap(ThreadBus, (b) => b.emit(event)));
+        },
+        log: (message: string) => {
+          void runtime.runPromise(Effect.flatMap(ThreadBus, (b) => b.log('agent', message)));
+        },
+        readArt: async (fileName: string) => {
+          const result = await runtime.runPromise(
+            Effect.flatMap(FileStore, (fs) => artReader(fs)(fileName)).pipe(
+              Effect.orElseSucceed(() => Option.none<{ mime: string; dataUrl: string }>()),
+            ),
+          );
+          return Option.getOrUndefined(result);
+        },
+      };
+      const runTurnEffect = (
+        work: () => Promise<TurnResult>,
+      ): Effect.Effect<TurnResult, AgentError> =>
+        Effect.tryPromise({ try: work, catch: (cause) => agentErrorOf(cause) });
+
       // ----- /api/chat/turn — one conversational card-editing turn -----
       server.middlewares.use('/api/chat/turn', (req, res) => {
         const sres = res as ServerResponse;
@@ -1500,15 +558,46 @@ export function cartisBridge(): Plugin {
           runtime,
           sres,
           Effect.gen(function* () {
-            const body = yield* readBody(req);
-            const parsed = yield* decodeChatTurn(body);
-            const fs = yield* FileStore;
-            return yield* runChatTurn(parsed, artReader(fs));
+            const parsed = yield* decodeChatTurn(yield* readBody(req));
+            return yield* runTurnEffect(() => runTurn(piRt, parsed, turnIo));
           }),
         );
       });
 
-      // ----- /api/chat/history?sessionId=… — rehydrate a card's conversation -----
+      // ----- /api/chat/edit — edit an earlier user message (tree sibling) -----
+      server.middlewares.use('/api/chat/edit', (req, res) => {
+        const sres = res as ServerResponse;
+        if (req.method !== 'POST') return sendJson(sres, 405, { error: 'POST only' });
+        respond(
+          runtime,
+          sres,
+          Effect.gen(function* () {
+            const parsed = yield* decodeChatEdit(yield* readBody(req));
+            const { targetMessageId, ...turnReq } = parsed;
+            return yield* runTurnEffect(() =>
+              runTurn(piRt, turnReq, turnIo, { kind: 'edit', targetUserEntryId: targetMessageId }),
+            );
+          }),
+        );
+      });
+
+      // ----- /api/chat/regenerate — replay the last user turn on a new branch -----
+      server.middlewares.use('/api/chat/regenerate', (req, res) => {
+        const sres = res as ServerResponse;
+        if (req.method !== 'POST') return sendJson(sres, 405, { error: 'POST only' });
+        respond(
+          runtime,
+          sres,
+          Effect.gen(function* () {
+            const parsed = yield* decodeChatTurn(yield* readBody(req));
+            return yield* runTurnEffect(() =>
+              runTurn(piRt, parsed, turnIo, { kind: 'regenerate' }),
+            );
+          }),
+        );
+      });
+
+      // ----- /api/chat/history?sessionId=… — the ACTIVE branch as messages -----
       server.middlewares.use('/api/chat/history', (req, res) => {
         const sres = res as ServerResponse;
         const [, query = ''] = (req.url ?? '').split('?');
@@ -1518,18 +607,18 @@ export function cartisBridge(): Plugin {
           sres,
           Effect.gen(function* () {
             if (sessionId.length === 0) return { messages: [] as ThreadMessageT[] };
-            const agent = yield* AgentClient;
-            const messages = yield* agent.messages(SessionId.make(sessionId));
-            const info = yield* agent
-              .info(SessionId.make(sessionId))
-              .pipe(Effect.orElseSucceed(() => undefined));
-            return { messages: mapSessionMessages(messages, info?.revert?.messageID) };
+            // Missing file → empty history (clean break for old opencode ids).
+            const messages = yield* Effect.tryPromise({
+              try: async () => mapSessionEntries(await piRt.getSession(sessionId)),
+              catch: (cause) => agentErrorOf(cause),
+            });
+            return { messages };
           }),
         );
       });
 
-      // ----- /api/chat/siblings?sessionId=… — parent-first branch set for ‹ n/m › -----
-      server.middlewares.use('/api/chat/siblings', (req, res) => {
+      // ----- /api/chat/tree?sessionId=… — ‹ n/m › anchors from the session tree -----
+      server.middlewares.use('/api/chat/tree', (req, res) => {
         const sres = res as ServerResponse;
         const [, query = ''] = (req.url ?? '').split('?');
         const sessionId = new URLSearchParams(query).get('sessionId') ?? '';
@@ -1537,13 +626,38 @@ export function cartisBridge(): Plugin {
           runtime,
           sres,
           Effect.gen(function* () {
-            if (sessionId.length === 0) return { branches: [] as ThreadSummaryT[] };
-            return { branches: yield* siblingSet(SessionId.make(sessionId)) };
+            if (sessionId.length === 0) return { anchors: [] };
+            const anchors = yield* Effect.tryPromise({
+              try: async () => computeAnchors(await piRt.getSession(sessionId)),
+              catch: (cause) => agentErrorOf(cause),
+            });
+            return { anchors };
           }),
         );
       });
 
-      // ----- /api/chat/abort|revert|regenerate|fork|permission -----
+      // ----- /api/chat/switch — durable branch switch (leaf_switch entry) -----
+      server.middlewares.use('/api/chat/switch', (req, res) => {
+        const sres = res as ServerResponse;
+        if (req.method !== 'POST') return sendJson(sres, 405, { error: 'POST only' });
+        respond(
+          runtime,
+          sres,
+          Effect.gen(function* () {
+            const { sessionId, leafId } = yield* decodeChatSwitch(yield* readBody(req));
+            if (piRt.inFlight.has(sessionId)) {
+              return yield* Effect.fail(new AgentError({ reason: 'busy' }));
+            }
+            yield* Effect.tryPromise({
+              try: async () => switchBranch(await piRt.getSession(sessionId), leafId),
+              catch: (cause) => agentErrorOf(cause),
+            });
+            return { sessionId };
+          }),
+        );
+      });
+
+      // ----- /api/chat/abort — interrupt the running turn -----
       server.middlewares.use('/api/chat/abort', (req, res) => {
         const sres = res as ServerResponse;
         if (req.method !== 'POST') return sendJson(sres, 405, { error: 'POST only' });
@@ -1552,68 +666,8 @@ export function cartisBridge(): Plugin {
           sres,
           Effect.gen(function* () {
             const { sessionId } = yield* decodeSessionAction(yield* readBody(req));
-            const agent = yield* AgentClient;
-            yield* agent.abort(sessionId);
-            return { sessionId };
-          }),
-        );
-      });
-
-      server.middlewares.use('/api/chat/revert', (req, res) => {
-        const sres = res as ServerResponse;
-        if (req.method !== 'POST') return sendJson(sres, 405, { error: 'POST only' });
-        respond(
-          runtime,
-          sres,
-          Effect.gen(function* () {
-            const { sessionId, messageId } = yield* decodeSessionAction(yield* readBody(req));
-            const agent = yield* AgentClient;
-            if (messageId !== undefined) yield* agent.revert(sessionId, messageId);
-            return { sessionId };
-          }),
-        );
-      });
-
-      server.middlewares.use('/api/chat/regenerate', (req, res) => {
-        const sres = res as ServerResponse;
-        if (req.method !== 'POST') return sendJson(sres, 405, { error: 'POST only' });
-        respond(
-          runtime,
-          sres,
-          Effect.gen(function* () {
-            const { sessionId } = yield* decodeSessionAction(yield* readBody(req));
-            return yield* runRegenerate(sessionId);
-          }),
-        );
-      });
-
-      server.middlewares.use('/api/chat/fork', (req, res) => {
-        const sres = res as ServerResponse;
-        if (req.method !== 'POST') return sendJson(sres, 405, { error: 'POST only' });
-        respond(
-          runtime,
-          sres,
-          Effect.gen(function* () {
-            const { sessionId } = yield* decodeSessionAction(yield* readBody(req));
-            const agent = yield* AgentClient;
-            const forkedId = yield* agent.fork(sessionId);
-            return { sessionId: forkedId };
-          }),
-        );
-      });
-
-      server.middlewares.use('/api/chat/permission', (req, res) => {
-        const sres = res as ServerResponse;
-        if (req.method !== 'POST') return sendJson(sres, 405, { error: 'POST only' });
-        respond(
-          runtime,
-          sres,
-          Effect.gen(function* () {
-            const { sessionId, permissionId, granted } = yield* decodePermissionReply(
-              yield* readBody(req),
-            );
-            const agent = yield* AgentClient;
-            yield* agent.replyPermission(sessionId, permissionId, granted);
+            const live = piRt.inFlight.get(sessionId);
+            if (live !== undefined) yield* Effect.promise(() => live.abort());
             return { sessionId };
           }),
         );
@@ -1641,12 +695,24 @@ export function cartisBridge(): Plugin {
               const body = yield* readBody(req);
               const parsed = yield* decodeImageGenerate(body);
               // 1) compose the final prompt via the LLM when theme context is present
-              const prompt = parsed.themeContext
-                ? yield* composeArtPrompt(
-                    parsed.themeContext,
-                    parsed.argumentValues ?? {},
-                    parsed.brief,
-                  )
+              const themeContext = parsed.themeContext;
+              const prompt = themeContext
+                ? yield* Effect.gen(function* () {
+                    const bus = yield* ThreadBus;
+                    yield* bus.emit({
+                      _tag: 'Art',
+                      phase: 'composing',
+                      detail: 'composing art prompt from theme + arguments',
+                    });
+                    return yield* Effect.promise(() =>
+                      composeArtPromptPi(
+                        piRt,
+                        themeContext,
+                        parsed.argumentValues ?? {},
+                        parsed.brief,
+                      ),
+                    );
+                  })
                 : parsed.prompt;
               // 2) resolve the source image: current art (edit mode) beats the attached photo
               let imageDataUrl = parsed.imageDataUrl;

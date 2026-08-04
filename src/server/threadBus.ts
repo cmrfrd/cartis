@@ -95,10 +95,6 @@ export function renderScoped(event: ThreadEventT): Option.Option<ScopedLine> {
         'SessionError',
         (e): ScopedLine => ({ scope: 'agent', message: `agent error: ${e.message}` }),
       ),
-      Match.tag(
-        'PermissionRequested',
-        (e): ScopedLine => ({ scope: 'agent', message: `permission requested: ${e.title}` }),
-      ),
       // Compose lines were agent-sourced in the old log; pipeline lines image-sourced.
       Match.tag(
         'Art',

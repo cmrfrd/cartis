@@ -1,8 +1,14 @@
 /**
- * ThreadState — the reactive chat store (spec §Decision 3), adopted by
- * BuilderView. It folds the SSE event stream into a message list, runs turns
- * through the Effect boundary, and persists nothing itself (opencode owns the
- * transcript; BuilderView persists only the sessionId pointer).
+ * ThreadState — the reactive chat store, adopted by BuilderView. It folds the
+ * SSE event stream into a message list, runs turns through the Effect
+ * boundary, and persists nothing itself (pi's session tree under
+ * cartis-data/chats owns the transcript; BuilderView persists only the
+ * sessionId pointer).
+ *
+ * Pi tool transport (migration spec §3.2): turn responses are STRUCTURED
+ * ({ reply, toolCalls, entry ids }); the client applies intents through the
+ * injected ChatContext and RE-KEYS its optimistic bubbles to the returned pi
+ * entry ids — so edits and anchors always target real tree entries.
  *
  * Boundary discipline: reads are snapshotted into locals before building
  * effects; results are Exit-matched at the boundary; the stream-consumer fiber
@@ -18,8 +24,8 @@ import type {
   ChatAttachmentT,
   ChatTurnRequestT,
   ChatTurnResponseT,
-  DocActionT,
   DocContextT,
+  ToolCallIntentT,
 } from '@/contracts/api';
 import { noteFromCause } from '@/contracts/errors';
 import type { FieldSummaryT } from '@/contracts/fields';
@@ -29,22 +35,24 @@ import {
   MessageId,
   type MessageIdT,
   MimeType,
-  type PermissionIdT,
   type SessionIdT,
 } from '@/contracts/ids';
-import { materializeAssistantParts } from '@/contracts/materialize';
+import {
+  CARD_EXPORT_TOOL,
+  CARD_GENERATE_ART_TOOL,
+  CARD_PATCH_TOOL,
+  CARD_SAVE_COPY_TOOL,
+  CARD_SAVE_TOOL,
+  CARD_SET_HOLO_TOOL,
+  CARD_SET_LAYOUT_TOOL,
+  CARD_SET_THEME_TOOL,
+  partsFromTurn,
+} from '@/contracts/materialize';
 import type { ThemeContextT } from '@/contracts/theme';
-import type {
-  MessageStatusT,
-  ThreadEventT,
-  ThreadMessageT,
-  ThreadPartT,
-  ThreadSummaryT,
-} from '@/contracts/thread';
+import type { MessageStatusT, ThreadEventT, ThreadMessageT, ThreadPartT } from '@/contracts/thread';
 import { attachmentPolicy, fileToDataUrl, MAX_ATTACHMENTS } from './attachments';
 import { ChatEvents } from './ChatEvents';
 import { ChatThread } from './ChatThread';
-import { divergencePoint } from './divergence';
 import { foldThreadEvent } from './fold';
 
 /** The card context + appliers BuilderView injects so a turn can edit the card. */
@@ -53,7 +61,7 @@ export interface ChatContext {
   readonly fields: readonly FieldSummaryT[];
   readonly currentData: CardDataT;
   readonly currentArtFileName?: string;
-  /** Current + available document knobs — rendered into the turn prompt. */
+  /** Current + available document knobs — the tool schemas derive from these. */
   readonly docContext?: DocContextT;
   /** Apply the agent's field patch to the open document. */
   applyPatch(patch: CardDataT): void;
@@ -64,9 +72,9 @@ export interface ChatContext {
   runArt(action: ArtActionT): void | Promise<void>;
   /** Mark the document dirty (e.g. switching to a branch is a saved-state change). */
   markDirty(): void;
-  /** Persist the document (agent 'save' action) — false on failure. */
+  /** Persist the document (card_save tool) — false on failure. */
   save(): Promise<boolean>;
-  /** Persist as a fresh copy (agent 'saveAsCopy' action) — false on failure. */
+  /** Persist as a fresh copy (card_save_copy tool) — false on failure. */
   saveAsCopy(): Promise<boolean>;
   /** Render + download + archive an export of the current preview. */
   exportRender(target: 'png' | 'print' | 'sheet'): Promise<boolean>;
@@ -78,24 +86,25 @@ export interface ChatContext {
   snapshotPreview(): Promise<{ mime: string; dataUrl: string } | undefined>;
 }
 
-/** The synchronous settings knobs, applied BEFORE art (spec ordering rule). */
-const isSettingsAction = (
-  action: DocActionT,
-): action is Extract<DocActionT, { kind: 'setLayout' | 'setTheme' | 'setHolo' }> =>
-  action.kind === 'setLayout' || action.kind === 'setTheme' || action.kind === 'setHolo';
-
-export interface PendingPermission {
-  readonly sessionId: SessionIdT;
-  readonly permissionId: PermissionIdT;
-  readonly title: string;
+/** One ‹ n/m › anchor from the session tree (server-computed, spec §4.2). */
+export interface BranchAnchor {
+  readonly messageId: MessageIdT;
+  readonly index: number;
+  readonly count: number;
+  readonly siblingLeafIds: readonly string[];
 }
 
-/** The event's session, if the variant carries one — pure Option helper (spec §3, §Match). */
+/** The synchronous settings knobs, applied BEFORE art (spec ordering rule). */
+const SETTINGS_TOOLS: ReadonlySet<string> = new Set([
+  CARD_SET_LAYOUT_TOOL,
+  CARD_SET_THEME_TOOL,
+  CARD_SET_HOLO_TOOL,
+]);
+
+/** The event's session, if the variant carries one — pure Option helper. */
 const eventSessionId = (event: ThreadEventT): Option.Option<SessionIdT> =>
   Match.value(event).pipe(
-    Match.tag('TurnStarted', 'PartDelta', 'TurnCompleted', 'PermissionRequested', (e) =>
-      Option.some(e.sessionId),
-    ),
+    Match.tag('TurnStarted', 'PartDelta', 'TurnCompleted', (e) => Option.some(e.sessionId)),
     Match.tag('Art', 'SessionError', () => Option.none<SessionIdT>()),
     Match.exhaustive,
   );
@@ -104,18 +113,13 @@ export class ThreadState extends State {
   messages: ThreadMessageT[] = [];
   running = false;
   sessionId?: SessionIdT = undefined;
-  pendingPermission?: PendingPermission = undefined;
   note?: string = undefined;
   /** The composer draft (UI state; cleared on submit). */
   draft = '';
   /** Gated attachments awaiting the next send (thumbnails read dataUrl). */
   pendingAttachments: ChatAttachmentT[] = [];
-  /** Branch (fork) siblings of the current session (branch picker). */
-  branches: ThreadSummaryT[] = [];
-  /** Ordered sibling session ids (parent first) for ‹ n/m › navigation. */
-  siblingIds: SessionIdT[] = [];
-  /** Where the ‹ n/m › arrows anchor: the divergence message + our position. */
-  branchPoint?: { messageId: MessageIdT; index: number; count: number } = undefined;
+  /** ‹ n/m › anchors from the session tree (one per fork on the active branch). */
+  anchors: BranchAnchor[] = [];
   /** Viewport is at (or near) the bottom — autoscroll follows new content. */
   viewportPinned = true;
   /** A drag-with-files is hovering the panel (drop overlay visible). */
@@ -161,22 +165,14 @@ export class ThreadState extends State {
     // thread are ghosts too (live-caught: "art generated" strip on a fresh
     // card). During a turn or an existing conversation they flow as usual.
     if (sid === undefined && !this.running && this.messages.length === 0) return;
-    if (event._tag === 'PermissionRequested') {
-      this.pendingPermission = {
-        sessionId: event.sessionId,
-        permissionId: event.permissionId,
-        title: event.title,
-      };
-      return;
-    }
     this.messages = foldThreadEvent(this.messages, event);
   }
 
-  /** Bind a saved card's session and rehydrate its conversation + branches. */
+  /** Bind a saved card's session and rehydrate its conversation + anchors. */
   bind(sessionId: SessionIdT): void {
     this.sessionId = sessionId;
     void this.rehydrate();
-    void this.loadBranches();
+    void this.loadTree();
   }
 
   /** Reset for a new/unbound card, aborting any in-flight turn first. */
@@ -187,14 +183,11 @@ export class ThreadState extends State {
     }
     this.messages = [];
     this.sessionId = undefined;
-    this.pendingPermission = undefined;
     this.running = false;
     this.note = undefined;
     this.draft = '';
     this.pendingAttachments = [];
-    this.branches = [];
-    this.siblingIds = [];
-    this.branchPoint = undefined;
+    this.anchors = [];
     this.canceling = false;
   }
 
@@ -267,7 +260,7 @@ export class ThreadState extends State {
     }, 1500);
   }
 
-  /** Commit the inline edit → fork-on-edit + resend. */
+  /** Commit the inline edit → sibling branch in the session tree. */
   async submitEdit(): Promise<void> {
     const id = this.editingId;
     const text = this.editDraft.trim();
@@ -280,182 +273,35 @@ export class ThreadState extends State {
   async cancel(): Promise<void> {
     const sid = this.sessionId;
     if (!this.running || sid === undefined) return;
-    this.canceling = true; // send()'s finalize sees this and marks the turn incomplete
+    this.canceling = true; // the turn's finalize sees this and marks it incomplete
     await runAppExit(Effect.flatMap(ChatThread, (c) => c.cancel(sid)));
   }
 
-  /**
-   * Regenerate the last assistant turn (revert + replay). The bridge derives the
-   * stored user text; the result re-materializes onto a running placeholder that
-   * replaces the previous reply in place.
-   */
-  async regenerate(): Promise<void> {
-    const sid = this.sessionId;
+  /** Build this turn's request from the injected context (post-await safe). */
+  private async buildRequest(
+    text: string,
+    attachments: ChatAttachmentT[],
+  ): Promise<ChatTurnRequestT | undefined> {
     const ctx = this.context?.();
-    if (sid === undefined || ctx === undefined || this.running) return;
-    // Replace the last assistant message with a running placeholder.
-    const lastAssistant = [...this.messages].reverse().find((m) => m.role === 'assistant');
-    const placeholderId = lastAssistant?.id ?? MessageId.make(crypto.randomUUID());
-    this.messages =
-      lastAssistant !== undefined
-        ? this.messages.map((m) =>
-            m.id === placeholderId ? { ...m, status: 'running', parts: [] } : m,
-          )
-        : [
-            ...this.messages,
-            { id: placeholderId, role: 'assistant', status: 'running', parts: [] },
-          ];
-    this.running = true;
-    this.note = undefined;
-    const exit = await runAppExit(Effect.flatMap(ChatThread, (c) => c.regenerate(sid)));
-    if (this.get(null)) return;
-    if (Exit.isSuccess(exit) && !this.canceling) {
-      const res = exit.value;
-      this.sessionId = res.sessionId;
-      this.replaceMessage(placeholderId, materializeAssistantParts(res.assistantText), 'complete');
-      if (Object.keys(res.patch).length > 0) ctx.applyPatch(res.patch);
-      this.applySettings(ctx, res.actions ?? []);
-      void this.runPostTurn(
-        ctx,
-        res.artAction,
-        (res.actions ?? []).filter((a) => !isSettingsAction(a)),
-      );
-    } else {
-      const message = this.canceling
-        ? 'Canceled.'
-        : noteFromCause((exit as Exit.Failure<unknown, unknown>).cause);
-      if (!this.canceling) this.note = message;
-      this.replaceMessage(placeholderId, [{ _tag: 'Text', text: message }], 'incomplete');
-    }
-    this.canceling = false;
-    this.running = false;
+    if (ctx === undefined) return undefined;
+    // The preview snapshot renders AFTER the optimistic bubble (spec: the
+    // ~100-300ms rasterize must never delay perceived send); failure → none.
+    const snapshot = await ctx.snapshotPreview().catch(() => undefined);
+    if (this.get(null)) return undefined;
+    return {
+      sessionId: this.sessionId,
+      themeContext: ctx.themeContext,
+      fields: ctx.fields,
+      currentData: ctx.currentData,
+      currentArtFileName: ctx.currentArtFileName,
+      userPrompt: text,
+      ...(attachments.length > 0 ? { attachments } : {}),
+      ...(ctx.docContext !== undefined ? { docContext: ctx.docContext } : {}),
+      ...(snapshot !== undefined ? { previewDataUrl: DataUrl.make(snapshot.dataUrl) } : {}),
+    };
   }
 
-  /** Replace one message's parts + status by id (immutably). */
-  private replaceMessage(id: string, parts: ThreadPartT[], status: MessageStatusT): void {
-    this.messages = this.messages.map((m) => (m.id === id ? { ...m, parts, status } : m));
-  }
-
-  /**
-   * Edit an earlier user message: fork the session first (native branching, so
-   * the original survives), revert to the message, then resend the new text.
-   */
-  async edit(messageId: MessageIdT, text: string): Promise<void> {
-    const sid = this.sessionId;
-    if (sid === undefined || this.running) return;
-    const forkExit = await runAppExit(Effect.flatMap(ChatThread, (c) => c.fork(sid)));
-    if (this.get(null)) return;
-    if (Exit.isSuccess(forkExit)) {
-      this.sessionId = forkExit.value;
-      this.context?.()?.markDirty(); // a branch is saved state
-      await runAppExit(Effect.flatMap(ChatThread, (c) => c.revert(forkExit.value, messageId)));
-      if (this.get(null)) return;
-    }
-    // Trim local history back to before the edited message, then resend.
-    const idx = this.messages.findIndex((m) => m.id === messageId);
-    if (idx >= 0) this.messages = this.messages.slice(0, idx);
-    await this.send(text);
-    // AFTER the resend: the branchPoint anchors on the post-edit history.
-    if (this.get(null)) return;
-    void this.loadBranches();
-  }
-
-  /** Switch to a branch (fork) session: rebind, rehydrate, mark the doc dirty. */
-  async switchBranch(sessionId: SessionIdT): Promise<void> {
-    if (sessionId === this.sessionId) return;
-    this.sessionId = sessionId;
-    this.context?.()?.markDirty();
-    await this.rehydrate();
-    void this.loadBranches();
-  }
-
-  /**
-   * Load the parent-first sibling set and compute the ‹ n/m › branch point:
-   * fetch the OTHER siblings' histories (failures drop that sibling), find
-   * where the current history diverges, fall back to the last user message.
-   */
-  async loadBranches(): Promise<void> {
-    const sid = this.sessionId;
-    if (sid === undefined) {
-      this.branches = [];
-      this.siblingIds = [];
-      this.branchPoint = undefined;
-      return;
-    }
-    const exit = await runAppExit(Effect.flatMap(ChatThread, (c) => c.siblings(sid)));
-    if (this.get(null)) return;
-    if (!Exit.isSuccess(exit)) return;
-    const siblings = [...exit.value];
-    this.branches = siblings;
-    this.siblingIds = siblings.map((s) => s.sessionId);
-    if (siblings.length < 2) {
-      this.branchPoint = undefined;
-      return;
-    }
-    const others = siblings.filter((s) => s.sessionId !== sid);
-    const historiesExit = await runAppExit(
-      Effect.flatMap(ChatThread, (c) =>
-        Effect.all(
-          others.map((s) =>
-            c
-              .history(s.sessionId)
-              .pipe(Effect.orElseSucceed(() => [] as readonly ThreadMessageT[])),
-          ),
-        ),
-      ),
-    );
-    if (this.get(null)) return;
-    const histories = Exit.isSuccess(historiesExit)
-      ? historiesExit.value.filter((h) => h.length > 0)
-      : [];
-    const messages = this.messages;
-    const anchor = divergencePoint(messages, histories).pipe(
-      Option.orElse(() =>
-        // Inconclusive (e.g. identical prefixes) → the last user message.
-        Option.fromNullable([...messages].reverse().find((m) => m.role === 'user')?.id),
-      ),
-      Option.getOrUndefined,
-    );
-    const index = this.siblingIds.indexOf(sid);
-    this.branchPoint =
-      anchor !== undefined && index >= 0
-        ? { messageId: anchor, index: index + 1, count: this.siblingIds.length }
-        : undefined;
-  }
-
-  /** Step to the previous/next sibling branch (the ‹ › arrows). */
-  async switchSibling(delta: 1 | -1): Promise<void> {
-    const sid = this.sessionId;
-    if (sid === undefined) return;
-    const at = this.siblingIds.indexOf(sid);
-    const target = at >= 0 ? this.siblingIds[at + delta] : undefined;
-    if (target === undefined) return;
-    await this.switchBranch(target);
-  }
-
-  /** Reply to the pending permission request (allow/deny), then clear it. */
-  async replyPermission(granted: boolean): Promise<void> {
-    const pending = this.pendingPermission;
-    if (pending === undefined) return;
-    this.pendingPermission = undefined;
-    await runAppExit(
-      Effect.flatMap(ChatThread, (c) =>
-        c.replyPermission(pending.sessionId, pending.permissionId, granted),
-      ),
-    );
-  }
-
-  /** Reload the conversation from opencode (stale session → fresh/empty). */
-  async rehydrate(): Promise<void> {
-    const sid = this.sessionId;
-    if (sid === undefined) return;
-    const exit = await runAppExit(Effect.flatMap(ChatThread, (c) => c.history(sid)));
-    if (this.get(null)) return;
-    if (Exit.isSuccess(exit)) this.messages = [...exit.value];
-    // failure (stale/missing session) → keep whatever we have; no UI note
-  }
-
-  /** Send one turn: optimistic user bubble → turn → materialize + apply. */
+  /** Send one turn: optimistic user bubble → turn → structured apply. */
   async send(text: string): Promise<void> {
     if (this.running) return; // one turn at a time (composer locks)
     const ctx = this.context?.();
@@ -474,82 +320,191 @@ export class ThreadState extends State {
       ),
       ...(text.length > 0 ? [{ _tag: 'Text', text } satisfies ThreadPartT] : []),
     ];
-    const userId = MessageId.make(crypto.randomUUID());
+    const optimisticId = MessageId.make(crypto.randomUUID());
     this.messages = [
       ...this.messages,
-      { id: userId, role: 'user', status: 'complete', parts: bubbleParts },
+      { id: optimisticId, role: 'user', status: 'complete', parts: bubbleParts },
     ];
     this.running = true;
     this.note = undefined;
 
-    // The preview snapshot renders AFTER the optimistic bubble (spec: the
-    // ~100-300ms rasterize must never delay perceived send); failure → none.
-    const snapshot = await ctx.snapshotPreview().catch(() => undefined);
-    if (this.get(null)) return;
-
-    // Snapshot the request before crossing into the effect.
-    const req: ChatTurnRequestT = {
-      sessionId: this.sessionId,
-      themeContext: ctx.themeContext,
-      fields: ctx.fields,
-      currentData: ctx.currentData,
-      currentArtFileName: ctx.currentArtFileName,
-      userPrompt: text,
-      ...(attachments.length > 0 ? { attachments } : {}),
-      ...(ctx.docContext !== undefined ? { docContext: ctx.docContext } : {}),
-      ...(snapshot !== undefined ? { previewDataUrl: DataUrl.make(snapshot.dataUrl) } : {}),
-    };
+    const req = await this.buildRequest(text, attachments);
+    if (req === undefined) return;
     const exit = await runAppExit(Effect.flatMap(ChatThread, (c) => c.turn(req)));
     if (this.get(null)) return; // destroyed mid-turn
-    this.applyTurnExit(userId, exit, ctx);
+    this.applyTurnExit(optimisticId, exit, ctx);
   }
 
-  /** Materialize a settled turn onto this turn's assistant message (shared by send/regenerate). */
+  /**
+   * Edit an earlier user message: ONE route call — the bridge navigates the
+   * tree to the target's parent and re-prompts, creating a sibling branch.
+   */
+  async edit(messageId: MessageIdT, text: string): Promise<void> {
+    if (this.running) return;
+    const ctx = this.context?.();
+    const sid = this.sessionId;
+    if (ctx === undefined || sid === undefined) return;
+    // Trim local history back to before the edited message, optimistic bubble.
+    const idx = this.messages.findIndex((m) => m.id === messageId);
+    if (idx >= 0) this.messages = this.messages.slice(0, idx);
+    const optimisticId = MessageId.make(crypto.randomUUID());
+    this.messages = [
+      ...this.messages,
+      { id: optimisticId, role: 'user', status: 'complete', parts: [{ _tag: 'Text', text }] },
+    ];
+    this.running = true;
+    this.note = undefined;
+    const req = await this.buildRequest(text, []);
+    if (req === undefined) return;
+    const exit = await runAppExit(Effect.flatMap(ChatThread, (c) => c.edit(req, messageId)));
+    if (this.get(null)) return;
+    this.applyTurnExit(optimisticId, exit, ctx);
+    this.context?.()?.markDirty(); // a branch is saved state
+    void this.loadTree();
+  }
+
+  /**
+   * Regenerate the last assistant turn: the bridge replays the stored user
+   * text on a new branch; the result lands on a running placeholder.
+   */
+  async regenerate(): Promise<void> {
+    if (this.running) return;
+    const ctx = this.context?.();
+    const sid = this.sessionId;
+    if (ctx === undefined || sid === undefined) return;
+    const lastAssistant = [...this.messages].reverse().find((m) => m.role === 'assistant');
+    const lastUser = [...this.messages].reverse().find((m) => m.role === 'user');
+    if (lastAssistant === undefined || lastUser === undefined) return;
+    this.messages = this.messages.map((m) =>
+      m.id === lastAssistant.id ? { ...m, status: 'running', parts: [] } : m,
+    );
+    this.running = true;
+    this.note = undefined;
+    const req = await this.buildRequest('', []);
+    if (req === undefined) return;
+    const exit = await runAppExit(Effect.flatMap(ChatThread, (c) => c.regenerate(req)));
+    if (this.get(null)) return;
+    this.applyTurnExit(lastUser.id, exit, ctx);
+    void this.loadTree();
+  }
+
+  /** Load the ‹ n/m › anchors from the session tree. */
+  async loadTree(): Promise<void> {
+    const sid = this.sessionId;
+    if (sid === undefined) {
+      this.anchors = [];
+      return;
+    }
+    const exit = await runAppExit(Effect.flatMap(ChatThread, (c) => c.tree(sid)));
+    if (this.get(null)) return;
+    if (Exit.isSuccess(exit)) {
+      this.anchors = exit.value.map((a) => ({
+        messageId: a.messageId,
+        index: a.index,
+        count: a.count,
+        siblingLeafIds: a.siblingLeafIds,
+      }));
+    }
+  }
+
+  /** Switch to a sibling branch (durable server-side), then rehydrate. */
+  async switchTo(leafId: string): Promise<void> {
+    const sid = this.sessionId;
+    if (sid === undefined || this.running) return;
+    await runAppExit(Effect.flatMap(ChatThread, (c) => c.switch(sid, leafId)));
+    if (this.get(null)) return;
+    this.context?.()?.markDirty();
+    await this.rehydrate();
+    void this.loadTree();
+  }
+
+  /** Step to the previous/next sibling branch (the ‹ › arrows). */
+  async switchSibling(anchor: BranchAnchor, delta: 1 | -1): Promise<void> {
+    const target = anchor.siblingLeafIds[anchor.index - 1 + delta];
+    if (target !== undefined) await this.switchTo(target);
+  }
+
+  /** Reload the ACTIVE branch from the bridge (stale session → fresh/empty). */
+  async rehydrate(): Promise<void> {
+    const sid = this.sessionId;
+    if (sid === undefined) return;
+    const exit = await runAppExit(Effect.flatMap(ChatThread, (c) => c.history(sid)));
+    if (this.get(null)) return;
+    if (Exit.isSuccess(exit)) this.messages = [...exit.value];
+    // failure (stale/missing session) → keep whatever we have; no UI note
+  }
+
+  /** Apply a settled turn: re-key bubbles to pi entry ids + run the intents. */
   private applyTurnExit(
-    userId: string,
+    optimisticUserId: MessageIdT,
     exit: Exit.Exit<ChatTurnResponseT, unknown>,
     ctx: ChatContext,
   ): void {
     if (Exit.isSuccess(exit) && !this.canceling) {
       const res = exit.value;
       this.sessionId = res.sessionId; // lazy-created session captured
-      this.finalizeAssistant(userId, materializeAssistantParts(res.assistantText), 'complete');
-      if (Object.keys(res.patch).length > 0) ctx.applyPatch(res.patch);
-      if (res.droppedFields !== undefined && res.droppedFields.length > 0) {
-        this.note = `ignored invalid field values: ${res.droppedFields.join(', ')}`;
-      }
-      // Settings knobs apply SYNCHRONOUSLY, before art starts (spec ordering:
-      // "switch to fullart and generate art" must render at the new aspect).
-      this.applySettings(ctx, res.actions ?? []);
-      // Detached: the reply renders now; art then doc actions sequence behind it.
-      void this.runPostTurn(
-        ctx,
-        res.artAction,
-        (res.actions ?? []).filter((a) => !isSettingsAction(a)),
+      // RE-KEY (spec §3.2): the optimistic user bubble takes the pi entry id;
+      // this turn's assistant message (streamed or appended) takes its own.
+      this.messages = this.messages.map((m) =>
+        m.id === optimisticUserId ? { ...m, id: res.userEntryId } : m,
       );
+      this.finalizeAssistant(
+        res.userEntryId,
+        res.assistantEntryId,
+        partsFromTurn(res.reply, res.toolCalls),
+        'complete',
+      );
+      if (res.toolErrors !== undefined && res.toolErrors.length > 0) {
+        this.note = `some tool calls failed validation: ${res.toolErrors
+          .map((e) => e.name)
+          .join(', ')}`;
+      }
+      this.applyIntents(ctx, res.toolCalls);
     } else if (this.canceling) {
-      this.finalizeAssistant(userId, [{ _tag: 'Text', text: 'Canceled.' }], 'incomplete');
+      this.finalizeAssistant(
+        optimisticUserId,
+        MessageId.make(crypto.randomUUID()),
+        [{ _tag: 'Text', text: 'Canceled.' }],
+        'incomplete',
+      );
     } else {
       const message = noteFromCause((exit as Exit.Failure<unknown, unknown>).cause);
       this.note = message;
-      this.finalizeAssistant(userId, [{ _tag: 'Text', text: message }], 'incomplete');
+      this.finalizeAssistant(
+        optimisticUserId,
+        MessageId.make(crypto.randomUUID()),
+        [{ _tag: 'Text', text: message }],
+        'incomplete',
+      );
     }
     this.canceling = false;
     this.running = false;
   }
 
-  /** Apply the settings knobs in order; a failed knob names itself in the note. */
-  private applySettings(ctx: ChatContext, actions: readonly DocActionT[]): void {
-    for (const action of actions) {
-      if (!isSettingsAction(action)) continue;
+  /**
+   * Apply the turn's validated tool intents. Settings knobs apply
+   * SYNCHRONOUSLY, before art starts (spec ordering: "switch to fullart and
+   * generate art" must render at the new aspect); card_patch merges into one
+   * document patch; art then save/copy/export sequence detached behind the
+   * already-rendered reply.
+   */
+  private applyIntents(ctx: ChatContext, toolCalls: readonly ToolCallIntentT[]): void {
+    for (const call of toolCalls) {
+      if (!SETTINGS_TOOLS.has(call.name)) continue;
       const ok =
-        action.kind === 'setLayout'
-          ? ctx.setLayout(action.layoutId)
-          : action.kind === 'setTheme'
-            ? ctx.setTheme(action.themeId)
-            : ctx.setHolo(action.value);
-      if (!ok) this.note = `action failed: ${action.kind}`;
+        call.name === CARD_SET_LAYOUT_TOOL
+          ? ctx.setLayout(String(call.args.layoutId ?? ''))
+          : call.name === CARD_SET_THEME_TOOL
+            ? ctx.setTheme(String(call.args.themeId ?? ''))
+            : ctx.setHolo(call.args.value === true);
+      if (!ok) this.note = `action failed: ${call.name}`;
     }
+    const patch: CardDataT = {};
+    for (const call of toolCalls) {
+      if (call.name === CARD_PATCH_TOOL) Object.assign(patch, call.args);
+    }
+    if (Object.keys(patch).length > 0) ctx.applyPatch(patch as CardDataT);
+    void this.runPostTurn(ctx, toolCalls);
   }
 
   /**
@@ -559,30 +514,42 @@ export class ThreadState extends State {
    */
   private async runPostTurn(
     ctx: ChatContext,
-    artAction: ArtActionT | undefined,
-    actions: readonly DocActionT[],
+    toolCalls: readonly ToolCallIntentT[],
   ): Promise<void> {
-    if (artAction !== undefined) await ctx.runArt(artAction);
-    for (const action of actions) {
+    const art = toolCalls.find((c) => c.name === CARD_GENERATE_ART_TOOL);
+    if (art !== undefined) {
+      await ctx.runArt({
+        brief: String(art.args.brief ?? ''),
+        editCurrentArt: art.args.editCurrentArt === true,
+      });
+    }
+    for (const call of toolCalls) {
       if (this.get(null)) return;
-      if (isSettingsAction(action)) continue; // applied synchronously pre-art
-      const ok = await (action.kind === 'save'
-        ? ctx.save()
-        : action.kind === 'saveAsCopy'
-          ? ctx.saveAsCopy()
-          : ctx.exportRender(action.target));
+      let ok: boolean;
+      if (call.name === CARD_SAVE_TOOL) ok = await ctx.save();
+      else if (call.name === CARD_SAVE_COPY_TOOL) ok = await ctx.saveAsCopy();
+      else if (call.name === CARD_EXPORT_TOOL) {
+        const target = String(call.args.target ?? 'png');
+        ok = await ctx.exportRender(target === 'print' || target === 'sheet' ? target : 'png');
+      } else continue;
       if (!ok && !this.get(null)) {
-        this.note = action.kind === 'export' ? 'export failed' : 'save failed';
+        this.note = call.name === CARD_EXPORT_TOOL ? 'export failed' : 'save failed';
       }
     }
   }
 
   /**
-   * Finalize this turn's assistant message: the one streamed in after `userId`
-   * (SSE) gets its parts replaced by the materialized ones; otherwise append.
+   * Finalize this turn's assistant message: the one streamed in after the
+   * user bubble (SSE) gets its parts replaced AND its id re-keyed to the pi
+   * entry id; otherwise append fresh.
    */
-  private finalizeAssistant(userId: string, parts: ThreadPartT[], status: MessageStatusT): void {
-    const userIdx = this.messages.findIndex((m) => m.id === userId);
+  private finalizeAssistant(
+    afterUserId: MessageIdT,
+    assistantId: MessageIdT,
+    parts: ThreadPartT[],
+    status: MessageStatusT,
+  ): void {
+    const userIdx = this.messages.findIndex((m) => m.id === afterUserId);
     let target = -1;
     for (let i = this.messages.length - 1; i > userIdx; i--) {
       if (this.messages[i]?.role === 'assistant') {
@@ -594,13 +561,10 @@ export class ThreadState extends State {
       const message = this.messages[target];
       if (message === undefined) return;
       const next = [...this.messages];
-      next[target] = { ...message, parts, status };
+      next[target] = { ...message, id: assistantId, parts, status };
       this.messages = next;
     } else {
-      this.messages = [
-        ...this.messages,
-        { id: MessageId.make(crypto.randomUUID()), role: 'assistant', status, parts },
-      ];
+      this.messages = [...this.messages, { id: assistantId, role: 'assistant', status, parts }];
     }
   }
 }
