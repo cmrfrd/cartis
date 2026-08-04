@@ -98,13 +98,16 @@ export class BodyError extends Data.TaggedError('BodyError')<{
 
 /** opencode agent contract violations. src/server/agentBridge.ts */
 export class AgentError extends Data.TaggedError('AgentError')<{
-  readonly reason: 'no-session-id' | 'no-fill' | 'bad-reply';
+  readonly reason: 'no-session-id' | 'no-fill' | 'bad-reply' | 'busy' | 'turn-failed';
+  readonly detail?: string;
 }> {
   override get message(): string {
     const byReason: Record<AgentError['reason'], string> = {
       'no-session-id': 'opencode session did not return an id',
       'no-fill': 'agent returned no fill patch',
       'bad-reply': 'the agent returned malformed output — try again or regenerate',
+      busy: 'a turn is already running for this card — wait for it to finish',
+      'turn-failed': this.detail ?? 'the agent turn failed — try again',
     };
     return byReason[this.reason];
   }
