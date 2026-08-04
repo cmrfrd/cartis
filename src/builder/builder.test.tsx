@@ -130,6 +130,31 @@ describe('BuilderView', () => {
     unmount();
   });
 
+  it('reports openCardId to the shell across open / save / new (route-state seam)', async () => {
+    const { container, shell, unmount } = await mountApp();
+    await vi.waitFor(() => expect(shell.archive.ready).toBe(true));
+    expect(shell.openCardId).toBeUndefined();
+    // first save of a new card → reported
+    const saveButton = Array.from(container.querySelectorAll('button')).find(
+      (b) => b.textContent === 'Save',
+    );
+    await click(saveButton ?? null);
+    await vi.waitFor(() => expect(shell.openCardId).toBe(shell.archive.cards[0]?.id));
+    // opening a card via the pending seam → reported
+    const card = shell.archive.cards[0];
+    if (!card) throw new Error('no saved card');
+    shell.pendingCard = { ...card, name: 'Reopened' };
+    await tick();
+    expect(shell.openCardId).toBe(card.id);
+    // New (clean doc, no guard) → cleared
+    const newButton = Array.from(container.querySelectorAll('button')).find(
+      (b) => b.textContent === 'New',
+    );
+    await click(newButton ?? null);
+    await vi.waitFor(() => expect(shell.openCardId).toBeUndefined());
+    unmount();
+  });
+
   it('preserves overlapping field values and user data across a layout switch', () => {
     const builder = BuilderView.new();
     builder.setField('name', 'Custom Hero');

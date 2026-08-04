@@ -1,5 +1,6 @@
 import { Component } from '@expressive/react';
 import { BuilderView } from '@/builder/BuilderView';
+import type { CardIdT } from '@/contracts/ids';
 import { GalleryView } from '@/gallery/GalleryView';
 import { CardArchive, type StoredCard } from '@/storage/CardArchive';
 import { ImageLibrary } from '@/storage/ImageLibrary';
@@ -19,6 +20,8 @@ export class AppShell extends Component {
   archive = new CardArchive();
   /** Set by the Gallery to hand a saved card to the Builder (consumed in BuilderView.mount). */
   pendingCard?: StoredCard = undefined;
+  /** The open saved card, reported UP by BuilderView (routing spec: the URL projects this). */
+  openCardId?: CardIdT = undefined;
 
   render() {
     const { view } = this;

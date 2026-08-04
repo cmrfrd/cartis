@@ -205,6 +205,7 @@ export class BuilderView extends Component {
     this.data = { ...card.data };
     this.holo = card.holo;
     this.savedId = card.id;
+    if (this.shell) this.shell.openCardId = card.id;
     this.savedNote = '';
     this.dirty = false;
     // Rehydrate the card's conversation, or start fresh (spec: edge semantics).
@@ -218,6 +219,7 @@ export class BuilderView extends Component {
     this.data = { ...layout.defaults };
     this.holo = false;
     this.savedId = undefined;
+    if (this.shell) this.shell.openCardId = undefined;
     this.savedNote = '';
     this.dirty = false;
     this.portraitKey = undefined;
@@ -281,6 +283,7 @@ export class BuilderView extends Component {
       });
       this.data = { ...this.data, name };
       this.savedId = saved.id;
+      shell.openCardId = saved.id;
       this.savedNote = `Saved “${saved.name}” to the gallery.`;
       this.dirty = false;
       return true;
@@ -383,6 +386,7 @@ export class BuilderView extends Component {
         chatSessionId: this.thread.sessionId,
       });
       this.savedId = saved.id;
+      shell.openCardId = saved.id;
       this.savedNote = `Saved “${saved.name}” to the gallery.`;
       this.dirty = false;
       return true;
