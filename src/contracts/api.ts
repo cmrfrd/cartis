@@ -114,7 +114,7 @@ export const ChatHistoryResponse = Schema.Struct({
 });
 export type ChatHistoryResponseT = typeof ChatHistoryResponse.Type;
 
-// GET /api/chat/children?sessionId=… — branch (fork) siblings for the picker.
+// GET /api/chat/siblings?sessionId=… — parent-first branch set for ‹ n/m ›.
 export const ChatBranchesResponse = Schema.Struct({
   branches: Schema.Array(ThreadSummary),
 });

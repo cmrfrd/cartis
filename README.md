@@ -55,15 +55,25 @@ activity bar.
   shown as a `card_patch` chip; art requests stream progress as a
   `card_generate_art` strip. Every field stays hand-editable and later turns see
   your edits (they always win). The full capability set is native:
+  - **Attachments** — the composer's `+` button, pasting into the input, and
+    dropping files on the panel all attach **images + text files**
+    (`image/*`, `text/*`, `application/json`, `.md`; 8 MB / 6 per message —
+    rejections surface in a dismissible note strip). Images reach the model as
+    vision ("make the art like this reference"); text files as readable
+    context. Attachments persist in the session and survive reopen/restart.
   - **Cancel** a running turn (Stop button → session abort; the turn finalizes
     incomplete).
   - **Edit** an earlier message — this *forks* the session (native branching) so
     the original survives, reverts to that point, and resends.
-  - **Regenerate** the last reply (revert + replay).
-  - **Branch picker** to switch between a session's forks.
+  - **Regenerate** the last reply (revert + replay; offered on the last reply
+    only).
+  - **‹ n/m › branch arrows** on the message where sibling branches diverge —
+    step between a session's forks in place (ChatGPT-style).
   - **Permission prompts** (Allow / Deny) when the agent requests one.
   - A failed turn shows an inline error strip (opencode down / not
     authenticated surfaces here on the first turn — there is no preflight).
+  - Assistant replies render as **markdown**; the panel is **drag-resizable**
+    (left edge, 340–600px, double-click resets).
   The conversation **persists per card**: a saved card stores its
   `chatSessionId` in `cartis-data/`, and reopening rehydrates the thread from
   opencode (surviving dev-server restarts). Copies (Save as copy / gallery
@@ -176,7 +186,7 @@ shared v1-transport materializer.
 |---|---|---|
 | `StoreClient` | `cartis/StoreClient` | Browser: CRUD over `/api/store/:store` |
 | `ImageProvider` | `cartis/ImageProvider` | Browser: generate art (stub or bridge/Replicate) |
-| `ChatThread` | `cartis/ChatThread` | Browser: session passthrough (turn/history/abort/revert/regenerate/fork/children/permission) |
+| `ChatThread` | `cartis/ChatThread` | Browser: session passthrough (turn/history/abort/revert/regenerate/fork/siblings/permission) |
 | `ChatEvents` | `cartis/ChatEvents` | Browser: `Stream<ThreadEvent>` over `/api/chat/events` (SSE) |
 | `ThreadBus` | `cartis/ThreadBus` | Server: fan-out `ThreadEvent` stream (in-memory) |
 | `FileStore` | `cartis/FileStore` | Server: binary + sidecar I/O under `cartis-data/` |
