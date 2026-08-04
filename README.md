@@ -61,6 +61,12 @@ activity bar.
     rejections surface in a dismissible note strip). Images reach the model as
     vision ("make the art like this reference"); text files as readable
     context. Attachments persist in the session and survive reopen/restart.
+  - **Document actions** — the agent has the author's own document powers:
+    "looks good, save it" persists the card (Save / Save as copy), and
+    "export a print PNG" runs the real export pipeline (`png` 300 DPI /
+    `print` 600 DPI + bleed / `sheet` 3×3 A4), sequenced AFTER any art
+    generation in the same turn so exports capture the new art. Each action
+    shows a receipt chip in the thread.
   - **Cancel** a running turn (Stop button → session abort; the turn finalizes
     incomplete).
   - **Edit** an earlier message — this *forks* the session (native branching) so
