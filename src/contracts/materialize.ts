@@ -24,8 +24,12 @@ import type { ThreadPartT } from './thread.ts';
 export const CARD_PATCH_TOOL = 'card_patch';
 export const CARD_GENERATE_ART_TOOL = 'card_generate_art';
 export const CARD_SAVE_TOOL = 'card_save';
+export const CARD_SAVE_COPY_TOOL = 'card_save_copy';
 export const CARD_EXPORT_TOOL = 'card_export';
 export const CARD_SETTINGS_TOOL = 'card_settings';
+export const CARD_SET_LAYOUT_TOOL = 'card_set_layout';
+export const CARD_SET_THEME_TOOL = 'card_set_theme';
+export const CARD_SET_HOLO_TOOL = 'card_set_holo';
 
 const ChatContract = Schema.Struct({
   reply: Schema.optional(Schema.String),
