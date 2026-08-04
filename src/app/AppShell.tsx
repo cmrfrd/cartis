@@ -5,6 +5,7 @@ import { GalleryView } from '@/gallery/GalleryView';
 import { CardArchive, type StoredCard } from '@/storage/CardArchive';
 import { ImageLibrary } from '@/storage/ImageLibrary';
 import { TabBar } from '@/ui';
+import { syncHistory } from './history';
 
 export type ViewId = 'builder' | 'gallery';
 
@@ -22,6 +23,11 @@ export class AppShell extends Component {
   pendingCard?: StoredCard = undefined;
   /** The open saved card, reported UP by BuilderView (routing spec: the URL projects this). */
   openCardId?: CardIdT = undefined;
+
+  mount() {
+    // The URL is a projection of this model — one sync module, zero deps.
+    return syncHistory(this);
+  }
 
   render() {
     const { view } = this;
