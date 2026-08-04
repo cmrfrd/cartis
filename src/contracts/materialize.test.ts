@@ -72,4 +72,41 @@ describe('materializeAssistantParts', () => {
   it('yields a single empty text part for an empty contract (never a blank crash)', () => {
     expect(materializeAssistantParts('{}')).toEqual([{ _tag: 'Text', text: '' }]);
   });
+
+  // Live-caught (2026-08-03 goblin-engineer turn): the model wrote flavor text
+  // with UNESCAPED inner quotes — invalid JSON — and the raw blob rendered as
+  // the reply while the patch silently dropped. The repair pass must recover it.
+  it('repairs unescaped inner quotes in string values (the flavor-text class)', () => {
+    const parts = materializeAssistantParts(
+      '{\n' +
+        '  "reply": "Replaced Nyra with a goblin engineer.",\n' +
+        '  "patch": {\n' +
+        '    "name": "Grubwick Boltsnap",\n' +
+        '    "flavor": ""I meant to do that."",\n' +
+        '    "cost": 2\n' +
+        '  },\n' +
+        '  "artAction": { "brief": "ugly goblin engineer", "editCurrentArt": false }\n' +
+        '}',
+    );
+    expect(tags(parts)).toEqual(['Text', 'ToolCall', 'ToolCall']);
+    expect(parts[0]).toEqual({ _tag: 'Text', text: 'Replaced Nyra with a goblin engineer.' });
+    const chip = parts[1];
+    expect(chip?._tag === 'ToolCall' ? chip.argsText : '').toContain('Grubwick Boltsnap');
+    expect(chip?._tag === 'ToolCall' ? chip.argsText : '').toContain('I meant to do that.');
+  });
+
+  it('repairs trailing commas', () => {
+    const parts = materializeAssistantParts('{"reply": "ok", "patch": {"cost": 3,},}');
+    expect(tags(parts)).toEqual(['Text', 'ToolCall']);
+    expect(parts[0]).toEqual({ _tag: 'Text', text: 'ok' });
+  });
+
+  it('a hopelessly broken contract still surfaces the reply text, never the raw blob', () => {
+    // Unbalanced braces + garbage — beyond repair, but the reply is extractable.
+    const parts = materializeAssistantParts(
+      '{"reply": "I tried to update the card.", "patch": {"name": "X", "cost": }',
+    );
+    expect(parts[0]).toEqual({ _tag: 'Text', text: 'I tried to update the card.' });
+    expect(JSON.stringify(parts)).not.toContain('"patch"'); // no raw JSON leaks
+  });
 });

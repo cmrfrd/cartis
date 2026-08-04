@@ -98,12 +98,13 @@ export class BodyError extends Data.TaggedError('BodyError')<{
 
 /** opencode agent contract violations. src/server/agentBridge.ts */
 export class AgentError extends Data.TaggedError('AgentError')<{
-  readonly reason: 'no-session-id' | 'no-fill';
+  readonly reason: 'no-session-id' | 'no-fill' | 'bad-reply';
 }> {
   override get message(): string {
     const byReason: Record<AgentError['reason'], string> = {
       'no-session-id': 'opencode session did not return an id',
       'no-fill': 'agent returned no fill patch',
+      'bad-reply': 'the agent returned malformed output — try again or regenerate',
     };
     return byReason[this.reason];
   }

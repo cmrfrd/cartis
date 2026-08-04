@@ -313,6 +313,46 @@ describe('runChatTurn', () => {
     },
   );
 
+  it.effect(
+    'repairs model JSON with unescaped inner quotes and APPLIES the patch (live-caught)',
+    () => {
+      const calls: PromptCall[] = [];
+      return Effect.gen(function* () {
+        const out = yield* runChatTurn(chatReq(), noArt);
+        // the goblin-engineer class: flavor with unescaped quotes must not drop the patch
+        expect(out.patch).toEqual({ name: 'Grubwick Boltsnap' });
+        expect(out.artAction).toEqual({ brief: 'ugly goblin', editCurrentArt: false });
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            chatStub(
+              '{"reply": "Made a goblin.", "patch": {"name": "Grubwick Boltsnap", "hacker": ""I meant to do that.""}, "artAction": {"brief": "ugly goblin", "editCurrentArt": false}}',
+              calls,
+              [],
+            ),
+            threadBusTestLayer,
+          ),
+        ),
+      );
+    },
+  );
+
+  it.effect('a hopelessly mangled contract fails the turn with a typed error (no raw blob)', () =>
+    Effect.gen(function* () {
+      const err = yield* runChatTurn(chatReq(), noArt).pipe(Effect.flip);
+      expect(err._tag).toBe('AgentError');
+      expect((err as AgentError).reason).toBe('bad-reply');
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          // unbalanced braces — beyond the repair pass
+          chatStub('{"reply": "tried", "patch": {"cost": }', [], []),
+          threadBusTestLayer,
+        ),
+      ),
+    ),
+  );
+
   it.effect('an attachment-only turn sends the stand-in request text', () => {
     const calls: PromptCall[] = [];
     return Effect.gen(function* () {

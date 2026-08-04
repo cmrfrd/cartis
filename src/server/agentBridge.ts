@@ -46,7 +46,11 @@ import {
   SessionId,
   type SessionIdT,
 } from '../contracts/ids.ts';
-import { materializeAssistantParts } from '../contracts/materialize.ts';
+import {
+  extractJson,
+  looksLikeContract,
+  materializeAssistantParts,
+} from '../contracts/materialize.ts';
 import {
   AgentEvent,
   PromptResult,
@@ -755,22 +759,12 @@ const CHAT_GUIDE =
   '{ "reply": string, "patch"?: { ...only changed fields... }, "artAction"?: { "brief": string, "editCurrentArt": boolean } }. ' +
   '"reply" is a short natural-language message to the author (what you changed, or a clarifying question). ' +
   'Include "patch" only when you are changing fields, containing only those fields. ' +
-  'Include "artAction" ONLY when the request calls for generating or editing the card art.';
+  'Include "artAction" ONLY when the request calls for generating or editing the card art. ' +
+  'The JSON must be STRICT: escape any double quotes inside string values as \\" ' +
+  '(e.g. "flavor": "\\"I meant to do that.\\"") and never leave trailing commas.';
 
 const decodeArtActionOption = Schema.decodeUnknownOption(ArtAction);
 const decodeCardData = Schema.decodeUnknownOption(CardData);
-
-/** Parse the first {...} block out of a model reply (fences tolerated). */
-function extractJson(raw: string): Option.Option<unknown> {
-  const start = raw.indexOf('{');
-  const end = raw.lastIndexOf('}');
-  if (start < 0 || end <= start) return Option.none();
-  try {
-    return Option.some(JSON.parse(raw.slice(start, end + 1)));
-  } catch {
-    return Option.none();
-  }
-}
 
 /**
  * Marker separating the rich turn scaffold (guide + theme + fields + snapshot)
@@ -840,8 +834,18 @@ function parseChatReply(
   decodePatch: (u: unknown) => Effect.Effect<CardDataT, AgentError>,
 ): Effect.Effect<{ assistantText: string; patch: CardDataT; artAction?: ArtActionT }, AgentError> {
   return Effect.gen(function* () {
+    // Shared lenient extraction (repairs unescaped inner quotes + trailing
+    // commas — the live-caught failure classes) so a typographic slip in
+    // flavor text no longer drops the whole patch.
     const json = extractJson(raw);
-    if (Option.isNone(json)) return { assistantText: raw, patch: {} };
+    if (Option.isNone(json)) {
+      // The model TRIED the JSON transport and mangled it beyond repair —
+      // failing the turn honestly beats showing the author a raw blob.
+      if (looksLikeContract(raw)) {
+        return yield* Effect.fail(new AgentError({ reason: 'bad-reply' }));
+      }
+      return { assistantText: raw, patch: {} };
+    }
     const body = json.value as { patch?: unknown; artAction?: unknown };
     const patch = yield* decodePatch(body.patch ?? {});
     const artAction = Option.getOrUndefined(decodeArtActionOption(body.artAction));
