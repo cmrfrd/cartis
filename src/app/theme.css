@@ -31,25 +31,39 @@
   src: url("../assets/fonts/eb-garamond-latin-600-normal.woff2") format("woff2");
 }
 
-/* ---- neobrutalism system (app chrome only; cards keep their own tokens) ---- */
+/* ---- app chrome tokens (cards keep their own tokens; see src/cards/*) ----
+
+   Single source of truth: the --color-* values in the plain @theme block below.
+   Every other name (neobrutalism-era --main/--background/… and the Tailwind
+   --color-* utilities) ALIASES those, so a hex is defined exactly once.
+
+   Elevation is a soft ambient shadow, not a hard offset — the old 3px drop-shadow
+   rendered black on near-black (invisible) and only produced a hover "bounce". The
+   box-shadow offset spacings are pinned to 0 so the button hover utilities
+   (translate-x-boxShadowX …) become no-ops WITHOUT editing button.tsx. */
 :root {
   --border-radius: 5px;
-  --box-shadow-x: 3px;
-  --box-shadow-y: 3px;
-  --reverse-box-shadow-x: -3px;
-  --reverse-box-shadow-y: -3px;
   --heading-font-weight: 700;
   --base-font-weight: 500;
 
-  --background: #14161f;
-  --secondary-background: #1d2130;
-  --foreground: #e8e4d8;
-  --main: #d9a441;
-  --main-foreground: #14161f;
-  --border: #000000;
-  --ring: #e8e4d8;
+  /* offsets neutralised (were 3px / -3px) — kills the hover translate bounce */
+  --box-shadow-x: 0px;
+  --box-shadow-y: 0px;
+  --reverse-box-shadow-x: 0px;
+  --reverse-box-shadow-y: 0px;
+
+  /* neobrutalism-era aliases → the @theme --color-* single source */
+  --background: var(--color-surface);
+  --secondary-background: var(--color-panel);
+  --foreground: var(--color-ink);
+  --main: var(--color-accent);
+  --main-foreground: var(--color-surface);
+  --border: var(--color-edge);        /* was #000000 — pure-black cages gone */
+  --ring: var(--color-accent);        /* was #e8e4d8 — visible gold focus ring */
   --overlay: rgba(0, 0, 0, 0.8);
-  --shadow: var(--box-shadow-x) var(--box-shadow-y) 0px 0px var(--border);
+
+  /* soft ambient elevation (was: 3px 3px 0 0 var(--border)) */
+  --shadow: 0 1px 2px rgb(0 0 0 / 0.45), 0 6px 18px rgb(0 0 0 / 0.28);
 }
 
 @theme inline {
@@ -81,6 +95,12 @@
   --color-ink-dim: #9aa0b5;
   --color-accent: #d9a441;
   --color-accent-soft: #8a6a2f;
+  --color-accent-hover: #e4b45c; /* filled-button hover (lighter gold) */
+  --color-accent-active: #c69337; /* filled-button pressed (darker gold) */
+  --color-danger: #e5726b; /* one destructive color */
+  --color-danger-strong: #d64f4f; /* solid destructive fill */
+  --color-hover: rgb(255 255 255 / 0.05); /* ghost/secondary hover raise */
+  --color-active: rgb(255 255 255 / 0.09); /* pressed */
   --font-display: "Cinzel", "Iowan Old Style", Palatino, Georgia, serif;
   --font-body: ui-sans-serif, system-ui, sans-serif;
   --font-card: "EB Garamond", "Iowan Old Style", Georgia, serif;

@@ -4,9 +4,11 @@
 **Status:** Approved. Expanded from the original agentic-e2e design (user
 request 2026-08-04) into a three-track hardening initiative:
 **A** adversarial model-output corpus, **B** scripted Playwright e2e with a
-fake-agent seam (including render parity), **C** agentic e2e (opencode-driven
-browser scenarios). Property-based fuzzing was considered and explicitly
-skipped (marginal over Track A).
+fake-agent seam (including render parity), **C** agentic e2e (pi-driven
+browser scenarios; the driver was originally designed on opencode and
+switched to pi's in-process SDK after a research spike — 2026-08-04).
+Property-based fuzzing was considered and explicitly skipped (marginal over
+Track A).
 
 ## Why
 
@@ -94,7 +96,7 @@ of the card face across builder and gallery-tile contexts (text-align,
 font-family — the UA-leak class) plus ONE `toHaveScreenshot` baseline of the
 builder card face.
 
-## Track C — agentic e2e (opencode-driven)
+## Track C — agentic e2e (pi-driven)
 
 A small, manually-triggered suite where an LLM with a **user-facing
 objective** drives the real app end-to-end, and a **mechanical harness — not
@@ -103,51 +105,74 @@ the LLM — judges the outcome**. Lives under `e2e/agentic/`.
 ### Principles
 
 1. **The driver acts; the harness judges.** Pass/fail never rests on the
-   LLM's self-assessment. Criteria are typed checks the runner executes.
+   LLM's self-assessment. Criteria are typed checks the runner executes —
+   and with the pi design, page criteria run DIRECTLY through the harness's
+   own browser connection (no agent relay at all).
 2. **Real seams.** The app's chat runs against REAL opencode (where the bug
    class lives); images stay on the free stub. The browser is real Chrome.
-3. **Isolation.** Scenarios never touch the user's `cartis-data` or the
-   repo's project-scoped opencode sessions.
+3. **Isolation.** Scenarios never touch the user's `cartis-data`; the driver
+   keeps NOTHING persistent (in-memory sessions, settings, credentials).
 4. **Small and manual.** Three scenarios, run by hand before merges that
    touch the chat/browser surface.
 
-### Architecture — three processes, one owner
+### Why pi (decision record)
+
+The original design spawned a second opencode server as the driver. A
+research spike (2026-08-04) showed `@earendil-works/pi-coding-agent` ships a
+real embeddable SDK — `createAgentSession()` runs the agent loop IN-PROCESS
+(prompt/abort/subscribe/messages), which deletes the driver child process,
+its port, the HTTP client, and the cwd/session-pollution concern (in-memory
+`SessionManager`). Decisive extra: because the HARNESS owns the browser MCP
+client, verification snippets execute mechanically through the same
+connection — the fenced-JSON agent-relay (and its trust caveat) is gone.
+The app's runtime stays opencode (unchanged); pi is the TEST DRIVER only.
+Costs accepted: `@earendil-works/pi-coding-agent` + `@modelcontextprotocol/sdk`
+as devDeps PINNED EXACT (pi is v0.x with breaking minors); pi auth is
+separate from opencode auth (`ANTHROPIC_API_KEY` or `pi` OAuth login —
+subscription usage bills as extra usage); pi targets node ≥ 22, bun is
+secondary — the canary gates bun compatibility.
+
+### Architecture — one owner, fewer processes
 
 `bun run e2e:agent [scenario-id…]` (script: `e2e/agentic/runner.ts`):
 
 1. **The app under test:** the dev server spawned with
-   `CARTIS_DATA_ROOT=<scratch>/data` — a NEW env override read in
-   `cartisBridge()` (`process.env.CARTIS_DATA_ROOT ?? 'cartis-data'`; with
-   the Track-B fake seam, one of only two `src/` changes). **Dedicated strict
-   port (data safety):** vite runs with `--port 5199 --strictPort`; the
-   runner ABORTS if 5199 is listening BEFORE spawn. Never poll 5173 — the
-   user's own server (and REAL data) is usually there.
-   `APP_URL = http://localhost:5199` is threaded into preamble and
-   objectives. Scratch root seeded from the scenario's fixture dir;
-   `REPLICATE_API_TOKEN` stripped (stub art).
-2. **The driver:** a second opencode server via the same `createOpencode` the
-   app uses: `config.mcp` attaches the **chrome-devtools MCP** server
-   (`chrome-devtools-mcp` via `bunx`; requires local Chrome) for real browser
-   tools; its **cwd is a scratch driver dir**, never the repo (sessions are
-   project-scoped — driver sessions must not pollute the card-chat list).
-   Staged fixture files land there; objectives are TEMPLATED — the harness
-   substitutes `{{APP_URL}}` and `{{STAGE_DIR}}` (absolute). Driver model:
-   `E2E_DRIVER_MODEL ?? OPENCODE_MODEL`. Permissions permissive so tool calls
-   don't block.
-3. **Scenarios, sequentially** (shared strict port): fresh scratch data root
-   + fresh dev server + fresh driver session per scenario.
+   `CARTIS_DATA_ROOT=<scratch>/data` (env override in `cartisBridge()`).
+   **Dedicated strict port (data safety):** vite runs with
+   `--port 5199 --strictPort`; the runner ABORTS if 5199 answers BEFORE
+   spawn. Never 5173 — the user's own server (and REAL data) is usually
+   there. `APP_URL = http://localhost:5199`. Scratch root seeded from the
+   scenario's fixture dir; `REPLICATE_API_TOKEN` stripped (stub art). The
+   app's agent spawns its own opencode child as in production.
+2. **The browser bridge (harness-owned):** the runner connects an
+   `@modelcontextprotocol/sdk` stdio Client to a spawned
+   `chrome-devtools-mcp` process (which launches Chrome). `listTools()`
+   results are wrapped as pi `customTools` (`defineTool` per tool; image
+   results flow as pi `ImageContent` — pi normalizes oversized screenshots).
+   The SAME client is the verification channel.
+3. **The driver (in-process pi):** `createAgentSession({ customTools:
+   browserTools, sessionManager: SessionManager.inMemory(), … })` with the
+   preamble as system prompt, model `E2E_DRIVER_MODEL ?? OPENCODE_MODEL`
+   mapped through pi's model catalog. Loop control is MECHANICAL:
+   `AbortSignal`-based timeout (`timeoutMin`) plus a `shouldStopAfterTurn`
+   turn cap (~40 tool calls) — budget is enforced, not just requested.
+   `session.subscribe()` streams every event; the transcript is captured
+   natively as evidence. Staged fixture files live in a scratch stage dir;
+   objectives are TEMPLATED (`{{APP_URL}}`, `{{STAGE_DIR}}` absolute).
+4. **Scenarios, sequentially:** fresh scratch data root + fresh dev server +
+   fresh pi session + fresh MCP/Chrome per scenario.
 
-Teardown is a `finally`: abort sessions, close both opencode servers, kill
-the dev server — and VERIFY the whole tree died, including the Chrome that
-`chrome-devtools-mcp` spawns (the canary proves `close()` kills it; teardown
-re-checks). Per-scenario `timeoutMin` aborts and fails with transcript.
+Teardown is a `finally`: `session.abort()`/`dispose()`, close the MCP client
+(must take Chrome down with it — canary proves this), kill the dev server —
+then VERIFY nothing from `vite|opencode serve|chrome-devtools-mcp|Chrome for
+Testing` survived.
 
 **Flake policy:** every verdict separates the DRIVER outcome
 (`done`/`blocked`/`timeout`) from the CRITERIA outcome. Criteria failures are
 real findings — never weaken a criterion to pass. Driver failures are
 retryable via `--retries N` (default 0), re-running ONLY driver-failed
-scenarios. Each scenario ends with a full-page screenshot into the run dir as
-passed-for-the-right-reason evidence.
+scenarios. The harness takes a final full-page screenshot DIRECTLY via the
+MCP client into the run dir as passed-for-the-right-reason evidence.
 
 ### Scenario contract (`e2e/agentic/scenarios/*.ts`)
 
@@ -157,7 +182,7 @@ export interface Scenario {
   title: string;
   timeoutMin: number;
   seed?: string;                    // e2e/agentic/fixtures/<name> → scratch data root
-  stage?: readonly string[];        // repo-relative files → driver cwd
+  stage?: readonly string[];        // repo-relative files → scratch stage dir
   objective: string;                // user-voice; {{APP_URL}}/{{STAGE_DIR}} templated
   constraints: readonly string[];
   criteria: readonly Criterion[];
@@ -168,22 +193,21 @@ export type Criterion =
 ```
 
 `fs` criteria run directly in the runner against the scratch data root.
-`page` criteria are FIXED JS snippets: one verification prompt instructs the
-driver to execute each verbatim with its evaluate tool and reply with ONLY a
-fenced JSON array of results; the runner parses the last fence and applies
-each `expect`. Unparseable reply → one retry → fail with the raw reply as
-evidence. (The trust caveat of relaying through the agent is accepted for v1;
-direct-CDP verification is v2 hardening.)
+`page` criteria run DIRECTLY too: after the driver settles, the harness calls
+the MCP `evaluate_script` tool itself with each fixed snippet and applies
+`expect` to the raw result. No agent relay, no fenced-JSON parsing, no trust
+caveat — verification is fully mechanical by construction.
 
-### Harness preamble (driver prompt contract)
+### Driver preamble (system prompt)
 
-Prepended to every objective: you are a USER of the card app at `{{APP_URL}}`
-driving a browser via the chrome-devtools tools; act through the UI only;
-never read or modify source files or data directories directly; take a
-snapshot before interacting; prefer snapshots over screenshots; wait for the
-app's agent turns to finish (Stop reverts to Send) before proceeding; reply
-exactly `DONE: <one-paragraph summary>` when complete, `BLOCKED: <why>` if
-truly stuck; keep under ~40 tool calls.
+You are a USER of the card app at `{{APP_URL}}`, driving a real browser
+through the provided browser tools; act through the UI only; never read or
+modify source files or data directories directly; take a snapshot before
+interacting; prefer snapshots over screenshots; wait for the app's agent
+turns to finish (Stop reverts to Send) before proceeding; reply exactly
+`DONE: <one-paragraph summary>` when the objective is complete, or
+`BLOCKED: <why>` if truly stuck. (The tool-call budget is enforced by the
+harness turn cap, not by instruction alone.)
 
 ### v1 scenarios
 
@@ -207,15 +231,21 @@ truly stuck; keep under ~40 tool calls.
 ### Output
 
 `e2e/runs/<ISO-stamp>/`: `report.md` (per-scenario × per-criterion ✓/✗ table
-with evidence + driver outcome), `transcript-<id>.json` (full session dump),
-final screenshots. Verdict table printed; nonzero exit on any failure.
+with evidence + driver outcome), `transcript-<id>.json` (the captured
+`subscribe()` event stream + final `session.messages`), final screenshots.
+Verdict table printed; nonzero exit on any failure.
 
 ### Known risk — gated first
 
-Whether `createOpencode({ config })` accepts an `mcp` block (and the session
-can actually call a browser tool) is unverified. The plan's Track-C canary
-proves it; fallback: write `opencode.json` into the driver cwd. If neither
-exposes MCP tools: STOP and redesign the driver's tool surface.
+Two unverified assumptions, proven by the canary before anything else is
+built: (1) the pi SDK (`createAgentSession`) runs under BUN (pi targets
+node ≥ 22; bun is secondary) — fallback: run the agentic runner under
+`node`; (2) the MCP→customTools bridge works end-to-end (spawn
+`chrome-devtools-mcp`, list tools, drive one navigation via a pi session,
+and call `evaluate_script` DIRECTLY from the harness). If pi proves
+unworkable, the documented fallback is the previous opencode-driver design
+(preserved in git history of this spec). Either way: STOP at the canary on
+failure — never build the runner on an unproven driver.
 
 ## Non-goals
 
@@ -227,6 +257,8 @@ Windows/Linux support beyond what the tools provide.
 ## Costs
 
 Track A: none (unit-speed). Track B: one devDependency + a Chromium
-download; runs in tens of seconds, free. Track C: minutes per run, opencode
-account tokens (driver + app agent), zero Replicate spend; local Chrome
-required.
+download; runs in tens of seconds, free. Track C: minutes per run; DRIVER
+tokens via pi auth (`ANTHROPIC_API_KEY` or Claude subscription as
+extra-usage billing) + APP-agent tokens via the existing opencode account;
+zero Replicate spend; local Chrome required; two pinned devDeps
+(`@earendil-works/pi-coding-agent`, `@modelcontextprotocol/sdk`).

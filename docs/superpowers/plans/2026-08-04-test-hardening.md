@@ -2,23 +2,24 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Three hardening tracks per `docs/superpowers/specs/2026-08-04-test-hardening-design.md`: **A** adversarial model-output corpus (unit-speed), **B** scripted Playwright e2e with a fake-agent bridge seam incl. render parity (`bun run e2e:scripted`), **C** agentic e2e — an opencode-driven LLM drives real Chrome to user-voice objectives, harness-judged (`bun run e2e:agent`).
+**Goal:** Three hardening tracks per `docs/superpowers/specs/2026-08-04-test-hardening-design.md`: **A** adversarial model-output corpus (unit-speed), **B** scripted Playwright e2e with a fake-agent bridge seam incl. render parity (`bun run e2e:scripted`), **C** agentic e2e — a pi-driven (in-process SDK) LLM drives real Chrome to user-voice objectives, harness-judged (`bun run e2e:agent`).
 
-**Architecture:** Track A is one table-driven vitest file over the real parse pipeline. Track B swaps `agentClientLive` for an in-memory `agentClientFake` (env-gated) that drives the REAL ThreadBus, under Playwright with a strict-port scratch-root webServer. Track C: one runner owns dev server (scratch `CARTIS_DATA_ROOT`, strict port 5199), a driver opencode (chrome-devtools MCP attached, scratch cwd), and sequential scenario sessions; `fs` criteria run in the runner, `page` criteria are fixed snippets relayed through the driver's evaluate tool.
+**Architecture:** Track A is one table-driven vitest file over the real parse pipeline. Track B swaps `agentClientLive` for an in-memory `agentClientFake` (env-gated) that drives the REAL ThreadBus, under Playwright with a strict-port scratch-root webServer. Track C: one runner owns the dev server (scratch `CARTIS_DATA_ROOT`, strict port 5199), a harness-owned MCP client to a spawned `chrome-devtools-mcp` (Chrome), and an IN-PROCESS pi `createAgentSession` driver whose customTools wrap the MCP tools; `fs` criteria run in the runner, `page` criteria run DIRECTLY via the harness's own MCP `evaluate_script` calls — no agent relay.
 
-**Tech Stack:** vitest (A), `@playwright/test` + Chromium (B), `@opencode-ai/sdk` `createOpencode` + `chrome-devtools-mcp` via `bunx` (C), bun scripts, `node:fs/promises`.
+**Tech Stack:** vitest (A), `@playwright/test` + Chromium (B), `@earendil-works/pi-coding-agent` (in-process driver) + `@modelcontextprotocol/sdk` (stdio client) + `chrome-devtools-mcp` (C), bun scripts, `node:fs/promises`.
 
 ## Global Constraints
 
 - **Task order:** Track A first (independent, immediate value). Track C's canary (Task 2) gates Tasks 3–5. Track B (Tasks 6–8) is independent of C and follows it here only for review sanity.
 - `src/` changes are EXACTLY: (1) `agentBridge.ts:1337` → `const DATA_ROOT = process.env.CARTIS_DATA_ROOT ?? 'cartis-data';` and (2) the Track-B fake seam (`src/server/agentFake.ts` + the env-gated provide). Both are config-reachable → relative `.ts` imports, no `@/`.
 - **Strict ports (data safety):** scripted = 5198, agentic = 5199, both `--strictPort`, pre-flight ABORT if the port already answers. NEVER 5173 — the user's live server (and REAL data) is usually there. `REPLICATE_API_TOKEN` stripped from all child envs.
-- Track C objectives are TEMPLATED (`{{APP_URL}}`, `{{STAGE_DIR}}` absolute); driver model `E2E_DRIVER_MODEL ?? OPENCODE_MODEL`; driver cwd NEVER the repo; raw SDK client in e2e (no `agentBridge.ts` import — it drags the vite-tied graph into a bun script).
+- Track C driver = pi IN-PROCESS: `@earendil-works/pi-coding-agent` + `@modelcontextprotocol/sdk` as devDeps PINNED EXACT (pi is v0.x with breaking minors). In-memory SessionManager/settings/credentials — nothing persisted, no driver cwd concern. Objectives TEMPLATED (`{{APP_URL}}`, `{{STAGE_DIR}}` absolute stage dir); driver model `E2E_DRIVER_MODEL ?? OPENCODE_MODEL` via pi's catalog; pi auth = `ANTHROPIC_API_KEY` or `pi` OAuth (separate from opencode auth). No `agentBridge.ts` import in e2e.
 - Track C verdicts separate DRIVER outcome (done/blocked/timeout) from CRITERIA outcome; `--retries N` (default 0) re-runs driver-failures only; never weaken a criterion to pass; final full-page screenshot per scenario.
-- Sequential scenarios; `rm -rf` + recreate scratch dirs per scenario; teardown VERIFIES the tree died (vite, opencodes, MCP's Chrome).
-- Pass/fail comes ONLY from `Criterion` checks (C) / Playwright assertions (B). Driver `DONE`/`BLOCKED` text is evidence, never a verdict.
+- Sequential scenarios; `rm -rf` + recreate scratch dirs per scenario; teardown VERIFIES the tree died (vite, the app's opencode, chrome-devtools-mcp, its Chrome).
+- Pass/fail comes ONLY from `Criterion` checks (C) / Playwright assertions (B). Driver `DONE`/`BLOCKED` text is evidence, never a verdict. Page criteria + final screenshot execute DIRECTLY through the harness's MCP client — never relayed through the agent.
+- Loop control is MECHANICAL: `AbortSignal`-based `timeoutMin` + a `shouldStopAfterTurn` turn cap (~40 tool calls).
 - `bun run verify` green per task and must NOT run Playwright (separate `e2e:scripted` script; exclude `e2e/scripted` from vitest globs — they're `*.spec.ts`, vitest matches `*.test.*`, no conflict). Add `"e2e"` to `tsconfig.json` include; biome covers `e2e/`; `.gitignore` += `e2e/runs/`, `e2e/.scratch/`, `test-results/`, `playwright-report/`.
-- SDK facts (verified): `Config.mcp: { [name]: McpLocalConfig }` `{ type: 'local', command: string[], environment?, enabled? }`; `Config.permission` exists — set permissive values.
+- pi facts (from the 2026-08-04 research spike): `createAgentSession({ customTools, sessionManager: SessionManager.inMemory(), modelRuntime, … })`; `session.prompt/abort/subscribe/messages`; `defineTool` with TypeBox schemas; tool results may carry `ImageContent` (screenshots auto-normalized); `PromptOptions.images` for user-side images. Verify exact API names against the PINNED version's `docs/sdk.md` at implementation time.
 - Commits end `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>`. Branch `feat/test-hardening`; ff-merge + push + delete at end.
 
 ---
@@ -35,55 +36,39 @@
 - [ ] **Step 2: seed 10 entries** (samples verbatim where live-caught): goblin unescaped quotes (`caught: '2026-08-03'`); Tinker nulls + off-list enums (`caught: '2026-08-03'`); fenced ```json; prose preamble + JSON; trailing commas; unbalanced braces → reply-salvage, `JSON.stringify(parts)` contains no `"patch"`; plain-text reply; `{}`; valid+mistyped `actions` mix; `setLayout`/`setTheme`/`setHolo` knobs. Header comment: **the bug→fixture rule — every live-caught sample is appended verbatim with a date.**
 - [ ] **Step 3:** run the file; `bun run verify` green; commit `test(contracts): adversarial model-output corpus (bug→fixture home)`.
 
-## Track C — agentic e2e
+## Track C — agentic e2e (pi-driven)
 
-### Task 2: Canary — driver opencode with browser tools + `CARTIS_DATA_ROOT`
+### Task 2: Canary — pi-under-bun + MCP browser bridge + `CARTIS_DATA_ROOT`
 
-**Files:** Create `e2e/agentic/harness.ts` (spawnDriver only), `e2e/agentic/canary.ts`. Modify `src/server/agentBridge.ts:1337`, `tsconfig.json` (include `e2e`), `.gitignore`.
+**Files:** Create `e2e/agentic/browser.ts` (MCP bridge), `e2e/agentic/driver.ts` (pi session factory), `e2e/agentic/canary.ts`. Modify `src/server/agentBridge.ts:1337`, `package.json` (devDeps pinned exact), `tsconfig.json` (include `e2e`), `.gitignore` (`e2e/runs/`, `e2e/.scratch/`).
 
 **Interfaces (produces):**
 ```ts
-// e2e/agentic/harness.ts — RAW SDK surface, no agentBridge import
-import { createOpencode } from '@opencode-ai/sdk';
-export interface Driver {
-  client: Awaited<ReturnType<typeof createOpencode>>['client'];
-  close(): void;   // must also kill MCP's Chrome (canary verifies)
+// e2e/agentic/browser.ts — the harness-owned browser connection
+export interface Browser {
+  /** call any chrome-devtools tool directly (verification channel). */
+  call(tool: string, args: Record<string, unknown>): Promise<unknown>;
+  /** pi customTools wrapping every MCP tool (driver channel). */
+  tools: PiTool[];
+  close(): Promise<void>;   // must take chrome-devtools-mcp AND Chrome down
 }
-export async function spawnDriver(cwd: string): Promise<Driver>;
+export async function connectBrowser(): Promise<Browser>;
+
+// e2e/agentic/driver.ts
+export interface DriverRun { reply: string; outcome: 'done' | 'blocked' | 'timeout'; events: unknown[] }
+export async function runDriver(browser: Browser, systemPrompt: string, objective: string, timeoutMin: number): Promise<DriverRun>;
 export const APP_URL = 'http://localhost:5199';
 ```
 
-- [ ] **Step 1: bridge env override** + comment (`// e2e runs point this at a scratch dir (test-hardening spec)`). Prove BOTH ways: `CARTIS_DATA_ROOT=/tmp/cartis-e2e-probe bun run dev -- --port 5199 --strictPort` → `curl localhost:5199/api/store/cards` = `[]` and probe dir created; then without the env on 5199 → real cards listed. Kill server.
-- [ ] **Step 2: spawnDriver.**
-```ts
-export async function spawnDriver(cwd: string): Promise<Driver> {
-  const prevCwd = process.cwd();
-  process.chdir(cwd); // opencode scopes sessions to cwd — NEVER the repo
-  try {
-    const model = process.env.E2E_DRIVER_MODEL ?? process.env.OPENCODE_MODEL;
-    const { client, server } = await createOpencode({
-      port: 0,
-      config: {
-        ...(model ? { model } : {}),
-        mcp: { browser: { type: 'local', command: ['bunx', 'chrome-devtools-mcp@latest'], enabled: true } },
-        permission: { edit: 'allow', bash: 'allow', webfetch: 'allow' }, // adjust keys to Config['permission']
-      },
-    });
-    return { client, close: () => server.close() };
-  } finally {
-    process.chdir(prevCwd);
-  }
-}
-// Raw SDK responses wrap payloads as { data } — unwrap inline at call sites.
-```
-(If cwd-at-call-time doesn't scope it: fallback = write `${cwd}/opencode.json` with the same config, spawn plain.)
-- [ ] **Step 3: canary.** mkdir `e2e/.scratch/canary`; spawnDriver; `session.create`; prompt *"Use your browser tools: navigate to https://example.com, take a page snapshot, reply with exactly the page's h1 text."*; print reply + tool-call parts from `session.messages`. **GO** = "Example Domain" + MCP tool calls visible. NO-GO → opencode.json fallback → still failing → STOP and report.
-- [ ] **Step 4:** `bun e2e/agentic/canary.ts`; record GO/NO-GO + config path atop harness.ts. `driver.close()` then PROVE the tree died: `pgrep -fl 'chrome-devtools-mcp|opencode serve'` empty, no Chrome-for-Testing leftover. If Chrome survives, add explicit child-kill to `close()` NOW.
-- [ ] **Step 5:** verify green; commit `feat(e2e): agentic driver canary (chrome-devtools MCP) + CARTIS_DATA_ROOT override`.
+- [ ] **Step 1: bridge env override** — `const DATA_ROOT = process.env.CARTIS_DATA_ROOT ?? 'cartis-data';` + comment. Prove BOTH ways on port 5199 (`--strictPort`): with the env → `[]` from `/api/store/cards` + probe dir created; without → real cards. Kill server.
+- [ ] **Step 2: deps + bridge.** `bun add -d --exact @earendil-works/pi-coding-agent @modelcontextprotocol/sdk`. `connectBrowser()`: `new Client(...)` + `StdioClientTransport({ command: 'bunx', args: ['chrome-devtools-mcp@latest'] })`, `listTools()`, map each to a pi `defineTool` whose `execute` forwards to `client.callTool` and converts image payloads to pi `ImageContent`; `call()` invokes `client.callTool` directly; `close()` closes the transport and verifies the child died.
+- [ ] **Step 3: driver factory.** `runDriver`: `ModelRuntime.create()` (in-memory credentials honoring `ANTHROPIC_API_KEY`), `createAgentSession` with `SessionManager.inMemory()`, `customTools: browser.tools`, system prompt = param, model from `E2E_DRIVER_MODEL ?? OPENCODE_MODEL`; subscribe→collect events; `shouldStopAfterTurn` counts ~40 tool calls; `AbortSignal.timeout(timeoutMin * 60_000)` → outcome 'timeout'; parse trailing `DONE:`/`BLOCKED:` → outcome.
+- [ ] **Step 4: canary run.** `bun e2e/agentic/canary.ts`: connectBrowser → runDriver(preamble-less system prompt, *"Navigate to https://example.com and reply DONE: followed by the page's h1 text."*, 3) → assert reply contains "Example Domain"; then the DIRECT channel: `browser.call('evaluate_script', { function: '() => document.querySelector("h1")?.textContent' })` → "Example Domain" WITHOUT the agent. `browser.close()` → `pgrep -fl 'chrome-devtools-mcp'` empty + no Chrome-for-Testing leftover (add explicit child-kill if it survives). **GO/NO-GO recorded atop browser.ts.** Bun-incompat fallback: run the agentic runner under `node`; pi-unworkable fallback: revert to the opencode-driver design (git history of the spec). STOP on failure — never build the runner on an unproven driver.
+- [ ] **Step 5:** `bun run verify` green; commit `feat(e2e): pi in-process driver canary + MCP browser bridge + CARTIS_DATA_ROOT override`.
 
 ### Task 3: Scenario contract + runner lifecycle (smoke)
 
-**Files:** Create `e2e/agentic/types.ts`, `e2e/agentic/runner.ts`, `e2e/agentic/scenarios/{index,smoke}.ts`. Modify `e2e/agentic/harness.ts`, `package.json` (`"e2e:agent": "bun e2e/agentic/runner.ts"`).
+**Files:** Create `e2e/agentic/types.ts`, `e2e/agentic/runner.ts`, `e2e/agentic/scenarios/{index,smoke}.ts`. Modify `e2e/agentic/driver.ts` (PREAMBLE + templating), `package.json` (`"e2e:agent": "bun e2e/agentic/runner.ts"`).
 
 **Interfaces (produces):**
 ```ts
@@ -92,36 +77,30 @@ export interface Scenario { id: string; title: string; timeoutMin: number; seed?
 export type Criterion =
   | { kind: 'fs'; label: string; check: (dataRoot: string) => boolean | Promise<boolean> }
   | { kind: 'page'; label: string; script: string; expect: (result: unknown) => boolean };
-// e2e/agentic/harness.ts additions
-export const PREAMBLE: string;
-export async function runObjective(d: Driver, s: Scenario, vars: { APP_URL: string; STAGE_DIR: string }): Promise<{ reply: string; timedOut: boolean; sessionId: string }>;
-export async function dumpTranscript(d: Driver, sessionId: string, file: string): Promise<void>;
+// driver.ts additions
+export const PREAMBLE: string;   // spec §Driver preamble; used as the pi system prompt
+export function template(text: string, vars: { APP_URL: string; STAGE_DIR: string }): string;
 ```
 
-- [ ] **Step 1: PREAMBLE (exact):** *"You are a USER of the Cartis card app at {{APP_URL}}, driving a real browser through your chrome-devtools tools. Act ONLY through the UI — never read or modify source files or data directories directly. Take a page snapshot before interacting. Prefer snapshots over screenshots. The app has its own AI: after sending a chat message, WAIT until its Stop button reverts to Send before your next action. Keep under 40 tool calls. When the objective is complete, reply exactly `DONE: <one-paragraph summary>`. If truly blocked, reply `BLOCKED: <why>`."* `runObjective` templates `{{APP_URL}}`/`{{STAGE_DIR}}` across preamble+objective+constraints, races `timeoutMin`, aborts on timeout.
-- [ ] **Step 2: runner lifecycle.** argv: ids (default all) + `--retries N`. PRE-FLIGHT: anything answering on 5199 → abort "port busy". Per scenario: (1) `rm -rf`+create `e2e/.scratch/<id>/{data,driver}`, copy seed/staged; (2) `Bun.spawn(['bun','run','dev','--','--port','5199','--strictPort'], { env: {...process.env, CARTIS_DATA_ROOT: dataRoot, REPLICATE_API_TOKEN: undefined} })`, poll `${APP_URL}/builder`→200 (30s max); (3) spawnDriver → runObjective; (4) Task-4 verdicts; driver-failure + retries left → full teardown + re-run; (5) `finally`: dumpTranscript, close, kill, wait port free, assert no orphan `vite|opencode serve|chrome-devtools-mcp`. Nonzero exit on any failure.
-- [ ] **Step 3: smoke.** `{ id: 'smoke', timeoutMin: 3, objective: 'Navigate to {{APP_URL}}/builder and confirm the app is showing.', constraints: [], criteria: [{ kind: 'page', label: 'builder heading', script: 'document.querySelector("h1")?.textContent ?? null', expect: (r) => r === 'CARTIS' }] }` (verdicts land in Task 4; log the reply only here).
+- [ ] **Step 1: PREAMBLE (exact, as pi system prompt):** *"You are a USER of the Cartis card app at {{APP_URL}}, driving a real browser through the provided browser tools. Act ONLY through the UI — never read or modify source files or data directories directly. Take a page snapshot before interacting. Prefer snapshots over screenshots. The app has its own AI: after sending a chat message, WAIT until its Stop button reverts to Send before your next action. When the objective is complete, reply exactly `DONE: <one-paragraph summary>`. If truly blocked, reply `BLOCKED: <why>`."* (budget enforced by the turn cap, not instruction).
+- [ ] **Step 2: runner lifecycle.** argv: ids (default all) + `--retries N`. PRE-FLIGHT: anything answering on 5199 → abort "port busy". Per scenario: (1) `rm -rf`+create `e2e/.scratch/<id>/{data,stage}`, copy seed/staged; (2) `Bun.spawn(['bun','run','dev','--','--port','5199','--strictPort'], { env: {...process.env, CARTIS_DATA_ROOT: dataRoot, REPLICATE_API_TOKEN: undefined} })`, poll `${APP_URL}/builder`→200 (30s); (3) `connectBrowser()` → `runDriver(browser, template(PREAMBLE, vars), template(objective+constraints, vars), timeoutMin)`; (4) Task-4 verdicts (direct via `browser.call`); driver-failure + retries left → full teardown + re-run; (5) `finally`: write events transcript, `browser.close()`, kill dev server, wait 5199 free, assert no orphan `vite|opencode serve|chrome-devtools-mcp`. Nonzero exit on any failure.
+- [ ] **Step 3: smoke.** `{ id: 'smoke', timeoutMin: 3, objective: 'Navigate to {{APP_URL}}/builder and confirm the app is showing.', constraints: [], criteria: [{ kind: 'page', label: 'builder heading', script: '() => document.querySelector("h1")?.textContent ?? null', expect: (r) => r === 'CARTIS' }] }`.
 - [ ] **Step 4:** `bun run e2e:agent smoke` — boots scratch, drives, `DONE:` printed, teardown clean (`pgrep` empty).
 - [ ] **Step 5:** verify green; commit `feat(e2e): agentic scenario contract + runner lifecycle (smoke)`.
 
-### Task 4: Verdicts — criteria execution, report, exit code
+### Task 4: Verdicts — direct criteria execution, report, exit code
 
-**Files:** Modify `e2e/agentic/harness.ts`, `e2e/agentic/runner.ts`.
+**Files:** Modify `e2e/agentic/runner.ts` (judge + report; small helpers in `driver.ts`/`browser.ts` as needed).
 
 **Interfaces (produces):**
 ```ts
-export async function runPageCriteria(d: Driver, sessionId: string, criteria: readonly Extract<Criterion, {kind:'page'}>[]): Promise<unknown[]>;
-// Verification prompt: "Execute each of the following JavaScript snippets, in order,
-// with your evaluate tool, VERBATIM. Then take a full-page screenshot and save it to
-// {{STAGE_DIR}}/final.png. Reply with ONLY one fenced json block containing the array
-// of results in the same order. No commentary." Parse LAST ```json fence; one retry; then throw.
 export interface Verdict { scenario: string; driverOutcome: 'done' | 'blocked' | 'timeout'; results: { label: string; pass: boolean; evidence: string }[]; driverReply: string; }
 ```
 
-- [ ] **Step 1:** implement `runPageCriteria` + fs execution (`await c.check(dataRoot)` try/catch → catch = fail w/ error as evidence) + `Verdict`. Blocked/timeout objectives STILL run criteria (state may be salvageable) but are flagged; runner copies `final.png` into the run dir.
-- [ ] **Step 2: report.** `e2e/runs/<ISO-stamp>/report.md`: verdict table (scenario × criterion ✓/✗ + evidence + driver outcome), transcripts alongside. Print table; `process.exitCode = 1` on any ✗.
-- [ ] **Step 3:** smoke → ✓; temporarily flip expectation → ✗ + exit 1; restore.
-- [ ] **Step 4:** verify green; commit `feat(e2e): mechanical verdicts — fs/page criteria, report, exit codes`.
+- [ ] **Step 1:** fs criteria: `await c.check(dataRoot)` in try/catch (catch = fail, error as evidence). Page criteria: for each, `browser.call('evaluate_script', { function: c.script })` DIRECTLY — no agent involvement — unwrap the MCP result payload, apply `expect`, raw result as evidence. Blocked/timeout runs criteria anyway (state may be salvageable), flagged. Final screenshot: `browser.call('take_screenshot', …)` into the run dir.
+- [ ] **Step 2: report.** `e2e/runs/<ISO-stamp>/report.md`: verdict table (scenario × criterion ✓/✗ + evidence + driver outcome), `transcript-<id>.json` (subscribe events + final messages), screenshots. Print table; `process.exitCode = 1` on any ✗.
+- [ ] **Step 3:** smoke → ✓; flip expectation → ✗ + exit 1; restore.
+- [ ] **Step 4:** verify green; commit `feat(e2e): mechanical verdicts — direct MCP page criteria, report, exit codes`.
 
 ### Task 5: The three v1 scenarios + fixtures
 
@@ -176,4 +155,4 @@ export interface Verdict { scenario: string; driverOutcome: 'done' | 'blocked' |
 
 ## Self-review
 
-Spec coverage: corpus w/ seeds + rule (T1); env override + canary gate + fallback (T2); templating/preamble/timeout/strict-port/pre-flight (T3); harness-judges + driverOutcome + screenshot + report (T4); scenarios + subject.png (T5); fake seam incl. ThreadBus + error shapes (T6); Playwright infra + lifecycle incl. ghosts (T7); chat-flow/malformed/parity (T8); docs + full runs (T9). Type consistency: `Scenario`/`Criterion`/`Driver`/`Verdict`/`agentFakeLive` defined once, consumed by name; ports 5198/5199 consistent throughout. IMPLEMENTER-selector notes in T5 are bounded lookups to be recorded in scenario files, not placeholders.
+Spec coverage: corpus w/ seeds + rule (T1); env override + pi/bun canary + MCP bridge + fallbacks (T2); templating/preamble/turn-cap/strict-port/pre-flight (T3); direct-verification verdicts + driverOutcome + screenshot + report (T4); scenarios + subject.png (T5); fake seam incl. ThreadBus + error shapes (T6); Playwright infra + lifecycle incl. ghosts (T7); chat-flow/malformed/parity (T8); docs + full runs (T9). Type consistency: `Scenario`/`Criterion`/`Browser`/`DriverRun`/`Verdict`/`agentFakeLive` defined once, consumed by name; ports 5198/5199 consistent throughout; page criteria + screenshots direct via `browser.call` everywhere. IMPLEMENTER-selector notes in T5 are bounded lookups to be recorded in scenario files, not placeholders.
