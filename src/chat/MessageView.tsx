@@ -16,6 +16,7 @@ import {
   CARD_GENERATE_ART_TOOL,
   CARD_PATCH_TOOL,
   CARD_SAVE_TOOL,
+  CARD_SETTINGS_TOOL,
 } from '@/contracts/materialize';
 import type { ThreadMessageT, ThreadPartT } from '@/contracts/thread';
 
@@ -231,7 +232,11 @@ function ToolUI(props: { part: Extract<ThreadPartT, { _tag: 'ToolCall' }> }) {
   const { part } = props;
   if (part.name === CARD_PATCH_TOOL) return <PatchChip part={part} />;
   if (part.name === CARD_GENERATE_ART_TOOL) return <ArtStrip part={part} />;
-  if (part.name === CARD_SAVE_TOOL || part.name === CARD_EXPORT_TOOL) {
+  if (
+    part.name === CARD_SAVE_TOOL ||
+    part.name === CARD_EXPORT_TOOL ||
+    part.name === CARD_SETTINGS_TOOL
+  ) {
     return <DocActionChip part={part} />;
   }
   return (
@@ -245,14 +250,23 @@ function ToolUI(props: { part: Extract<ThreadPartT, { _tag: 'ToolCall' }> }) {
 function DocActionChip(props: { part: Extract<ThreadPartT, { _tag: 'ToolCall' }> }) {
   const { part } = props;
   let label = part.title ?? part.name;
-  if (part.name === CARD_EXPORT_TOOL && part.argsText !== undefined) {
+  let verb = part.name === CARD_SAVE_TOOL ? 'saved' : 'exported';
+  if (part.argsText !== undefined) {
     try {
       const args: unknown = JSON.parse(part.argsText);
-      const target =
-        typeof args === 'object' && args !== null && 'target' in args
-          ? String((args as { target: unknown }).target)
-          : '';
-      if (target.length > 0) label = `export ${target}`;
+      const a = typeof args === 'object' && args !== null ? (args as Record<string, unknown>) : {};
+      if (part.name === CARD_EXPORT_TOOL && typeof a.target === 'string') {
+        label = `export ${a.target}`;
+      }
+      if (part.name === CARD_SETTINGS_TOOL) {
+        verb = 'set';
+        label =
+          a.kind === 'setLayout'
+            ? `layout: ${String(a.layoutId ?? '')}`
+            : a.kind === 'setTheme'
+              ? `theme: ${String(a.themeId ?? '')}`
+              : `holo: ${a.value === true ? 'on' : 'off'}`;
+      }
     } catch {
       // keep the title
     }
@@ -262,9 +276,7 @@ function DocActionChip(props: { part: Extract<ThreadPartT, { _tag: 'ToolCall' }>
       data-testid="tool-doc-action"
       className="inline-flex items-center gap-1 rounded-base border border-accent/40 bg-accent/10 px-2 py-1 text-[11px] text-ink"
     >
-      <span className="font-base uppercase tracking-wide text-accent">
-        {part.name === CARD_SAVE_TOOL ? 'saved' : 'exported'}
-      </span>
+      <span className="font-base uppercase tracking-wide text-accent">{verb}</span>
       <span className="font-mono">{label}</span>
     </span>
   );

@@ -43,6 +43,9 @@ const contextOf = (over: Partial<ChatContext> = {}): ChatContext => ({
   save: () => Promise.resolve(true),
   saveAsCopy: () => Promise.resolve(true),
   exportRender: () => Promise.resolve(true),
+  setLayout: () => true,
+  setTheme: () => true,
+  setHolo: () => true,
   ...over,
 });
 
@@ -273,6 +276,65 @@ describe('ThreadState doc actions', () => {
     await state.send('generate art, save it, export a print png');
     await vi.waitFor(() => expect(order).toEqual(['art', 'save', 'export:print']));
     expect(state.note).toBeUndefined();
+    state.set(null);
+  });
+
+  it('settings knobs apply SYNCHRONOUSLY before art; save waits behind art', async () => {
+    const order: string[] = [];
+    const state = makeThread(
+      threadStub({
+        turn: () =>
+          Effect.succeed({
+            sessionId: SessionId.make('s1'),
+            assistantText:
+              '{"reply":"ok","artAction":{"brief":"b","editCurrentArt":false},"actions":[{"kind":"setLayout","layoutId":"fullart"},{"kind":"save"}]}',
+            patch: {},
+            artAction: { brief: 'b', editCurrentArt: false },
+            actions: [
+              { kind: 'setLayout' as const, layoutId: 'fullart' },
+              { kind: 'save' as const },
+            ],
+          }),
+      }),
+      undefined,
+      contextOf({
+        setLayout: (id) => {
+          order.push(`layout:${id}`);
+          return true;
+        },
+        runArt: async () => {
+          await new Promise((r) => setTimeout(r, 10));
+          order.push('art');
+        },
+        save: async () => {
+          order.push('save');
+          return true;
+        },
+      }),
+    );
+    await state.send('go fullart, generate art, save');
+    // the knob applied before the (slow) art run even started resolving
+    expect(order[0]).toBe('layout:fullart');
+    await vi.waitFor(() => expect(order).toEqual(['layout:fullart', 'art', 'save']));
+    state.set(null);
+  });
+
+  it('a failed knob surfaces as action failed: <kind>', async () => {
+    const state = makeThread(
+      threadStub({
+        turn: () =>
+          Effect.succeed({
+            sessionId: SessionId.make('s1'),
+            assistantText: '{"reply":"hm","actions":[{"kind":"setLayout","layoutId":"nope"}]}',
+            patch: {},
+            actions: [{ kind: 'setLayout' as const, layoutId: 'nope' }],
+          }),
+      }),
+      undefined,
+      contextOf({ setLayout: () => false }),
+    );
+    await state.send('switch to nope');
+    expect(state.note).toBe('action failed: setLayout');
     state.set(null);
   });
 

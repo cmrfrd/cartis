@@ -11,6 +11,7 @@ import {
   CARD_GENERATE_ART_TOOL,
   CARD_PATCH_TOOL,
   CARD_SAVE_TOOL,
+  CARD_SETTINGS_TOOL,
   materializeAssistantParts,
 } from './materialize';
 import type { ThreadPartT } from './thread';
@@ -100,6 +101,23 @@ describe('materializeAssistantParts', () => {
     );
     const chips = parts.filter((p) => p._tag === 'ToolCall');
     expect(chips.map((c) => (c._tag === 'ToolCall' ? c.name : ''))).toEqual([CARD_SAVE_TOOL]);
+  });
+
+  it('emits card_settings chips for the layout/theme/holo knobs', () => {
+    const parts = materializeAssistantParts(
+      '{"reply": "Going fullart.", "actions": [' +
+        '{"kind": "setLayout", "layoutId": "fullart"}, ' +
+        '{"kind": "setTheme", "themeId": "arcane"}, ' +
+        '{"kind": "setHolo", "value": true}, ' +
+        '{"kind": "setLayout"}]}', // mistyped (no layoutId) → dropped
+    );
+    const chips = parts.filter((p) => p._tag === 'ToolCall');
+    expect(chips.map((c) => (c._tag === 'ToolCall' ? c.name : ''))).toEqual([
+      CARD_SETTINGS_TOOL,
+      CARD_SETTINGS_TOOL,
+      CARD_SETTINGS_TOOL,
+    ]);
+    expect(chips[0]?._tag === 'ToolCall' ? chips[0].argsText : '').toContain('fullart');
   });
 
   // Live-caught (2026-08-03 goblin-engineer turn): the model wrote flavor text

@@ -762,9 +762,11 @@ const CHAT_GUIDE =
   '"reply" is a short natural-language message to the author (what you changed, or a clarifying question). ' +
   'Include "patch" only when you are changing fields, containing only those fields. ' +
   'Include "artAction" ONLY when the request calls for generating or editing the card art. ' +
-  'Include "actions" ONLY when the author asks to save or export the card: ' +
-  '"actions": [ {"kind": "save"} | {"kind": "saveAsCopy"} | {"kind": "export", "target": "png"|"print"|"sheet"} ] ' +
-  '(png = plain 300 DPI, print = 600 DPI with bleed and crop marks, sheet = a 3x3 A4 cut sheet). ' +
+  'Include "actions" ONLY when the author asks for a document operation: ' +
+  '"actions": [ {"kind": "save"} | {"kind": "saveAsCopy"} | {"kind": "export", "target": "png"|"print"|"sheet"} ' +
+  '| {"kind": "setLayout", "layoutId": string} | {"kind": "setTheme", "themeId": string} | {"kind": "setHolo", "value": boolean} ] ' +
+  '(png = plain 300 DPI, print = 600 DPI with bleed and crop marks, sheet = a 3x3 A4 cut sheet; ' +
+  'setLayout/setTheme accept ONLY the ids listed under Layouts/Themes below; settings apply before any artAction runs). ' +
   'The JSON must be STRICT: escape any double quotes inside string values as \\" ' +
   '(e.g. "flavor": "\\"I meant to do that.\\"") and never leave trailing commas.';
 
@@ -786,9 +788,17 @@ const USER_REQUEST_MARKER = 'Author request: ';
  */
 function chatPromptText(req: ChatTurnRequestT): string {
   const request = req.userPrompt.trim().length > 0 ? req.userPrompt : '(see attached files)';
+  const doc = req.docContext;
   return [
     CHAT_GUIDE,
     `Look and feel: ${req.themeContext.lookAndFeel}`,
+    ...(doc !== undefined
+      ? [
+          `Layouts: ${doc.layoutOptions.join(', ')} (current: ${doc.layoutId})`,
+          `Themes: ${doc.themeOptions.join(', ')} (current: ${doc.themeId})`,
+          `Holo: ${doc.holo ? 'on' : 'off'}`,
+        ]
+      : []),
     `Fields: ${req.fields.map((f) => `${f.key} (${f.kind})`).join(', ')}`,
     `Current values (respect these; the author may have hand-edited): ${JSON.stringify(req.currentData)}`,
     `${USER_REQUEST_MARKER}${request}`,

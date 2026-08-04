@@ -82,8 +82,24 @@ export const DocAction = Schema.Union(
     /** png = 300 DPI plain, print = 600 DPI + bleed/marks, sheet = 3×3 A4. */
     target: Schema.Literal('png', 'print', 'sheet'),
   }),
+  // Settings knobs (routing+awareness spec §2): ids are plain strings on the
+  // wire — the CLIENT validates against the theme registry (the bridge has
+  // none). These apply FIRST, before art, so a same-turn art run uses them.
+  Schema.Struct({ kind: Schema.Literal('setLayout'), layoutId: Schema.String }),
+  Schema.Struct({ kind: Schema.Literal('setTheme'), themeId: Schema.String }),
+  Schema.Struct({ kind: Schema.Literal('setHolo'), value: Schema.Boolean }),
 );
 export type DocActionT = typeof DocAction.Type;
+
+/** Current + available document knobs, rendered into the turn prompt. */
+export const DocContext = Schema.Struct({
+  themeId: Schema.String,
+  themeOptions: Schema.Array(Schema.String),
+  layoutId: Schema.String,
+  layoutOptions: Schema.Array(Schema.String),
+  holo: Schema.Boolean,
+});
+export type DocContextT = typeof DocContext.Type;
 
 // POST /api/chat/turn — one conversational card-editing turn.
 // Request mirrors the fill request (session-per-card, currentData snapshot,
@@ -111,6 +127,7 @@ export const ChatTurnRequest = Schema.Struct({
   currentArtFileName: Schema.optional(Schema.String),
   userPrompt: Schema.String,
   attachments: Schema.optional(Schema.Array(ChatAttachment)),
+  docContext: Schema.optional(DocContext),
 });
 export type ChatTurnRequestT = typeof ChatTurnRequest.Type;
 

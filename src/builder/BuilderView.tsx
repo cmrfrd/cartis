@@ -80,6 +80,30 @@ export class BuilderView extends Component {
       save: () => this.saveCard(),
       saveAsCopy: () => this.saveAsCopy(),
       exportRender: (target) => this.exportRender(target),
+      // Settings knobs (routing+awareness spec §2): the agent turns the SAME
+      // knobs the UI does, validated against the registry.
+      setLayout: (layoutId) => {
+        if (!this.theme.layouts.some((l) => l.id === layoutId)) return false;
+        this.pickLayout(LayoutId.make(layoutId));
+        return true;
+      },
+      setTheme: (themeId) => {
+        if (!listThemes().some((t) => t.id === themeId)) return false;
+        this.pickTheme(ThemeId.make(themeId));
+        return true;
+      },
+      setHolo: (value) => {
+        this.holo = value;
+        this.dirty = true;
+        return true;
+      },
+      docContext: {
+        themeId: this.themeId,
+        themeOptions: listThemes().map((t) => t.id),
+        layoutId: this.layoutId,
+        layoutOptions: theme.layouts.map((l) => l.id),
+        holo: this.holo,
+      },
     };
   }
 

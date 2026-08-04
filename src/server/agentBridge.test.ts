@@ -337,6 +337,30 @@ describe('runChatTurn', () => {
     },
   );
 
+  it.effect('renders the docContext options line so the model knows its knobs', () => {
+    const calls: PromptCall[] = [];
+    return Effect.gen(function* () {
+      yield* runChatTurn(
+        chatReq({
+          docContext: {
+            themeId: 'arcane',
+            themeOptions: ['arcane'],
+            layoutId: 'classic',
+            layoutOptions: ['classic', 'fullart'],
+            holo: false,
+          },
+        }),
+        noArt,
+      );
+      const text = calls[0]?.text ?? '';
+      expect(text).toContain('Layouts: classic, fullart (current: classic)');
+      expect(text).toContain('Themes: arcane (current: arcane)');
+      expect(text).toContain('Holo: off');
+    }).pipe(
+      Effect.provide(Layer.mergeAll(chatStub('{"reply":"ok"}', calls, []), threadBusTestLayer)),
+    );
+  });
+
   it.effect('passes valid doc actions through and drops mistyped entries', () =>
     Effect.gen(function* () {
       const out = yield* runChatTurn(chatReq(), noArt);

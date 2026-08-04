@@ -19,6 +19,7 @@ import type {
   ChatTurnRequestT,
   ChatTurnResponseT,
   DocActionT,
+  DocContextT,
 } from '@/contracts/api';
 import { noteFromCause } from '@/contracts/errors';
 import type { FieldSummaryT } from '@/contracts/fields';
@@ -52,6 +53,8 @@ export interface ChatContext {
   readonly fields: readonly FieldSummaryT[];
   readonly currentData: CardDataT;
   readonly currentArtFileName?: string;
+  /** Current + available document knobs — rendered into the turn prompt. */
+  readonly docContext?: DocContextT;
   /** Apply the agent's field patch to the open document. */
   applyPatch(patch: CardDataT): void;
   /**
@@ -67,7 +70,17 @@ export interface ChatContext {
   saveAsCopy(): Promise<boolean>;
   /** Render + download + archive an export of the current preview. */
   exportRender(target: 'png' | 'print' | 'sheet'): Promise<boolean>;
+  /** Settings knobs — validated against the registry; false on unknown ids. */
+  setLayout(layoutId: string): boolean;
+  setTheme(themeId: string): boolean;
+  setHolo(value: boolean): boolean;
 }
+
+/** The synchronous settings knobs, applied BEFORE art (spec ordering rule). */
+const isSettingsAction = (
+  action: DocActionT,
+): action is Extract<DocActionT, { kind: 'setLayout' | 'setTheme' | 'setHolo' }> =>
+  action.kind === 'setLayout' || action.kind === 'setTheme' || action.kind === 'setHolo';
 
 export interface PendingPermission {
   readonly sessionId: SessionIdT;
@@ -295,7 +308,12 @@ export class ThreadState extends State {
       this.sessionId = res.sessionId;
       this.replaceMessage(placeholderId, materializeAssistantParts(res.assistantText), 'complete');
       if (Object.keys(res.patch).length > 0) ctx.applyPatch(res.patch);
-      void this.runPostTurn(ctx, res.artAction, res.actions ?? []);
+      this.applySettings(ctx, res.actions ?? []);
+      void this.runPostTurn(
+        ctx,
+        res.artAction,
+        (res.actions ?? []).filter((a) => !isSettingsAction(a)),
+      );
     } else {
       const message = this.canceling
         ? 'Canceled.'
@@ -467,6 +485,7 @@ export class ThreadState extends State {
       currentArtFileName: ctx.currentArtFileName,
       userPrompt: text,
       ...(attachments.length > 0 ? { attachments } : {}),
+      ...(ctx.docContext !== undefined ? { docContext: ctx.docContext } : {}),
     };
     const exit = await runAppExit(Effect.flatMap(ChatThread, (c) => c.turn(req)));
     if (this.get(null)) return; // destroyed mid-turn
@@ -484,8 +503,15 @@ export class ThreadState extends State {
       this.sessionId = res.sessionId; // lazy-created session captured
       this.finalizeAssistant(userId, materializeAssistantParts(res.assistantText), 'complete');
       if (Object.keys(res.patch).length > 0) ctx.applyPatch(res.patch);
+      // Settings knobs apply SYNCHRONOUSLY, before art starts (spec ordering:
+      // "switch to fullart and generate art" must render at the new aspect).
+      this.applySettings(ctx, res.actions ?? []);
       // Detached: the reply renders now; art then doc actions sequence behind it.
-      void this.runPostTurn(ctx, res.artAction, res.actions ?? []);
+      void this.runPostTurn(
+        ctx,
+        res.artAction,
+        (res.actions ?? []).filter((a) => !isSettingsAction(a)),
+      );
     } else if (this.canceling) {
       this.finalizeAssistant(userId, [{ _tag: 'Text', text: 'Canceled.' }], 'incomplete');
     } else {
@@ -495,6 +521,20 @@ export class ThreadState extends State {
     }
     this.canceling = false;
     this.running = false;
+  }
+
+  /** Apply the settings knobs in order; a failed knob names itself in the note. */
+  private applySettings(ctx: ChatContext, actions: readonly DocActionT[]): void {
+    for (const action of actions) {
+      if (!isSettingsAction(action)) continue;
+      const ok =
+        action.kind === 'setLayout'
+          ? ctx.setLayout(action.layoutId)
+          : action.kind === 'setTheme'
+            ? ctx.setTheme(action.themeId)
+            : ctx.setHolo(action.value);
+      if (!ok) this.note = `action failed: ${action.kind}`;
+    }
   }
 
   /**
@@ -510,6 +550,7 @@ export class ThreadState extends State {
     if (artAction !== undefined) await ctx.runArt(artAction);
     for (const action of actions) {
       if (this.get(null)) return;
+      if (isSettingsAction(action)) continue; // applied synchronously pre-art
       const ok = await (action.kind === 'save'
         ? ctx.save()
         : action.kind === 'saveAsCopy'

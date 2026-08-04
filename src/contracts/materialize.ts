@@ -25,6 +25,7 @@ export const CARD_PATCH_TOOL = 'card_patch';
 export const CARD_GENERATE_ART_TOOL = 'card_generate_art';
 export const CARD_SAVE_TOOL = 'card_save';
 export const CARD_EXPORT_TOOL = 'card_export';
+export const CARD_SETTINGS_TOOL = 'card_settings';
 
 const ChatContract = Schema.Struct({
   reply: Schema.optional(Schema.String),
@@ -157,11 +158,22 @@ export function materializeAssistantParts(text: string): ThreadPartT[] {
     parts.push(toolChip(CARD_GENERATE_ART_TOOL, 'Generate art', contract.artAction));
   }
   for (const action of decodeDocActions(contract.actions)) {
-    parts.push(
-      action.kind === 'export'
-        ? toolChip(CARD_EXPORT_TOOL, 'Export render', action)
-        : toolChip(CARD_SAVE_TOOL, action.kind === 'save' ? 'Save card' : 'Save as copy', action),
-    );
+    switch (action.kind) {
+      case 'export':
+        parts.push(toolChip(CARD_EXPORT_TOOL, 'Export render', action));
+        break;
+      case 'save':
+      case 'saveAsCopy':
+        parts.push(
+          toolChip(CARD_SAVE_TOOL, action.kind === 'save' ? 'Save card' : 'Save as copy', action),
+        );
+        break;
+      case 'setLayout':
+      case 'setTheme':
+      case 'setHolo':
+        parts.push(toolChip(CARD_SETTINGS_TOOL, 'Card settings', action));
+        break;
+    }
   }
   // A parsed-but-empty contract still yields a (blank) message, never nothing.
   if (parts.length === 0) parts.push({ _tag: 'Text', text: '' });
