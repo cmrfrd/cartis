@@ -47,14 +47,12 @@ export function ThreadPanel() {
     >
       <ResizeHandle />
       <header className="flex items-center gap-2 border-edge border-b px-4 py-3">
-        <span className="font-display text-accent text-sm tracking-widest">CHAT</span>
+        <span className="text-accent text-sm tracking-widest">CHAT</span>
         <span className="text-[11px] text-ink-dim">edit this card by conversation</span>
       </header>
       {empty ? (
         <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-5 p-4">
-          <h2 className="text-center font-display text-ink text-lg">
-            What should this card become?
-          </h2>
+          <h2 className="text-center text-ink text-lg">What should this card become?</h2>
           <div className="w-full">
             {pendingPermission !== undefined && <PermissionStrip title={pendingPermission.title} />}
             <NoteStrip />

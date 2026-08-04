@@ -20,7 +20,7 @@ export function Panel(props: { title?: string; children?: Component.Node; classN
     <Card className={`gap-3 py-4 ${props.className ?? ''}`}>
       {props.title && (
         <CardHeader className="px-4">
-          <CardTitle className="font-display text-sm uppercase tracking-widest">
+          <CardTitle className="text-xs uppercase tracking-wide text-ink-dim font-semibold">
             {props.title}
           </CardTitle>
         </CardHeader>

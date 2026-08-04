@@ -58,7 +58,7 @@ export class PhotoPicker extends Component {
             </span>
           )}
         </div>
-        {note && <p className="text-xs text-red-300">{note}</p>}
+        {note && <p className="text-xs text-danger">{note}</p>}
       </div>
     );
   }

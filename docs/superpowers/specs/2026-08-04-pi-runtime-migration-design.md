@@ -8,7 +8,8 @@ the dev-server bridge — and simultaneously replaces the v1 JSON transport
 with REAL TOOL CALLING. Grounded in three subagent reports: a pi SDK
 embedding reference, a complete opencode-touchpoint inventory, and an
 adversarial review whose 16 findings (2 blockers on leaf durability and id
-reconciliation) are incorporated below. Exact pi API names were verified
+reconciliation) are incorporated below, plus a completeness pass adding the
+migration's own testing net (§8) and hygiene checklist (§9). Exact pi API names were verified
 against source at the researched commit and MUST be re-verified against the
 pinned version during the canary.
 
@@ -287,7 +288,8 @@ finding 13 — do not read this row as "client unchanged").
 5 schemas) + its decode tests in `contracts.test.ts` (PromptResult /
 SessionCreated); `opencodeClientOf`/`OpencodeSdkSurface`/`OpencodeClient`;
 the spawn lifecycle (port 0 + finalizer) + the BridgeRuntime "spawn ENOENT"
-stub test; `mapAgentEvent` (+ ~20 tests → replaced by `mapPiEvent` tests);
+stub test; `withActivity` + the SSE lazy-generator pump (replaced by
+`session.subscribe`); `mapAgentEvent` (+ ~20 tests → replaced by `mapPiEvent` tests);
 `mapSessionMessages` (+ tests → `mapSessionEntries` tests); `siblingSet` +
 `sessionSummary`; `USER_REQUEST_MARKER`/`userRequestOf` + the
 `chatPromptText` scaffold; `PromptResult`/`promptText`; `extractJson`/
@@ -301,7 +303,11 @@ anchors, no fork/revert); `ChatThread` (edit/switch/tree replace
 fork/revert/siblings); fold (drop materialize fallback);
 `materializeAssistantParts` (parser → builder); `/api/chat/*` routes per
 §4.4; `AgentClient` tag surface (reshaped to the pi operations; the ~40
-seam-level stub tests survive with reshaped payloads).
+seam-level stub tests survive with reshaped payloads); `errors.ts` — THE
+catalog stays authoritative: `AgentError` reasons `no-session-id`/`no-fill`/
+`bad-reply` die, replaced by `busy` (in-flight conflict) and `turn-failed`
+(pi turn error, message from `errorMessage`), with `statusOfError` and the
+header table updated.
 
 ## 6. Env, docs, sequencing
 
@@ -320,9 +326,15 @@ seam-level stub tests survive with reshaped payloads).
    bridge — one scripted turn end-to-end: session create in a scratch chats
    dir, custom tool called with validated args, entries on disk including
    the metadata custom entry, branch read-back, dispose clean, and an
-   empty-params tool accepted by the target provider(s). All API names
-   re-verified against the pinned version (pi's own `docs/sdk.md` has at
-   least one wrong example — trust `ai/src/types.ts`). STOP on failure.
+   empty-params tool accepted by the target provider(s). The canary ALSO
+   proves the deterministic test seam (§8.2): a fake `ModelRuntime` whose
+   scripted `streamSimple` drives a real `createAgentSession` with no
+   network. (Verified in source: the session's Agent gets a HARDCODED
+   `streamFn` that calls `modelRuntime.streamSimple` — so
+   `setDefaultStreamFn` does NOT affect coding-agent sessions; the
+   ModelRuntime object is the seam.) All API names re-verified against the
+   pinned version (pi's own `docs/sdk.md` has at least one wrong example —
+   trust `ai/src/types.ts`). STOP on failure.
 2. **v0.x churn:** pin EXACT; upgrades are deliberate events gated by the
    (post-refactor) e2e suites.
 3. **Per-turn cost:** loader reload + session open per turn — cheap in the
@@ -335,6 +347,94 @@ seam-level stub tests survive with reshaped payloads).
 5. **Model under-calling tools** (says "done", calls nothing): prompt
    guidelines + live e2e gate; a reply-only turn remains a valid
    conversational turn.
+
+## 8. Testing — the migration's OWN net (hardening suite comes later)
+
+The test-hardening initiative is sequenced AFTER this migration, so this
+refactor carries its own complete net. Baseline: the current suite (391+
+tests) is green before the branch starts; `bun run verify` stays green after
+every task.
+
+### 8.1 Pure unit (inside `bun run verify`)
+
+- `mapPiEvent` reducer: table-driven over both event layers (inner
+  `text_*`/`toolcall_*` in `message_update` using the CUMULATIVE `partial`;
+  top-level `tool_execution_*`; error variants; throttling) — replaces the
+  `mapAgentEvent` tests one-for-one.
+- `mapSessionEntries`: fixture entry lists covering — `model_change`/
+  `thinking_level_change`/`label`/`custom` skipping; `toolResult` joined to
+  its assistant `toolCall` block by `toolCallId` (separate entries!);
+  attachment-metadata association by `userEntryId`; aborted turns →
+  incomplete; a `leaf_switch`-terminated branch.
+- `toolsFromFields`: the TypeBox builder — integer min/max, select literal
+  unions, layout/theme literal unions from docContext, empty-object tools;
+  plus the persona/system-prompt builder (contains fields + currentData,
+  contains NO marker).
+- Tree anchors: sibling counting from `getTree()` fixtures, skipping
+  non-message entries, `{ messageId, index, count, siblingLeafIds }` shape.
+
+### 8.2 Deterministic FULL-LOOP tests (the strong tier; canary-verified)
+
+A `FakeModelRuntime` whose scripted `streamSimple` emits canned
+assistant-message event streams (text + `toolCall` content blocks) drives
+REAL `createAgentSession` + REAL tool validation/execution + REAL
+`SessionManager` persistence against a tmp chats dir, inside vitest — no
+network, fully deterministic. Scenarios:
+
+- happy turn: tool calls recorded in canonical block order; response ids
+  come from the post-prompt `getBranch()` read; entries on disk.
+- validation failure: script an invalid `card_patch` arg, then a corrected
+  second response — assert pi's error-tool-result round-trip and the final
+  collected calls (the deterministic replacement for the retired
+  adversarial-JSON corpus).
+- abort mid-stream: `stopReason:'aborted'` persisted → maps incomplete.
+- **leaf durability (blocker-1 regression):** switch branch
+  (`branch` + `leaf_switch` entry), DISPOSE and RE-OPEN the SessionManager,
+  assert the active branch is the selected one; then a follow-up turn
+  parents onto it.
+- edit/regenerate: `navigateTree` + reprompt produce the expected sibling
+  tree; anchors update.
+- clean break: a session id with no file → fresh session under the same id.
+
+Fallback if `ModelRuntime` injection proves unworkable in the canary:
+same scenarios via bridge-seam stubs plus a heavier live-e2e checklist.
+
+### 8.3 Seam & client tests (reshaped, not rewritten)
+
+The ~40 `AgentClient`/`ChatThread` stub tests survive with reshaped payloads
+(`{reply, toolCalls, userEntryId, assistantEntryId}`); new ThreadState tests
+pin the RE-KEYING rule (optimistic bubble ids swap to entry ids on response;
+edit/anchor targeting works immediately after a live turn, no rehydrate
+required); fold part-upsert tests unchanged; panel tests drop
+permission-strip cases and keep chips/composer/branch-arrow behavior.
+
+### 8.4 Live e2e gate (pre-merge, real model + browser)
+
+The scripted checklist, all through the real UI: patch turn (chips + form);
+attachment turn (image + .md); edit an earlier message → ‹ n/m › arrows
+appear at the true fork point; **switch to the older branch → RESTART the
+dev server → selection retained** (durability proof); regenerate; save /
+export / setLayout tools produce real files and UI changes; abort mid-turn →
+incomplete bubble; open a card carrying an OLD opencode chatSessionId →
+fresh chat, no errors; art generation end-to-end. Real bugs found here are
+fixed before merge — never worked around.
+
+## 9. Migration hygiene — the airtight checklist
+
+- **Sweep gates (final task, mechanically checked):**
+  `grep -ri opencode src test` → zero hits; `@opencode-ai/sdk` absent from
+  package.json + lockfile; `OPENCODE_MODEL` gone from code, `.env.example`,
+  README, vite.config; `src/contracts/opencode.ts` deleted;
+  `permission-strip`/`permission-allow` testids gone; no orphaned exports
+  (`biome` + `tsc` clean catch the rest).
+- **Non-destructive by construction (the rollback story):** no data is
+  migrated or deleted — old opencode conversations remain untouched in
+  opencode's own store, and new pi chats live only in `cartis-data/chats/`.
+  A `git revert` of the branch fully restores the old runtime INCLUDING
+  access to old conversations. State this in the PR/commit message.
+- Single feature branch, ff-merge; `bun run verify` + `bun run build` +
+  the §8.4 live gate before merge; memory + README updated with the new
+  env vars and the pi gotchas learned.
 
 ## Non-goals
 

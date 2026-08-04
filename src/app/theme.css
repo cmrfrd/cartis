@@ -58,8 +58,8 @@
   --foreground: var(--color-ink);
   --main: var(--color-accent);
   --main-foreground: var(--color-surface);
-  --border: var(--color-edge);        /* was #000000 — pure-black cages gone */
-  --ring: var(--color-accent);        /* was #e8e4d8 — visible gold focus ring */
+  --border: var(--color-edge); /* was #000000 — pure-black cages gone */
+  --ring: var(--color-accent); /* was #e8e4d8 — visible gold focus ring */
   --overlay: rgba(0, 0, 0, 0.8);
 
   /* soft ambient elevation (was: 3px 3px 0 0 var(--border)) */
@@ -104,6 +104,29 @@
   --font-display: "Cinzel", "Iowan Old Style", Palatino, Georgia, serif;
   --font-body: ui-sans-serif, system-ui, sans-serif;
   --font-card: "EB Garamond", "Iowan Old Style", Georgia, serif;
+}
+
+/* Thin, subtle scrollbars on dark (app chrome; card exports don't scroll). */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-edge) transparent;
+}
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 9999px;
+  background: var(--color-edge);
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-ink-dim);
+  background-clip: padding-box;
 }
 
 /* Assistant chat prose (react-markdown output) on the app tokens. Scoped to

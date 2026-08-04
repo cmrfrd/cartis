@@ -65,7 +65,7 @@ export function SelectInput(props: {
 }) {
   return (
     <select
-      className="w-full rounded-base border-2 border-border bg-secondary-background px-2.5 py-1.5 font-base text-foreground text-sm shadow-shadow focus:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+      className="h-9 w-full rounded-base border-2 border-border bg-secondary-background px-3 font-base text-foreground text-sm transition-colors hover:border-ink-dim/40 focus:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-surface"
       value={props.value}
       onChange={(e) => props.onValue(e.target.value)}
     >

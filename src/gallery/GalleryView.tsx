@@ -207,7 +207,7 @@ function CardListEntry(props: { card: StoredCard; renders: readonly StoredExport
           className="min-w-0 flex-1 text-left"
           onClick={() => gallery.openCard(card)}
         >
-          <p className="truncate font-display text-sm">{card.name}</p>
+          <p className="truncate text-sm font-medium">{card.name}</p>
           <p className="text-[11px] text-ink-dim">
             {card.themeId} · {card.layoutId} · {new Date(card.updatedAt).toLocaleString()}
           </p>
@@ -278,7 +278,7 @@ function GalleryCards() {
                 <CardTile card={card} />
               </button>
               <p
-                className="max-w-full truncate font-display text-sm"
+                className="max-w-full truncate text-sm font-medium"
                 style={{ maxWidth: CARD_WIDTH * TILE_SCALE }}
               >
                 {card.name}
