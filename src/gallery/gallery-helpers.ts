@@ -5,6 +5,7 @@
 
 import type { Option } from 'effect';
 import { getLayoutOption } from '@/cards/registry';
+import { resolveImageFields } from '@/cards/resolve';
 import type { CardData, Layout } from '@/cards/types';
 import type { StoredCard, StoredExport } from '@/storage/CardArchive';
 
@@ -64,13 +65,7 @@ export function resolveCardData(
   layout: Layout,
   urls: Record<string, string>,
 ): CardData {
-  const out: CardData = { ...card.data };
-  for (const field of layout.fields) {
-    if (field.kind !== 'image') continue;
-    const raw = out[field.key];
-    const id = typeof raw === 'string' ? raw : '';
-    out[field.key] =
-      urls[id] ?? (id.startsWith('blob:') || id.startsWith('data:') ? id : undefined);
-  }
-  return out;
+  // Delegates to THE shared resolution (src/cards/resolve.ts) — the gallery
+  // tile and the builder preview stay identical by construction.
+  return resolveImageFields(card.data, layout, urls);
 }

@@ -6,6 +6,7 @@ import { Array as Arr, Effect, Exit, Match, Option } from 'effect';
 import { AppShell } from '@/app/AppShell';
 import { runAppExit } from '@/app/runtime';
 import { getLayout, getTheme, listThemes } from '@/cards/registry';
+import { resolveImageFields } from '@/cards/resolve';
 import type { CardData, FieldValue, Layout, Theme } from '@/cards/types';
 import { ThreadPanel } from '@/chat/ThreadPanel';
 import { type ChatContext, ThreadState } from '@/chat/ThreadState';
@@ -186,16 +187,9 @@ export class BuilderView extends Component {
 
   /** Card data with image-library references resolved to displayable URLs (tracks library.urls transitively). */
   get resolved(): CardData {
-    const urls = this.shell?.library.urls ?? {};
-    const out: CardData = { ...this.data };
-    for (const field of this.layout.fields) {
-      if (field.kind !== 'image') continue;
-      const raw = out[field.key];
-      const id = typeof raw === 'string' ? raw : '';
-      out[field.key] =
-        urls[id] ?? (id.startsWith('blob:') || id.startsWith('data:') ? id : undefined);
-    }
-    return out;
+    // THE shared resolution (src/cards/resolve.ts) — identical to the gallery
+    // tile by construction. Reads library.urls transitively (tracked).
+    return resolveImageFields(this.data, this.layout, this.shell?.library.urls ?? {});
   }
 
   setField(key: string, value: FieldValue) {
