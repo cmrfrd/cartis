@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { setAppLayer, testAppLayerWith } from '@/app/runtime';
 import type { ChatTurnResponseT } from '@/contracts/api';
 import { ChatRequestError } from '@/contracts/errors';
-import { PermissionId, SessionId } from '@/contracts/ids';
+import { MessageId, PermissionId, SessionId } from '@/contracts/ids';
 import type { ThreadEventT } from '@/contracts/thread';
 import { click, mountApp, setInput, tick } from '../../test/util';
 import { chatEventsFromPubSub } from './ChatEvents';
@@ -231,7 +231,7 @@ describe('ThreadPanel', () => {
     unmount();
   });
 
-  it('edit forks + resends and reveals the branch picker', async () => {
+  it('edit forks + resends and reveals ‹ n/m › arrows at the divergence point', async () => {
     const calls = { fork: 0, revert: 0 };
     setAppLayer(
       testAppLayerWith({
@@ -251,7 +251,23 @@ describe('ThreadPanel', () => {
             return Effect.void;
           },
           siblings: () =>
-            Effect.succeed([{ sessionId: SessionId.make('orig-a'), title: 'original' }]),
+            Effect.succeed([
+              { sessionId: SessionId.make('orig-a'), title: 'original' },
+              { sessionId: SessionId.make('fork-1'), parentId: SessionId.make('orig-a') },
+            ]),
+          history: (sid) =>
+            Effect.succeed(
+              sid === 'orig-a'
+                ? [
+                    {
+                      id: MessageId.make('h1'),
+                      role: 'user' as const,
+                      status: 'complete' as const,
+                      parts: [{ _tag: 'Text' as const, text: 'first message' }],
+                    },
+                  ]
+                : [],
+            ),
         }),
       }),
     );
@@ -269,8 +285,105 @@ describe('ThreadPanel', () => {
       expect(calls.fork).toBe(1);
       expect(calls.revert).toBe(1);
       expect(document.body.textContent).toContain('edited message'); // resent user text
-      expect(document.querySelector('[data-testid="branch-picker"]')).not.toBeNull();
+      // the fork is the 2nd of 2 siblings; arrows anchor the divergent message
+      expect(document.querySelector('[data-testid="branch-next"]')).not.toBeNull();
+      expect(document.body.textContent).toContain('2/2');
     });
+    // stepping back rehydrates the original branch
+    await click(document.querySelector('[data-testid="branch-prev"]'));
+    await vi.waitFor(() => expect(document.body.textContent).toContain('first message'));
+    unmount();
+  });
+
+  it('renders assistant text as markdown (user text stays plain)', async () => {
+    setAppLayer(
+      testAppLayerWith({
+        thread: chatStub({
+          turn: () =>
+            Effect.succeed({
+              sessionId: SessionId.make('s1'),
+              assistantText: '{"reply":"a **bold** move"}',
+              patch: {},
+            }),
+        }),
+      }),
+    );
+    const { unmount } = await mountApp();
+    await setInput(composer(), 'use **stars** literally');
+    await click(document.querySelector('[data-testid="composer-send"]'));
+    await vi.waitFor(() => {
+      const strong = document.querySelector('.chat-md strong');
+      expect(strong?.textContent).toBe('bold');
+      // the user bubble shows raw asterisks, not markup
+      expect(document.body.textContent).toContain('use **stars** literally');
+    });
+    unmount();
+  });
+
+  it('copy swaps to a copied state; regenerate appears only on the LAST assistant message', async () => {
+    const written: string[] = [];
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText: (t: string) => written.push(t) },
+      configurable: true,
+    });
+    let n = 0;
+    setAppLayer(
+      testAppLayerWith({
+        thread: chatStub({
+          turn: () => {
+            n += 1;
+            return Effect.succeed({
+              sessionId: SessionId.make('s1'),
+              assistantText: `{"reply":"answer ${String(n)}"}`,
+              patch: {},
+            });
+          },
+        }),
+      }),
+    );
+    const { unmount } = await mountApp();
+    await setInput(composer(), 'one');
+    await click(document.querySelector('[data-testid="composer-send"]'));
+    await vi.waitFor(() => expect(document.body.textContent).toContain('answer 1'));
+    await setInput(composer(), 'two');
+    await click(document.querySelector('[data-testid="composer-send"]'));
+    await vi.waitFor(() => expect(document.body.textContent).toContain('answer 2'));
+    // two assistant messages, ONE regenerate control (the last)
+    expect(document.querySelectorAll('[data-testid="action-regenerate"]')).toHaveLength(1);
+    const copies = document.querySelectorAll('[data-testid="action-copy"]');
+    expect(copies.length).toBeGreaterThan(1);
+    await click(copies[copies.length - 1] ?? null);
+    await vi.waitFor(() => {
+      expect(written).toEqual(['answer 2']);
+      expect(document.querySelector('[data-testid="action-copy"][title="Copied"]')).not.toBeNull();
+    });
+    unmount();
+  });
+
+  it('the resize handle drags the panel width within [340, 600] and resets on double-click', async () => {
+    setAppLayer(testAppLayerWith({ thread: chatStub() }));
+    const { unmount } = await mountApp();
+    const panel = document.querySelector('[data-testid="chat-panel"]') as HTMLElement;
+    const handle = document.querySelector('[data-testid="chat-resize"]');
+    if (!handle) throw new Error('resize handle not found');
+    expect(panel.style.width).toBe('400px');
+    handle.dispatchEvent(
+      new MouseEvent('pointerdown', { bubbles: true, cancelable: true, clientX: 500 }),
+    );
+    handle.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, clientX: 420 }));
+    handle.dispatchEvent(new MouseEvent('pointerup', { bubbles: true }));
+    await tick();
+    expect(panel.style.width).toBe('480px'); // dragged 80px left → wider
+    handle.dispatchEvent(
+      new MouseEvent('pointerdown', { bubbles: true, cancelable: true, clientX: 500 }),
+    );
+    handle.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, clientX: 100 }));
+    handle.dispatchEvent(new MouseEvent('pointerup', { bubbles: true }));
+    await tick();
+    expect(panel.style.width).toBe('600px'); // clamped at max
+    handle.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+    await tick();
+    expect(panel.style.width).toBe('400px'); // double-click resets
     unmount();
   });
 

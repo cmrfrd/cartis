@@ -38,6 +38,8 @@ export class BuilderView extends Component {
   previewEl = ref<HTMLDivElement>();
   /** The card's chat sidebar (adopted child; opencode session per card). */
   thread = new ThreadState();
+  /** Chat panel width in px — session-only, drag-resizable (340–600, dbl-click 400). */
+  chatWidth = 400;
   /** Modified-flag: any edit sets it; save/load/new clear it. */
   dirty = false;
   /** A guarded destructive intent awaiting the user's choice (document guard). */

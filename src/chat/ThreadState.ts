@@ -100,6 +100,8 @@ export class ThreadState extends State {
   /** The user message currently being inline-edited, and its working text. */
   editingId?: MessageIdT = undefined;
   editDraft = '';
+  /** Message whose Copy button shows the ✓ state (cleared after 1.5s). */
+  copiedId?: MessageIdT = undefined;
 
   /** Injected by BuilderView: the current card's chat context + appliers. */
   context?: () => ChatContext | undefined = undefined;
@@ -220,6 +222,16 @@ export class ThreadState extends State {
     this.editDraft = '';
   }
 
+  /** Copy a message's text; the ✓ feedback state clears itself after 1.5s. */
+  copyMessage(message: ThreadMessageT): void {
+    const text = message.parts.map((p) => (p._tag === 'Text' ? p.text : '')).join('');
+    void navigator.clipboard?.writeText(text);
+    this.copiedId = message.id;
+    setTimeout(() => {
+      if (!this.get(null) && this.copiedId === message.id) this.copiedId = undefined;
+    }, 1500);
+  }
+
   /** Commit the inline edit → fork-on-edit + resend. */
   async submitEdit(): Promise<void> {
     const id = this.editingId;
@@ -298,12 +310,14 @@ export class ThreadState extends State {
       this.context?.()?.markDirty(); // a branch is saved state
       await runAppExit(Effect.flatMap(ChatThread, (c) => c.revert(forkExit.value, messageId)));
       if (this.get(null)) return;
-      void this.loadBranches();
     }
     // Trim local history back to before the edited message, then resend.
     const idx = this.messages.findIndex((m) => m.id === messageId);
     if (idx >= 0) this.messages = this.messages.slice(0, idx);
     await this.send(text);
+    // AFTER the resend: the branchPoint anchors on the post-edit history.
+    if (this.get(null)) return;
+    void this.loadBranches();
   }
 
   /** Switch to a branch (fork) session: rebind, rehydrate, mark the doc dirty. */
