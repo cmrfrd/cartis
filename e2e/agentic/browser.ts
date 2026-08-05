@@ -54,7 +54,11 @@ function toPiContent(blocks: McpContentBlock[]): Array<Record<string, unknown>> 
 export async function connectBrowser(): Promise<Browser> {
   const transport = new StdioClientTransport({
     command: 'bunx',
-    args: ['chrome-devtools-mcp@latest', '--isolated'],
+    // --allow-unrestricted-paths: without it upload_file/take_screenshot are
+    // fenced to "workspace roots" we never negotiate — staged fixtures under
+    // the repo were Access-denied (live-caught: the photo-card driver burned
+    // its whole budget on it). This browser is harness-owned and isolated.
+    args: ['chrome-devtools-mcp@latest', '--isolated', '--allow-unrestricted-paths'],
   });
   const client = new Client({ name: 'cartis-e2e-harness', version: '1.0.0' });
   await client.connect(transport);

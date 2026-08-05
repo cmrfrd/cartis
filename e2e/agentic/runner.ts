@@ -30,7 +30,9 @@ const RUNS_BASE = resolve('e2e/runs');
 const args = process.argv.slice(2);
 const retriesAt = args.indexOf('--retries');
 const retries = retriesAt >= 0 ? Number(args[retriesAt + 1] ?? '0') : 0;
-const ids = args.filter((a, i) => a !== '--retries' && i !== retriesAt + 1);
+// Live-caught: `i !== retriesAt + 1` with retriesAt === -1 dropped arg 0 —
+// a single-scenario invocation silently ran the WHOLE suite.
+const ids = args.filter((a, i) => a !== '--retries' && (retriesAt < 0 || i !== retriesAt + 1));
 const selected = ids.length > 0 ? scenarios.filter((s) => ids.includes(s.id)) : scenarios;
 if (selected.length === 0) {
   console.error(
