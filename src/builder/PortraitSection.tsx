@@ -1,14 +1,15 @@
 import { Component, get } from '@expressive/react';
-import { Effect, Exit } from 'effect';
+import { Effect, Exit, Schema } from 'effect';
 import { AppShell } from '@/app/AppShell';
 import { runAppExit } from '@/app/runtime';
 import { noteFromCause } from '@/contracts/errors';
+import { AspectRatio, type AspectRatioT } from '@/contracts/fields';
 import { CameraCapture } from '@/images/CameraCapture';
 import { bytesToDataUrl } from '@/images/codec';
 import { ImageProvider } from '@/images/ImageProvider';
 import { PhotoPicker } from '@/images/PhotoPicker';
 import type { ImageLibrary } from '@/storage/ImageLibrary';
-import { Button, FieldRow, Panel, TextInput } from '@/ui';
+import { Button, FieldRow, Panel, SelectInput, TextInput } from '@/ui';
 // Deliberate module cycle with BuilderView (it renders PortraitSection) — benign, see BuilderView.tsx.
 import { BuilderView } from './BuilderView';
 
@@ -17,6 +18,23 @@ const SOURCES = [
   { id: 'camera', label: 'Webcam' },
   { id: 'library', label: 'Library' },
 ] as const;
+
+/** The select's values are our own options — decode keeps the closed union honest. */
+const decodeAspect = Schema.decodeUnknownSync(AspectRatio);
+
+/** Selector labels for every AspectRatio member, auto first (the default mode). */
+const ASPECT_OPTIONS: readonly { value: AspectRatioT; label: string }[] = [
+  { value: 'auto', label: 'Auto (AI picks)' },
+  { value: '1:1', label: 'Square 1:1' },
+  { value: '4:5', label: 'Portrait 4:5' },
+  { value: '3:4', label: 'Portrait 3:4' },
+  { value: '2:3', label: 'Portrait 2:3' },
+  { value: '9:16', label: 'Tall 9:16' },
+  { value: '5:4', label: 'Landscape 5:4' },
+  { value: '4:3', label: 'Landscape 4:3' },
+  { value: '3:2', label: 'Landscape 3:2' },
+  { value: '16:9', label: 'Wide 16:9' },
+];
 
 /**
  * Text-first art tools (spec §Builder): the default path composes art purely
@@ -84,7 +102,7 @@ export class PortraitSection extends Component {
         .join(', '),
     };
     const styleId = builder.themeId;
-    const aspectRatio = layout.artAspect ?? 'match_input_image';
+    const aspectRatio = builder.resolvedArtAspect();
     const name = `${String(builder.data.name ?? 'card')} art`;
     this.busy = true;
     this.note = 'Generating art…';
@@ -137,6 +155,13 @@ export class PortraitSection extends Component {
                 this.brief = v;
               }}
               placeholder="a phoenix over her shoulder"
+            />
+          </FieldRow>
+          <FieldRow label="Aspect">
+            <SelectInput
+              value={this.builder?.resolvedArtAspect() ?? 'auto'}
+              onValue={(v) => this.builder?.setArtAspect(decodeAspect(v))}
+              options={ASPECT_OPTIONS}
             />
           </FieldRow>
           <div className="flex items-center gap-3">

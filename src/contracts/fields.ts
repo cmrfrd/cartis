@@ -36,19 +36,27 @@ export const FieldKind = Schema.Literal('text', 'textarea', 'number', 'select', 
 export type FieldKindT = typeof FieldKind.Type;
 
 // ---------------------------------------------------------------------------
-// AspectRatio — the closed set replicate/flux accepts (+ match_input_image)
+// AspectRatio — the closed set google/nano-banana-pro accepts, plus 'auto'.
+// 'auto' is an APP-LEVEL mode ("let the AI pick"): it is resolved to a
+// concrete ratio by the art-prompt composer BEFORE the replicate call, so
+// ReplicateClient takes ConcreteAspectRatio and "auto reached the model" is
+// a compile error, not a latent bug.
 // ---------------------------------------------------------------------------
 
-export const AspectRatio = Schema.Literal(
+export const ConcreteAspectRatio = Schema.Literal(
   '1:1',
-  '3:2',
-  '2:3',
+  '4:5',
+  '5:4',
   '3:4',
   '4:3',
-  '16:9',
+  '2:3',
+  '3:2',
   '9:16',
-  'match_input_image',
+  '16:9',
 );
+export type ConcreteAspectRatioT = typeof ConcreteAspectRatio.Type;
+
+export const AspectRatio = Schema.Union(ConcreteAspectRatio, Schema.Literal('auto'));
 export type AspectRatioT = typeof AspectRatio.Type;
 
 // ---------------------------------------------------------------------------

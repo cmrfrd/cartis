@@ -76,6 +76,9 @@ export const DocContext = Schema.Struct({
   layoutId: Schema.String,
   layoutOptions: Schema.Array(Schema.String),
   holo: Schema.Boolean,
+  /** The card's resolved art aspect + the pickable set (drives the tool schema). */
+  artAspect: Schema.String,
+  aspectOptions: Schema.Array(Schema.String),
 });
 export type DocContextT = typeof DocContext.Type;
 
@@ -202,7 +205,7 @@ export const ImageGenerateRequest = Schema.Struct({
    */
   imageDataUrl: Schema.optional(DataUrl),
   /** Closed union with a decode-side default — a decoded request is always complete. */
-  aspectRatio: Schema.optionalWith(AspectRatio, { default: () => 'match_input_image' as const }),
+  aspectRatio: Schema.optionalWith(AspectRatio, { default: () => 'auto' as const }),
   themeContext: Schema.optional(ThemeContext),
   argumentValues: Schema.optional(Schema.Record({ key: Schema.String, value: Schema.String })),
   brief: Schema.optional(Schema.String),

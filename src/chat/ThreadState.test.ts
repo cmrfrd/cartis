@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { setAppLayer, testAppLayerWith } from '@/app/runtime';
 import type { ChatTurnResponseT } from '@/contracts/api';
 import { ChatRequestError, NetworkError } from '@/contracts/errors';
-import { MessageId, SessionId } from '@/contracts/ids';
+import { DataUrl, FileName, MessageId, MimeType, SessionId } from '@/contracts/ids';
 import type { ThreadEventT } from '@/contracts/thread';
 import { type ChatEvents, chatEventsFromPubSub } from './ChatEvents';
 import { ChatThread, type ChatThreadShape } from './ChatThread';
@@ -45,6 +45,7 @@ const contextOf = (over: Partial<ChatContext> = {}): ChatContext => ({
   setLayout: () => true,
   setTheme: () => true,
   setHolo: () => true,
+  setArtAspect: () => true,
   snapshotPreview: () => Promise.resolve(undefined),
   ...over,
 });
@@ -345,6 +346,74 @@ describe('ThreadState tool intents', () => {
     // the knob applied before the (slow) art run even started resolving
     expect(order[0]).toBe('layout:fullart');
     await vi.waitFor(() => expect(order).toEqual(['layout:fullart', 'art', 'save']));
+    state.set(null);
+  });
+
+  it('card_set_aspect_ratio applies synchronously like the other settings knobs', async () => {
+    const seen: string[] = [];
+    const state = makeThread(
+      threadStub({
+        turn: () =>
+          Effect.succeed(
+            resp({
+              reply: 'ok',
+              toolCalls: [{ name: 'card_set_aspect_ratio', args: { aspectRatio: '16:9' } }],
+            }),
+          ),
+      }),
+      undefined,
+      contextOf({
+        setArtAspect: (value) => {
+          seen.push(value);
+          return true;
+        },
+      }),
+    );
+    await state.send('make the art widescreen');
+    expect(seen).toEqual(['16:9']); // synchronous — applied before send resolved
+    expect(state.note).toBeUndefined();
+    state.set(null);
+  });
+
+  it("passes the turn's attached image to the art run as the img2img source (live-caught)", async () => {
+    // The reported bug: a photo attached in chat reached the agent as vision
+    // only — the art pipeline got NO source image, so the generated art looked
+    // nothing like the photo. The turn's image attachment must ride into runArt.
+    const seen: (string | undefined)[] = [];
+    const state = makeThread(
+      threadStub({
+        turn: () =>
+          Effect.succeed(
+            resp({
+              reply: 'ok',
+              toolCalls: [
+                { name: 'card_generate_art', args: { brief: 'tinker her', editCurrentArt: false } },
+              ],
+            }),
+          ),
+      }),
+      undefined,
+      contextOf({
+        runArt: (_action, sourceDataUrl) => {
+          seen.push(sourceDataUrl);
+        },
+      }),
+    );
+    state.pendingAttachments = [
+      {
+        name: FileName.make('notes.txt'),
+        mime: MimeType.make('text/plain'),
+        dataUrl: DataUrl.make('data:text/plain;base64,eA=='),
+      },
+      {
+        name: FileName.make('alie.png'),
+        mime: MimeType.make('image/png'),
+        dataUrl: DataUrl.make('data:image/png;base64,QQ=='),
+      },
+    ];
+    await state.send('turn my friend into a tinker card');
+    // the IMAGE attachment (not the text file) is the source
+    await vi.waitFor(() => expect(seen).toEqual(['data:image/png;base64,QQ==']));
     state.set(null);
   });
 

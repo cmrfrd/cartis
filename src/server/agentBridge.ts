@@ -31,7 +31,11 @@ import {
   NetworkError,
   ReplicateError,
 } from '../contracts/errors.ts';
-import type { AspectRatioT } from '../contracts/fields.ts';
+import {
+  type AspectRatioT,
+  ConcreteAspectRatio,
+  type ConcreteAspectRatioT,
+} from '../contracts/fields.ts';
 import { type DataUrlT, SessionId } from '../contracts/ids.ts';
 
 import { Prediction, type PredictionT } from '../contracts/replicate.ts';
@@ -69,24 +73,56 @@ function envRedacted(name: string): Effect.Effect<Option.Option<Redacted.Redacte
 
 // ---------- pi runtime (in-process agent; migration spec) ----------
 
+/** The composer's output: a prompt plus the CONCRETE ratio the art will use. */
+export interface ComposedArt {
+  prompt: string;
+  aspectRatio: ConcreteAspectRatioT;
+}
+
+const decodeConcreteAspect = Schema.decodeUnknownOption(ConcreteAspectRatio);
+
 /**
- * One-shot art-prompt composition via pi's completeSimple — no session, no
- * watcher (spec §4.4). Falls back to the raw lookAndFeel when the model
- * returns nothing usable.
+ * Parse the composer model's reply: an optional `ASPECT: <ratio>` FIRST line
+ * (present only when we asked the model to pick), then the prompt paragraph.
+ * A recognized ASPECT line is stripped either way; an invalid ratio yields
+ * `aspect: undefined` so the caller falls back rather than sending garbage.
  */
-async function composeArtPromptPi(
+export function parseComposedArt(raw: string): {
+  prompt: string;
+  aspect: ConcreteAspectRatioT | undefined;
+} {
+  const text = raw.trim();
+  const match = /^aspect\s*:\s*(\S+)\s*\n?/i.exec(text);
+  if (match === null) return { prompt: text, aspect: undefined };
+  return {
+    prompt: text.slice(match[0].length).trim(),
+    aspect: Option.getOrUndefined(decodeConcreteAspect(match[1])),
+  };
+}
+
+/**
+ * One-shot art composition via pi's completeSimple — no session, no watcher
+ * (spec §4.4). Composes the image prompt AND resolves the aspect ratio:
+ * a concrete request passes through untouched; 'auto' asks the model to pick
+ * from the concrete set (first line `ASPECT: <ratio>`), falling back to 1:1.
+ * Falls back to the raw lookAndFeel when the model returns nothing usable.
+ */
+export async function composeArtPi(
   rt: PiRuntimeT,
   themeContext: ThemeContextT,
   argumentValues: Record<string, string>,
-  brief?: string,
-): Promise<string> {
+  opts: { aspect: AspectRatioT; hasSourcePhoto: boolean; brief?: string },
+): Promise<ComposedArt> {
+  const fallbackAspect: ConcreteAspectRatioT = opts.aspect === 'auto' ? '1:1' : opts.aspect;
+  const fallback: ComposedArt = { prompt: themeContext.lookAndFeel, aspectRatio: fallbackAspect };
   const { modelRuntime } = await rt.deps();
   const ref = parseModelRef(process.env.CARTIS_MODEL);
   const model = modelRuntime.getModel(ref.provider, ref.modelId);
-  if (model === undefined) return themeContext.lookAndFeel;
+  if (model === undefined) return fallback;
   const argLines = Object.entries(argumentValues)
     .map(([k, v]) => `- ${k}: ${v}`)
     .join('\n');
+  const brief = opts.brief;
   const instruction = [
     'You are writing a single image-generation prompt for a standalone artwork. ' +
       'Return ONLY the prompt text — no preamble, no markdown, one paragraph. ' +
@@ -94,6 +130,13 @@ async function composeArtPromptPi(
       'NEVER use the words "card", "trading card", "frame", "border", or ask for any ' +
       'text, title, stats, or layout elements in the image — the model must paint ' +
       'pure illustration (mentioning a card makes it render card frames and text).',
+    opts.aspect === 'auto'
+      ? `Before the prompt, on the FIRST line alone, write "ASPECT: <ratio>" choosing the ` +
+        `ratio that best suits the subject from exactly: ${ConcreteAspectRatio.literals.join(', ')}. ` +
+        (opts.hasSourcePhoto
+          ? 'A reference photo is attached to the generation — favor a ratio that flatters a portrait subject.'
+          : 'There is no reference photo — pick purely from the subject and scene.')
+      : '',
     `Look and feel: ${themeContext.lookAndFeel}`,
     themeContext.palette.length > 0 ? `Palette: ${themeContext.palette}` : '',
     argLines.length > 0 ? `Card arguments:\n${argLines}` : '',
@@ -106,15 +149,20 @@ async function composeArtPromptPi(
       messages: [{ role: 'user', content: instruction, timestamp: Date.now() } as never],
     });
     if (message.stopReason === 'error' || message.stopReason === 'aborted') {
-      return themeContext.lookAndFeel;
+      return fallback;
     }
     const text = (message.content ?? [])
       .map((c) => ('text' in c && c.type === 'text' ? c.text : ''))
       .join('')
       .trim();
-    return text.length > 0 ? text : themeContext.lookAndFeel;
+    if (text.length === 0) return fallback;
+    const parsed = parseComposedArt(text);
+    return {
+      prompt: parsed.prompt.length > 0 ? parsed.prompt : themeContext.lookAndFeel,
+      aspectRatio: opts.aspect === 'auto' ? (parsed.aspect ?? '1:1') : opts.aspect,
+    };
   } catch {
-    return themeContext.lookAndFeel;
+    return fallback;
   }
 }
 
@@ -129,7 +177,9 @@ function agentErrorOf(cause: unknown): AgentError {
 
 // ---------- replicate ----------
 
-const REPLICATE_MODEL = 'black-forest-labs/flux-kontext-pro';
+export const REPLICATE_MODEL = 'google/nano-banana-pro';
+/** 2K balances card-art sharpness (300-DPI export) against cost/speed. */
+const REPLICATE_RESOLUTION = '2K';
 const POLL_INTERVAL: Schedule.Schedule<number> = Schedule.spaced('1500 millis');
 const POLL_TIMEOUT = '120 seconds';
 
@@ -231,7 +281,8 @@ export class ReplicateClient extends Context.Tag('cartis/ReplicateClient')<
   {
     generate(
       token: Redacted.Redacted<string>,
-      input: { prompt: string; imageDataUrl?: DataUrlT; aspectRatio: AspectRatioT },
+      // Concrete by type — 'auto' (the AI-picks mode) resolves before this seam.
+      input: { prompt: string; imageDataUrl?: DataUrlT; aspectRatio: ConcreteAspectRatioT },
     ): Effect.Effect<string, ReplicateError | NetworkError>;
   }
 >() {}
@@ -251,15 +302,14 @@ export const replicateClientLive: Layer.Layer<
 
     const generate = (
       token: Redacted.Redacted<string>,
-      input: { prompt: string; imageDataUrl?: DataUrlT; aspectRatio: AspectRatioT },
+      input: { prompt: string; imageDataUrl?: DataUrlT; aspectRatio: ConcreteAspectRatioT },
     ): Effect.Effect<string, ReplicateError | NetworkError> =>
       Effect.gen(function* () {
         // Presence IS validity now — the DataUrl brand proves a non-empty
-        // base64 source (the E006 empty-input_image class is unrepresentable).
-        // Still never ask to match a nonexistent input image's aspect.
+        // base64 source (the E006 empty-image_input class is unrepresentable),
+        // and the aspect is concrete by type ('auto' resolved upstream).
         const hasSource = input.imageDataUrl !== undefined;
-        const requested = input.aspectRatio;
-        const aspectRatio = !hasSource && requested === 'match_input_image' ? '1:1' : requested;
+        const aspectRatio = input.aspectRatio;
         const startedAt = yield* Clock.currentTimeMillis;
         const elapsed = Clock.currentTimeMillis.pipe(
           Effect.map((now) => Math.round((now - startedAt) / 1000)),
@@ -268,14 +318,16 @@ export const replicateClientLive: Layer.Layer<
         yield* art(
           'generating',
           hasSource
-            ? `sending photo + prompt to replicate (flux-kontext-pro, ${aspectRatio})`
-            : `sending prompt to replicate (flux-kontext-pro, ${aspectRatio})`,
+            ? `sending photo + prompt to replicate (nano-banana-pro, ${aspectRatio})`
+            : `sending prompt to replicate (nano-banana-pro, ${aspectRatio})`,
         );
         const created = yield* sdk.createPrediction(token, {
           prompt: input.prompt,
-          ...(hasSource ? { input_image: input.imageDataUrl } : {}),
+          // nano-banana-pro takes an ARRAY of reference images (up to 14); we send one.
+          ...(hasSource ? { image_input: [input.imageDataUrl] } : {}),
           output_format: 'png',
           aspect_ratio: aspectRatio,
+          resolution: REPLICATE_RESOLUTION,
         });
         const id = created.id;
         yield* art('generating', `prediction ${id ?? '?'} created`);
@@ -698,9 +750,13 @@ export function cartisBridge(): Plugin {
             Effect.gen(function* () {
               const body = yield* readBody(req);
               const parsed = yield* decodeImageGenerate(body);
-              // 1) compose the final prompt via the LLM when theme context is present
+              // 1) compose prompt + resolve the aspect via the LLM when theme
+              //    context is present ('auto' = the model picks a concrete ratio)
               const themeContext = parsed.themeContext;
-              const prompt = themeContext
+              const requestedAspect = parsed.aspectRatio;
+              const hasSourcePhoto =
+                parsed.imageDataUrl !== undefined || parsed.editCurrentArt === true;
+              const composed = themeContext
                 ? yield* Effect.gen(function* () {
                     const bus = yield* ThreadBus;
                     yield* bus.emit({
@@ -708,16 +764,27 @@ export function cartisBridge(): Plugin {
                       phase: 'composing',
                       detail: 'composing art prompt from theme + arguments',
                     });
-                    return yield* Effect.promise(() =>
-                      composeArtPromptPi(
-                        piRt,
-                        themeContext,
-                        parsed.argumentValues ?? {},
-                        parsed.brief,
-                      ),
+                    const out = yield* Effect.promise(() =>
+                      composeArtPi(piRt, themeContext, parsed.argumentValues ?? {}, {
+                        aspect: requestedAspect,
+                        hasSourcePhoto,
+                        brief: parsed.brief,
+                      }),
                     );
+                    if (requestedAspect === 'auto') {
+                      yield* bus.emit({
+                        _tag: 'Art',
+                        phase: 'composing',
+                        detail: `aspect auto → ${out.aspectRatio}`,
+                      });
+                    }
+                    return out;
                   })
-                : parsed.prompt;
+                : undefined;
+              const prompt = composed?.prompt ?? parsed.prompt;
+              // No composer (raw-prompt path): 'auto' has nothing to pick with — 1:1.
+              const aspectRatio =
+                composed?.aspectRatio ?? (requestedAspect === 'auto' ? '1:1' : requestedAspect);
               // 2) resolve the source image: current art (edit mode) beats the attached photo
               let imageDataUrl = parsed.imageDataUrl;
               if (parsed.editCurrentArt === true && parsed.currentArtFileName !== undefined) {
@@ -739,7 +806,7 @@ export function cartisBridge(): Plugin {
                 .generate(token, {
                   prompt,
                   imageDataUrl,
-                  aspectRatio: parsed.aspectRatio,
+                  aspectRatio,
                 })
                 .pipe(
                   // Surface art failures in the chat as an Art 'error' event.

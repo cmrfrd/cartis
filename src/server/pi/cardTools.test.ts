@@ -16,6 +16,8 @@ const doc = {
   layoutId: 'classic',
   layoutOptions: ['classic', 'fullart'],
   holo: false,
+  artAspect: 'auto',
+  aspectOptions: ['auto', '1:1', '3:4', '16:9'],
 };
 
 const collect = (): IntentCollector => ({ calls: [] });
@@ -44,11 +46,20 @@ describe('cardTools schemas (provider-enforced, spec §3.1)', () => {
     expect(Value.Check(schema, { layoutId: 'nope' })).toBe(false);
   });
 
+  it('card_set_aspect_ratio only accepts ratios from docContext (unrepresentable bug class)', () => {
+    const schema = toolByName('card_set_aspect_ratio').parameters;
+    expect(Value.Check(schema, { aspectRatio: 'auto' })).toBe(true);
+    expect(Value.Check(schema, { aspectRatio: '16:9' })).toBe(true);
+    expect(Value.Check(schema, { aspectRatio: '21:9' })).toBe(false); // off-list
+    expect(Value.Check(schema, { aspectRatio: 'match_input_image' })).toBe(false); // retired
+  });
+
   it('omits set_layout/set_theme without docContext; card_patch without fields', () => {
     const names = cardTools([], undefined, collect()).map((t) => t.name);
     expect(names).not.toContain('card_patch');
     expect(names).not.toContain('card_set_layout');
     expect(names).not.toContain('card_set_theme');
+    expect(names).not.toContain('card_set_aspect_ratio');
     expect(names).toContain('card_generate_art');
     expect(names).toContain('card_save');
   });

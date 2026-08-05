@@ -5,7 +5,15 @@ import type { PredictionT } from '@/contracts/replicate.ts';
 import type { ThreadEventT } from '@/contracts/thread.ts';
 import { httpClientFromHandler } from '@/lib/http.ts';
 import { it } from '../../test/effect.ts';
-import { ReplicateClient, ReplicateSdk, replicateClientLive } from './agentBridge.ts';
+import {
+  composeArtPi,
+  parseComposedArt,
+  REPLICATE_MODEL,
+  ReplicateClient,
+  ReplicateSdk,
+  replicateClientLive,
+} from './agentBridge.ts';
+import type { PiRuntime } from './pi/runtime.ts';
 import { ThreadBus, threadBusTestLayer } from './threadBus.ts';
 
 /** Art-event details from a bus history (the replicate/compose progress lane). */
@@ -88,8 +96,12 @@ const replicateEnv = (sequence: ReadonlyArray<PredFixture>) =>
   );
 
 describe('ReplicateClient.generate', () => {
+  it('targets google/nano-banana-pro (the latest max nano banana)', () => {
+    expect(REPLICATE_MODEL).toBe('google/nano-banana-pro');
+  });
+
   it.effect(
-    'omits input_image for text-first generation (empty data URL) and fixes the aspect',
+    'omits image_input for text-first generation and sends the 2K nano-banana input shape',
     () => {
       const created: object[] = [];
       const succeeded: PredFixture = {
@@ -112,47 +124,53 @@ describe('ReplicateClient.generate', () => {
           c.generate(Redacted.make('tok'), {
             prompt: 'a mossy henge',
             imageDataUrl: undefined, // absent — no source photo (the sentinel is unrepresentable now)
-            aspectRatio: 'match_input_image',
+            aspectRatio: '1:1', // always concrete here — 'auto' resolves upstream, by type
           }),
         );
         const input = created[0] as Record<string, unknown>;
-        expect(input.input_image).toBeUndefined();
-        expect(input.aspect_ratio).toBe('1:1'); // cannot match a nonexistent input image
+        expect(input.image_input).toBeUndefined();
+        expect(input.aspect_ratio).toBe('1:1');
+        expect(input.resolution).toBe('2K');
         expect(input.prompt).toBe('a mossy henge');
       }).pipe(Effect.provide(env));
     },
   );
 
-  it.effect('keeps input_image and the requested aspect when a source photo exists', () => {
-    const created: object[] = [];
-    const succeeded: PredFixture = {
-      id: 'p1',
-      status: 'succeeded',
-      output: 'https://replicate.delivery/out.png',
-    };
-    const env = replicateClientLive.pipe(
-      Layer.provide(
-        Layer.mergeAll(
-          recordingSdkStub([succeeded], created),
-          threadBusTestLayer,
-          httpClientFromHandler(pngHandler),
+  it.effect(
+    'wraps the source photo in the image_input ARRAY and keeps the requested aspect',
+    () => {
+      const created: object[] = [];
+      const succeeded: PredFixture = {
+        id: 'p1',
+        status: 'succeeded',
+        output: 'https://replicate.delivery/out.png',
+      };
+      const env = replicateClientLive.pipe(
+        Layer.provide(
+          Layer.mergeAll(
+            recordingSdkStub([succeeded], created),
+            threadBusTestLayer,
+            httpClientFromHandler(pngHandler),
+          ),
         ),
-      ),
-      Layer.merge(threadBusTestLayer),
-    );
-    return Effect.gen(function* () {
-      yield* Effect.flatMap(ReplicateClient, (c) =>
-        c.generate(Redacted.make('tok'), {
-          prompt: 'stylize me',
-          imageDataUrl: DataUrl.make('data:image/png;base64,QQ=='),
-          aspectRatio: '3:4',
-        }),
+        Layer.merge(threadBusTestLayer),
       );
-      const input = created[0] as Record<string, unknown>;
-      expect(input.input_image).toBe('data:image/png;base64,QQ==');
-      expect(input.aspect_ratio).toBe('3:4');
-    }).pipe(Effect.provide(env));
-  });
+      return Effect.gen(function* () {
+        yield* Effect.flatMap(ReplicateClient, (c) =>
+          c.generate(Redacted.make('tok'), {
+            prompt: 'stylize me',
+            imageDataUrl: DataUrl.make('data:image/png;base64,QQ=='),
+            aspectRatio: '3:4',
+          }),
+        );
+        const input = created[0] as Record<string, unknown>;
+        expect(input.image_input).toEqual(['data:image/png;base64,QQ==']);
+        expect(input.input_image).toBeUndefined(); // retired flux-era field must not leak
+        expect(input.aspect_ratio).toBe('3:4');
+        expect(input.resolution).toBe('2K');
+      }).pipe(Effect.provide(env));
+    },
+  );
 
   it.effect('creates a prediction, polls to success, downloads output, emits Art events', () =>
     Effect.gen(function* () {
@@ -207,7 +225,7 @@ describe('ReplicateClient.generate', () => {
           c.generate(Redacted.make('tok'), {
             prompt: 'p',
             imageDataUrl: DataUrl.make('data:image/png;base64,QQ=='),
-            aspectRatio: 'match_input_image',
+            aspectRatio: '3:2',
           }),
         ),
       );
@@ -244,7 +262,7 @@ describe('ReplicateClient.generate', () => {
           c.generate(Redacted.make('tok'), {
             prompt: 'p',
             imageDataUrl: DataUrl.make('data:image/png;base64,QQ=='),
-            aspectRatio: 'match_input_image',
+            aspectRatio: '3:2',
           }),
         ).pipe(Effect.flip),
       );
@@ -270,7 +288,7 @@ describe('ReplicateClient.generate', () => {
           c.generate(Redacted.make('tok'), {
             prompt: 'p',
             imageDataUrl: DataUrl.make('data:image/png;base64,QQ=='),
-            aspectRatio: 'match_input_image',
+            aspectRatio: '3:2',
           }),
         ).pipe(Effect.flip),
       );
@@ -288,6 +306,127 @@ describe('ReplicateClient.generate', () => {
       ),
     ),
   );
+});
+
+// ---------------------------------------------------------------------------
+// Art composition — prompt + AI aspect pick ('auto' resolves HERE, never at
+// the replicate seam)
+// ---------------------------------------------------------------------------
+
+describe('parseComposedArt', () => {
+  it('extracts a valid ASPECT first line and strips it from the prompt', () => {
+    expect(parseComposedArt('ASPECT: 16:9\nsweeping neon vista')).toEqual({
+      prompt: 'sweeping neon vista',
+      aspect: '16:9',
+    });
+  });
+
+  it('strips an unrecognized-ratio ASPECT line but reports no aspect', () => {
+    expect(parseComposedArt('ASPECT: 7:9\na mossy henge')).toEqual({
+      prompt: 'a mossy henge',
+      aspect: undefined,
+    });
+  });
+
+  it('returns the whole text as prompt when there is no ASPECT line', () => {
+    expect(parseComposedArt('a mossy henge at dusk')).toEqual({
+      prompt: 'a mossy henge at dusk',
+      aspect: undefined,
+    });
+  });
+});
+
+describe('composeArtPi', () => {
+  const themeCtx = { lookAndFeel: 'gritty neon', palette: '', argumentSummary: '' };
+
+  /** Stub runtime: canned completeSimple text + optional instruction capture. */
+  const runtimeWith = (text: string, captured?: { instruction?: string }): PiRuntime =>
+    ({
+      deps: () =>
+        Promise.resolve({
+          modelRuntime: {
+            getModel: () => ({ id: 'stub-model' }),
+            completeSimple: (_model: never, req: { messages: { content: string }[] }) => {
+              if (captured !== undefined) captured.instruction = req.messages[0]?.content ?? '';
+              return Promise.resolve({
+                stopReason: 'stop',
+                content: [{ type: 'text', text }],
+              });
+            },
+          },
+        }),
+    }) as unknown as PiRuntime;
+
+  it('auto: adopts the model-picked ratio and strips it from the prompt', async () => {
+    const out = await composeArtPi(
+      runtimeWith('ASPECT: 16:9\nsweeping vista'),
+      themeCtx,
+      {},
+      {
+        aspect: 'auto',
+        hasSourcePhoto: false,
+      },
+    );
+    expect(out).toEqual({ prompt: 'sweeping vista', aspectRatio: '16:9' });
+  });
+
+  it('auto: falls back to 1:1 when the model gives no usable ratio', async () => {
+    const out = await composeArtPi(
+      runtimeWith('just a prompt, no ratio'),
+      themeCtx,
+      {},
+      {
+        aspect: 'auto',
+        hasSourcePhoto: false,
+      },
+    );
+    expect(out).toEqual({ prompt: 'just a prompt, no ratio', aspectRatio: '1:1' });
+  });
+
+  it('concrete request: keeps the ratio and does NOT ask the model to pick one', async () => {
+    const captured: { instruction?: string } = {};
+    const out = await composeArtPi(
+      runtimeWith('a mossy henge', captured),
+      themeCtx,
+      {},
+      {
+        aspect: '3:2',
+        hasSourcePhoto: false,
+      },
+    );
+    expect(out).toEqual({ prompt: 'a mossy henge', aspectRatio: '3:2' });
+    expect(captured.instruction ?? '').not.toContain('ASPECT');
+  });
+
+  it('auto with a source photo: the instruction tells the model a photo is attached', async () => {
+    const captured: { instruction?: string } = {};
+    await composeArtPi(
+      runtimeWith('ASPECT: 3:4\nportrait', captured),
+      themeCtx,
+      {},
+      {
+        aspect: 'auto',
+        hasSourcePhoto: true,
+      },
+    );
+    expect(captured.instruction ?? '').toContain('photo');
+  });
+
+  it('model unavailable: falls back to lookAndFeel + 1:1 for auto', async () => {
+    const rt = {
+      deps: () => Promise.resolve({ modelRuntime: { getModel: () => undefined } }),
+    } as unknown as PiRuntime;
+    const out = await composeArtPi(rt, themeCtx, {}, { aspect: 'auto', hasSourcePhoto: true });
+    expect(out).toEqual({ prompt: 'gritty neon', aspectRatio: '1:1' });
+  });
+
+  it('model unavailable with a concrete request: keeps the requested ratio', async () => {
+    const rt = {
+      deps: () => Promise.resolve({ modelRuntime: { getModel: () => undefined } }),
+    } as unknown as PiRuntime;
+    const out = await composeArtPi(rt, themeCtx, {}, { aspect: '9:16', hasSourcePhoto: false });
+    expect(out).toEqual({ prompt: 'gritty neon', aspectRatio: '9:16' });
+  });
 });
 
 // ---------------------------------------------------------------------------

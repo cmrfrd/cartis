@@ -1,5 +1,5 @@
 import { Component, get, ref } from '@expressive/react';
-import { Array as Arr, Effect, Exit, Match, Option } from 'effect';
+import { Array as Arr, Effect, Exit, Match, Option, Schema } from 'effect';
 // Value import of AppShell is a deliberate module cycle (AppShell renders BuilderView).
 // Safe: neither module touches the other's binding during module evaluation — only
 // inside method bodies at runtime, which ESM live bindings resolve correctly.
@@ -10,7 +10,12 @@ import { resolveImageFields } from '@/cards/resolve';
 import type { CardData, FieldValue, Layout, Theme } from '@/cards/types';
 import { ThreadPanel } from '@/chat/ThreadPanel';
 import { type ChatContext, ThreadState } from '@/chat/ThreadState';
-import { summarizeField } from '@/contracts/fields';
+import {
+  AspectRatio,
+  type AspectRatioT,
+  ConcreteAspectRatio,
+  summarizeField,
+} from '@/contracts/fields';
 import { type CardIdT, LayoutId, type LayoutIdT, ThemeId, type ThemeIdT } from '@/contracts/ids';
 import { ExportBar } from '@/export/ExportBar';
 import {
@@ -20,6 +25,7 @@ import {
   renderPreviewSnapshot,
   renderSheetBlob,
 } from '@/export/exportCard';
+import { dataUrlToBytes } from '@/images/codec';
 import { ImageProvider } from '@/images/ImageProvider';
 import type { StoredCard } from '@/storage/CardArchive';
 import { Button, Panel, PreviewStage, SelectInput, TextInput } from '@/ui';
@@ -37,6 +43,8 @@ export class BuilderView extends Component {
   layoutId: LayoutIdT = LayoutId.make('');
   data: CardData = {};
   holo = false;
+  /** Per-card art aspect override; undefined = follow `layout.artAspect ?? 'auto'`. */
+  artAspect?: AspectRatioT = undefined;
   savedId?: CardIdT = undefined;
   savedNote = '';
   /** Which image field's portrait tools are open (Task 8). */
@@ -80,7 +88,8 @@ export class BuilderView extends Component {
         this.data = { ...this.data, ...patch };
         this.dirty = true;
       },
-      runArt: (action) => this.runArtAction(action.brief, action.editCurrentArt),
+      runArt: (action, sourceDataUrl) =>
+        this.runArtAction(action.brief, action.editCurrentArt, sourceDataUrl),
       markDirty: () => {
         this.dirty = true;
       },
@@ -104,12 +113,21 @@ export class BuilderView extends Component {
         this.dirty = true;
         return true;
       },
+      setArtAspect: (value) => {
+        // The tool schema already pins the closed set; decode keeps it honest.
+        const decoded = Schema.decodeUnknownOption(AspectRatio)(value);
+        if (Option.isNone(decoded)) return false;
+        this.setArtAspect(decoded.value);
+        return true;
+      },
       docContext: {
         themeId: this.themeId,
         themeOptions: listThemes().map((t) => t.id),
         layoutId: this.layoutId,
         layoutOptions: theme.layouts.map((l) => l.id),
         holo: this.holo,
+        artAspect: this.resolvedArtAspect(),
+        aspectOptions: ['auto', ...ConcreteAspectRatio.literals],
       },
       snapshotPreview: () => this.snapshotPreview(),
     };
@@ -202,6 +220,22 @@ export class BuilderView extends Component {
     this.dirty = true;
   }
 
+  /**
+   * The aspect art generation uses: card override → layout preference → auto.
+   * A METHOD, not a `get` computed: expressive memoizes getters against the
+   * deps of their first run, and `artAspect` starts undefined — the `??`
+   * short-circuit makes the dep set unstable and the cache goes stale
+   * (live-caught in tests, 2026-08-04).
+   */
+  resolvedArtAspect(): AspectRatioT {
+    return this.artAspect ?? this.layout.artAspect ?? 'auto';
+  }
+
+  setArtAspect(value: AspectRatioT) {
+    this.artAspect = value;
+    this.dirty = true;
+  }
+
   /** Switching theme EDITS the open document (lifecycle spec decision 4):
    *  identity kept, overlapping argument values preserved, dirty marked. */
   pickTheme(id: ThemeIdT) {
@@ -238,6 +272,7 @@ export class BuilderView extends Component {
     this.layoutId = card.layoutId;
     this.data = { ...card.data };
     this.holo = card.holo;
+    this.artAspect = card.artAspect;
     this.savedId = card.id;
     if (this.shell) this.shell.openCardId = card.id;
     this.savedNote = '';
@@ -253,6 +288,7 @@ export class BuilderView extends Component {
     const layout = this.layout;
     this.data = { ...layout.defaults };
     this.holo = false;
+    this.artAspect = undefined;
     this.savedId = undefined;
     if (this.shell) this.shell.openCardId = undefined;
     this.savedNote = '';
@@ -315,6 +351,7 @@ export class BuilderView extends Component {
         layoutId: this.layoutId,
         data: { ...this.data, name },
         holo: this.holo,
+        artAspect: this.artAspect,
       });
       this.data = { ...this.data, name };
       this.savedId = saved.id;
@@ -349,9 +386,11 @@ export class BuilderView extends Component {
   /**
    * Run the art pipeline for a chat turn's artAction (spec decision 7). Progress
    * streams into the chat as Art events; success updates the art slot. Called by
-   * ThreadState via the injected chat context.
+   * ThreadState via the injected chat context. `sourceDataUrl` = the turn's
+   * attached photo — decoded into the generation's img2img source so the art
+   * keeps the subject's identity (vision alone loses it, live-caught).
    */
-  async runArtAction(brief: string, editCurrentArt: boolean) {
+  async runArtAction(brief: string, editCurrentArt: boolean, sourceDataUrl?: string) {
     const library = this.shell?.library;
     const artKey = Option.getOrUndefined(this.artKeyOption());
     if (!library || artKey === undefined) return; // no art slot or library — nothing to do
@@ -366,14 +405,23 @@ export class BuilderView extends Component {
       if (v !== undefined && v !== '') argumentValues[field.key] = String(v);
     }
     const currentArtFileName = Option.getOrUndefined(this.currentArtFileName());
+    // A malformed data URL must not kill the run — fall back to text-first.
+    let source: { bytes: ArrayBuffer; type: string } | undefined;
+    if (sourceDataUrl !== undefined) {
+      try {
+        source = dataUrlToBytes(sourceDataUrl);
+      } catch {
+        source = undefined;
+      }
+    }
     const exit = await runAppExit(
       Effect.flatMap(ImageProvider, (p) =>
         p.generate({
-          sourceBytes: new ArrayBuffer(0),
-          sourceType: 'application/octet-stream',
+          sourceBytes: source?.bytes ?? new ArrayBuffer(0),
+          sourceType: source?.type ?? 'application/octet-stream',
           prompt: theme.lookAndFeel,
           styleId: this.themeId,
-          aspectRatio: layout.artAspect ?? 'match_input_image',
+          aspectRatio: this.resolvedArtAspect(),
           themeContext: {
             lookAndFeel: theme.lookAndFeel,
             palette: theme.artFlavor?.(data) ?? '',
@@ -417,6 +465,7 @@ export class BuilderView extends Component {
         layoutId: this.layoutId,
         data: this.data,
         holo: this.holo,
+        artAspect: this.artAspect,
         // Persist the card→session pointer once a conversation exists (lazy).
         chatSessionId: this.thread.sessionId,
       });

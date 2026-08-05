@@ -17,6 +17,7 @@ import {
   CARD_PATCH_TOOL,
   CARD_SAVE_COPY_TOOL,
   CARD_SAVE_TOOL,
+  CARD_SET_ASPECT_TOOL,
   CARD_SET_HOLO_TOOL,
   CARD_SET_LAYOUT_TOOL,
   CARD_SET_THEME_TOOL,
@@ -241,7 +242,8 @@ function ToolUI(props: { part: Extract<ThreadPartT, { _tag: 'ToolCall' }> }) {
     part.name === CARD_EXPORT_TOOL ||
     part.name === CARD_SET_LAYOUT_TOOL ||
     part.name === CARD_SET_THEME_TOOL ||
-    part.name === CARD_SET_HOLO_TOOL
+    part.name === CARD_SET_HOLO_TOOL ||
+    part.name === CARD_SET_ASPECT_TOOL
   ) {
     return <DocActionChip part={part} />;
   }
@@ -274,6 +276,9 @@ function DocActionChip(props: { part: Extract<ThreadPartT, { _tag: 'ToolCall' }>
       } else if (part.name === CARD_SET_HOLO_TOOL) {
         verb = 'set';
         label = `holo: ${a.value === true ? 'on' : 'off'}`;
+      } else if (part.name === CARD_SET_ASPECT_TOOL) {
+        verb = 'set';
+        label = `aspect: ${String(a.aspectRatio ?? '')}`;
       }
     } catch {
       // keep the title

@@ -125,6 +125,31 @@ describe('CardRecord', () => {
     expect(decoded.chatSessionId).toBe('ses_abc123');
   });
 
+  it('decodes without artAspect (pre-aspect cards, no migration) and with it', () => {
+    const base = {
+      id: 'card-4',
+      name: 'Aspected',
+      themeId: 'arcane',
+      layoutId: 'classic',
+      holo: false,
+      updatedAt: 1700000000,
+      data: {},
+    };
+    // absent-tolerant: existing stored cards decode fine
+    expect(Schema.decodeUnknownSync(CardRecord)(base).artAspect).toBeUndefined();
+    // present: both 'auto' and a concrete ratio round-trip
+    expect(Schema.decodeUnknownSync(CardRecord)({ ...base, artAspect: 'auto' }).artAspect).toBe(
+      'auto',
+    );
+    expect(Schema.decodeUnknownSync(CardRecord)({ ...base, artAspect: '16:9' }).artAspect).toBe(
+      '16:9',
+    );
+    // retired flux-era value fails decode
+    expect(() =>
+      Schema.decodeUnknownSync(CardRecord)({ ...base, artAspect: 'match_input_image' }),
+    ).toThrow();
+  });
+
   it('rejects an old templateId-only row (clean break, decision 2)', () => {
     const legacy = {
       id: 'old-1',
@@ -494,7 +519,7 @@ describe('ImageGenerateRequest / ImageGenerateResponse', () => {
       prompt: 'mythic ember dragon',
       imageDataUrl: 'data:image/png;base64,abc',
     });
-    expect(decoded.aspectRatio).toBe('match_input_image');
+    expect(decoded.aspectRatio).toBe('auto');
   });
 
   it('rejects an empty imageDataUrl (the old sentinel) and unknown aspects', () => {

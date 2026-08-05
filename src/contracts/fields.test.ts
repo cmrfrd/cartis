@@ -9,6 +9,7 @@ import { describe, expect, it } from 'vitest';
 import {
   AspectRatio,
   CardDataSchema,
+  ConcreteAspectRatio,
   decodePatchLenient,
   FieldKind,
   FieldSpecSchema,
@@ -21,7 +22,10 @@ import {
 const decodeValue = Schema.decodeUnknownSync(FieldValue);
 const decodeKind = Schema.decodeUnknownSync(FieldKind);
 const decodeAspect = Schema.decodeUnknownSync(AspectRatio);
+const decodeConcreteAspect = Schema.decodeUnknownSync(ConcreteAspectRatio);
 const decodeSpec = Schema.decodeUnknownSync(FieldSpecSchema);
+
+const CONCRETE_ASPECTS = ['1:1', '4:5', '5:4', '3:4', '4:3', '2:3', '3:2', '9:16', '16:9'] as const;
 
 describe('FieldValue', () => {
   it('accepts string, number, boolean, undefined', () => {
@@ -90,12 +94,24 @@ describe('FieldKind', () => {
 });
 
 describe('AspectRatio', () => {
-  it('accepts the closed set and rejects arbitrary ratios', () => {
-    for (const aspect of ['1:1', '3:2', '2:3', '3:4', '4:3', '16:9', '9:16', 'match_input_image']) {
+  it('accepts auto plus the nano-banana-pro concrete set and rejects arbitrary ratios', () => {
+    for (const aspect of CONCRETE_ASPECTS) {
       expect(decodeAspect(aspect)).toBe(aspect);
     }
+    expect(decodeAspect('auto')).toBe('auto');
+    expect(() => decodeAspect('match_input_image')).toThrow(); // retired flux-era value
     expect(() => decodeAspect('5:7')).toThrow();
     expect(() => decodeAspect('')).toThrow();
+  });
+});
+
+describe('ConcreteAspectRatio', () => {
+  it('accepts every concrete ratio but NOT auto (auto must resolve before replicate)', () => {
+    for (const aspect of CONCRETE_ASPECTS) {
+      expect(decodeConcreteAspect(aspect)).toBe(aspect);
+    }
+    expect(() => decodeConcreteAspect('auto')).toThrow();
+    expect(() => decodeConcreteAspect('match_input_image')).toThrow();
   });
 });
 

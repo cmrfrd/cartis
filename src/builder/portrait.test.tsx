@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { setAppLayer, testAppLayerWith } from '@/app/runtime';
 import { type GenerationInput, ImageProvider } from '@/images/ImageProvider';
 import { ImageLibrary } from '@/storage/ImageLibrary';
-import { click, mountApp, tick } from '../../test/util';
+import { click, mountApp, setSelect, tick } from '../../test/util';
 import { BuilderView } from './BuilderView';
 import { PortraitSection } from './PortraitSection';
 
@@ -69,6 +69,33 @@ describe('PortraitSection (headless, text-first)', () => {
     library.set(null);
   });
 
+  it('sends the resolved aspect: layout default first, then the user override', async () => {
+    const aspects: (string | undefined)[] = [];
+    const generate = vi.fn((input: GenerationInput) => {
+      aspects.push(input.aspectRatio);
+      return Effect.succeed({ bytes: bytesOf('art'), type: 'image/png', via: 'stub' as const });
+    });
+    setAppLayer(
+      testAppLayerWith({ image: Layer.succeed(ImageProvider, ImageProvider.of({ generate })) }),
+    );
+
+    const library = ImageLibrary.new();
+    await vi.waitFor(() => {
+      expect(library.ready).toBe(true);
+    });
+    const builder = BuilderView.new();
+    const section = PortraitSection.new({ fieldKey: 'art' });
+
+    await section.generateArt({ builder, library }); // classic layout → '3:2'
+    builder.setArtAspect('16:9');
+    await section.generateArt({ builder, library }); // per-card override wins
+    expect(aspects).toEqual(['3:2', '16:9']);
+
+    section.set(null);
+    builder.set(null);
+    library.set(null);
+  });
+
   it('applies a library image directly to the card field', async () => {
     const builder = BuilderView.new();
     const section = PortraitSection.new({ fieldKey: 'art' });
@@ -95,6 +122,32 @@ describe('Builder art tools (mounted)', () => {
     expect(text).toContain('Art brief');
     expect(text).toContain('Generate art');
     expect(text).toContain('Attach photo (optional)');
+    unmount();
+  });
+
+  it('offers an aspect selector (Auto + concrete ratios) and persists the choice on save', async () => {
+    const { container, shell, unmount } = await mountApp();
+    await vi.waitFor(() => {
+      expect(shell.archive.ready).toBe(true);
+    });
+    const openButton = Array.from(container.querySelectorAll('button')).find(
+      (b) => b.textContent === 'Portrait tools',
+    );
+    await click(openButton ?? null);
+    await tick();
+    const aspectSelect = Array.from(container.querySelectorAll('select')).find((s) =>
+      Array.from(s.options).some((o) => (o.textContent ?? '').includes('Auto (AI picks)')),
+    );
+    expect(aspectSelect).toBeDefined();
+    await setSelect(aspectSelect ?? null, '16:9');
+    const saveButton = Array.from(container.querySelectorAll('button')).find(
+      (b) => b.textContent === 'Save',
+    );
+    await click(saveButton ?? null);
+    await vi.waitFor(() => {
+      expect(shell.archive.cards).toHaveLength(1);
+    });
+    expect(shell.archive.cards[0]?.artAspect).toBe('16:9');
     unmount();
   });
 });

@@ -3,6 +3,7 @@ import { Effect, Exit } from 'effect';
 import { runAppExit } from '@/app/runtime';
 import type { CardData } from '@/cards/types';
 import { noteFromCause } from '@/contracts/errors';
+import type { AspectRatioT } from '@/contracts/fields';
 import {
   CardId,
   type CardIdT,
@@ -36,6 +37,8 @@ export interface SaveCardInput {
   layoutId: LayoutIdT;
   data: CardData;
   holo: boolean;
+  /** Per-card art aspect override ('auto' = AI picks; absent = layout default). */
+  artAspect?: AspectRatioT;
   /** The pi chat session backing this card (card chat panel). */
   chatSessionId?: SessionIdT;
 }
@@ -86,7 +89,8 @@ export class CardArchive extends State {
       data: { ...input.data },
       holo: input.holo,
       updatedAt: Timestamp.make(Date.now()),
-      // Omit the key entirely when absent (copies/pre-chat cards start fresh).
+      // Omit the keys entirely when absent (copies/pre-chat cards start fresh).
+      ...(input.artAspect !== undefined ? { artAspect: input.artAspect } : {}),
       ...(input.chatSessionId !== undefined ? { chatSessionId: input.chatSessionId } : {}),
     };
     const exit = await runAppExit(

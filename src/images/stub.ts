@@ -14,7 +14,7 @@ export interface GenerationInput {
   sourceType: string;
   prompt: string;
   styleId: string;
-  /** Replicate aspect — the closed union (e.g. '3:2', 'match_input_image'). */
+  /** Art aspect — the closed union (e.g. '3:2', or 'auto' = the AI picks). */
   aspectRatio?: AspectRatioT;
   themeContext?: { lookAndFeel: string; palette: string; argumentSummary: string };
   argumentValues?: Record<string, string>;

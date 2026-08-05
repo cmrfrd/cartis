@@ -139,7 +139,7 @@ export const imageProviderLive: Layer.Layer<ImageProvider, never, HttpClient.Htt
               input.sourceBytes.byteLength > 0
                 ? bytesToDataUrl(input.sourceBytes, input.sourceType)
                 : undefined,
-            aspectRatio: input.aspectRatio ?? 'match_input_image',
+            aspectRatio: input.aspectRatio ?? 'auto',
             themeContext: input.themeContext,
             argumentValues: input.argumentValues,
             brief: input.brief,

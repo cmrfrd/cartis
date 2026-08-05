@@ -20,6 +20,7 @@ import {
   CARD_PATCH_TOOL,
   CARD_SAVE_COPY_TOOL,
   CARD_SAVE_TOOL,
+  CARD_SET_ASPECT_TOOL,
   CARD_SET_HOLO_TOOL,
   CARD_SET_LAYOUT_TOOL,
   CARD_SET_THEME_TOOL,
@@ -169,6 +170,21 @@ export function cardTools(
         collector,
       ),
     );
+    if (doc.aspectOptions.length > 0) {
+      tools.push(
+        tool(
+          CARD_SET_ASPECT_TOOL,
+          'Set art aspect',
+          `Set the art aspect ratio ('auto' = pick the best fit at generation time). Current: ${doc.artAspect}.`,
+          Type.Object(
+            { aspectRatio: Type.Union(doc.aspectOptions.map((o) => Type.Literal(o))) },
+            { additionalProperties: false },
+          ),
+          collector,
+          ['Aspect changes apply BEFORE any art generation in the same turn.'],
+        ),
+      );
+    }
   }
   return tools;
 }

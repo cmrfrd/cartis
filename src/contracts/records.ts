@@ -10,7 +10,7 @@
  */
 
 import { Schema } from 'effect';
-import { FieldValue } from './fields.ts';
+import { AspectRatio, FieldValue } from './fields.ts';
 import { CardId, ExportId, ImageId, LayoutId, SessionId, ThemeId, Timestamp } from './ids.ts';
 
 // ---------------------------------------------------------------------------
@@ -65,6 +65,13 @@ export const CardRecord = Schema.Struct({
    * gitignored cartis-data/chats; we persist only this pointer.
    */
   chatSessionId: Schema.optional(SessionId),
+  /**
+   * Per-card art aspect override (multi-aspect art, 2026-08-04). Optional +
+   * absent-tolerant: pre-aspect cards decode fine and resolve through
+   * `layout.artAspect ?? 'auto'`. 'auto' = the composer model picks a
+   * concrete ratio at generation time.
+   */
+  artAspect: Schema.optional(AspectRatio),
 });
 export type CardRecordT = typeof CardRecord.Type;
 

@@ -22,6 +22,7 @@ export const CARD_EXPORT_TOOL = 'card_export';
 export const CARD_SET_LAYOUT_TOOL = 'card_set_layout';
 export const CARD_SET_THEME_TOOL = 'card_set_theme';
 export const CARD_SET_HOLO_TOOL = 'card_set_holo';
+export const CARD_SET_ASPECT_TOOL = 'card_set_aspect_ratio';
 
 /** Display title for a tool name (chips; falls back to the raw name). */
 export const toolTitleOf = (name: string): string => TITLES[name] ?? name;
@@ -35,6 +36,7 @@ const TITLES: Record<string, string> = {
   [CARD_SET_LAYOUT_TOOL]: 'Switch layout',
   [CARD_SET_THEME_TOOL]: 'Switch theme',
   [CARD_SET_HOLO_TOOL]: 'Toggle holo',
+  [CARD_SET_ASPECT_TOOL]: 'Set art aspect',
 };
 
 /** Build a turn's display parts: reply text, then one chip per tool intent. */

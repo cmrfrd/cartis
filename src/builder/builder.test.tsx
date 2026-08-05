@@ -245,6 +245,58 @@ describe('BuilderView', () => {
     builder.set(null);
   });
 
+  it('a chat-attached photo becomes the art img2img SOURCE, not just agent vision (live-caught)', async () => {
+    // Assertions live OUTSIDE the stub — a throw inside generate becomes a
+    // swallowed Effect failure and the test would pass vacuously.
+    const inputs: GenerationInput[] = [];
+    const generate = vi.fn((input: GenerationInput) => {
+      inputs.push(input);
+      return Effect.succeed({ bytes: bytesOf('art'), type: 'image/png', via: 'stub' as const });
+    });
+    setAppLayer(
+      testAppLayerWith({
+        thread: chatStub({
+          turn: () =>
+            Effect.succeed(
+              resp({
+                reply: 'Making her a tinker.',
+                toolCalls: [
+                  {
+                    name: 'card_generate_art',
+                    args: { brief: 'steampunk tinker portrait', editCurrentArt: false },
+                  },
+                ],
+              }),
+            ),
+        }),
+        image: Layer.succeed(ImageProvider, ImageProvider.of({ generate })),
+      }),
+    );
+    const { shell, unmount } = await mountApp();
+    await vi.waitFor(() => expect(shell.library.ready).toBe(true));
+    // Attach a photo through the real composer, then send.
+    const attach = document.querySelector('[data-testid="composer-attach"] input[type="file"]');
+    if (!(attach instanceof HTMLInputElement)) throw new Error('attach input not found');
+    Object.defineProperty(attach, 'files', {
+      value: [new File(['x'], 'alie.png', { type: 'image/png' })],
+      configurable: true,
+    });
+    attach.dispatchEvent(new Event('change', { bubbles: true }));
+    await vi.waitFor(() => {
+      expect(document.querySelector('[data-testid="composer-attachment"]')).not.toBeNull();
+    });
+    const textarea = document.querySelector('textarea[placeholder="Message the assistant…"]');
+    await setInput(textarea, 'turn my friend into a tinker card');
+    await click(document.querySelector('[data-testid="composer-send"]'));
+    await vi.waitFor(() => {
+      expect(generate).toHaveBeenCalledOnce();
+    });
+    // the attached photo's bytes arrived as the generation source
+    expect(new TextDecoder().decode(inputs[0]?.sourceBytes ?? new ArrayBuffer(0))).toBe('x');
+    expect(inputs[0]?.sourceType).toBe('image/png');
+    unmount();
+  });
+
   it('runs art generation when a chat turn returns an artAction', async () => {
     const generate = vi.fn((input: GenerationInput) => {
       expect(input.brief).toBe('a phoenix companion');
@@ -341,6 +393,23 @@ describe('document lifecycle (headless)', () => {
     expect(builder.thread.sessionId).toBeUndefined(); // fresh card → fresh chat
     expect(builder.layoutId).toBe('fullart'); // stays in the current context
     expect(builder.data.name).toBe('Nyra, Unbound'); // fullart defaults
+    builder.set(null);
+  });
+
+  it('artAspect resolves card override → layout default, and clears with the document', () => {
+    const builder = BuilderView.new();
+    // classic layout declares artAspect '3:2' — the default resolution
+    expect(builder.resolvedArtAspect()).toBe('3:2');
+    builder.setArtAspect('16:9');
+    expect(builder.resolvedArtAspect()).toBe('16:9');
+    expect(builder.dirty).toBe(true);
+    builder.loadCard(makeCard({ artAspect: 'auto' })); // stored override wins
+    expect(builder.resolvedArtAspect()).toBe('auto');
+    builder.loadCard(makeCard()); // no stored aspect → layout default
+    expect(builder.resolvedArtAspect()).toBe('3:2');
+    builder.setArtAspect('9:16');
+    builder.newCard(); // the override belongs to the document
+    expect(builder.resolvedArtAspect()).toBe('3:2');
     builder.set(null);
   });
 

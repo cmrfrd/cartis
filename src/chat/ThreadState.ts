@@ -43,6 +43,7 @@ import {
   CARD_PATCH_TOOL,
   CARD_SAVE_COPY_TOOL,
   CARD_SAVE_TOOL,
+  CARD_SET_ASPECT_TOOL,
   CARD_SET_HOLO_TOOL,
   CARD_SET_LAYOUT_TOOL,
   CARD_SET_THEME_TOOL,
@@ -68,8 +69,10 @@ export interface ChatContext {
   /**
    * Delegate an art action to the builder's art run (phases arrive as Art
    * events). Returns the run's promise so doc actions can sequence after it.
+   * `sourceDataUrl` = the turn's attached photo, riding into generation as the
+   * img2img source (vision alone loses the subject's identity — live-caught).
    */
-  runArt(action: ArtActionT): void | Promise<void>;
+  runArt(action: ArtActionT, sourceDataUrl?: string): void | Promise<void>;
   /** Mark the document dirty (e.g. switching to a branch is a saved-state change). */
   markDirty(): void;
   /** Persist the document (card_save tool) — false on failure. */
@@ -82,6 +85,7 @@ export interface ChatContext {
   setLayout(layoutId: string): boolean;
   setTheme(themeId: string): boolean;
   setHolo(value: boolean): boolean;
+  setArtAspect(value: string): boolean;
   /** Downscaled snapshot of the rendered preview (agent vision); undefined on failure. */
   snapshotPreview(): Promise<{ mime: string; dataUrl: string } | undefined>;
 }
@@ -99,6 +103,7 @@ const SETTINGS_TOOLS: ReadonlySet<string> = new Set([
   CARD_SET_LAYOUT_TOOL,
   CARD_SET_THEME_TOOL,
   CARD_SET_HOLO_TOOL,
+  CARD_SET_ASPECT_TOOL,
 ]);
 
 /** The event's session, if the variant carries one — pure Option helper. */
@@ -332,7 +337,7 @@ export class ThreadState extends State {
     if (req === undefined) return;
     const exit = await runAppExit(Effect.flatMap(ChatThread, (c) => c.turn(req)));
     if (this.get(null)) return; // destroyed mid-turn
-    this.applyTurnExit(optimisticId, exit, ctx);
+    this.applyTurnExit(optimisticId, exit, ctx, attachments);
   }
 
   /**
@@ -439,6 +444,7 @@ export class ThreadState extends State {
     optimisticUserId: MessageIdT,
     exit: Exit.Exit<ChatTurnResponseT, unknown>,
     ctx: ChatContext,
+    attachments: readonly ChatAttachmentT[] = [],
   ): void {
     if (Exit.isSuccess(exit) && !this.canceling) {
       const res = exit.value;
@@ -459,7 +465,7 @@ export class ThreadState extends State {
           .map((e) => e.name)
           .join(', ')}`;
       }
-      this.applyIntents(ctx, res.toolCalls);
+      this.applyIntents(ctx, res.toolCalls, attachments);
     } else if (this.canceling) {
       this.finalizeAssistant(
         optimisticUserId,
@@ -488,7 +494,11 @@ export class ThreadState extends State {
    * document patch; art then save/copy/export sequence detached behind the
    * already-rendered reply.
    */
-  private applyIntents(ctx: ChatContext, toolCalls: readonly ToolCallIntentT[]): void {
+  private applyIntents(
+    ctx: ChatContext,
+    toolCalls: readonly ToolCallIntentT[],
+    attachments: readonly ChatAttachmentT[] = [],
+  ): void {
     for (const call of toolCalls) {
       if (!SETTINGS_TOOLS.has(call.name)) continue;
       const ok =
@@ -496,7 +506,9 @@ export class ThreadState extends State {
           ? ctx.setLayout(String(call.args.layoutId ?? ''))
           : call.name === CARD_SET_THEME_TOOL
             ? ctx.setTheme(String(call.args.themeId ?? ''))
-            : ctx.setHolo(call.args.value === true);
+            : call.name === CARD_SET_ASPECT_TOOL
+              ? ctx.setArtAspect(String(call.args.aspectRatio ?? ''))
+              : ctx.setHolo(call.args.value === true);
       if (!ok) this.note = `action failed: ${call.name}`;
     }
     const patch: CardDataT = {};
@@ -504,7 +516,7 @@ export class ThreadState extends State {
       if (call.name === CARD_PATCH_TOOL) Object.assign(patch, call.args);
     }
     if (Object.keys(patch).length > 0) ctx.applyPatch(patch as CardDataT);
-    void this.runPostTurn(ctx, toolCalls);
+    void this.runPostTurn(ctx, toolCalls, attachments);
   }
 
   /**
@@ -515,13 +527,19 @@ export class ThreadState extends State {
   private async runPostTurn(
     ctx: ChatContext,
     toolCalls: readonly ToolCallIntentT[],
+    attachments: readonly ChatAttachmentT[] = [],
   ): Promise<void> {
     const art = toolCalls.find((c) => c.name === CARD_GENERATE_ART_TOOL);
     if (art !== undefined) {
-      await ctx.runArt({
-        brief: String(art.args.brief ?? ''),
-        editCurrentArt: art.args.editCurrentArt === true,
-      });
+      // The turn's attached photo steers generation (img2img identity source).
+      const photo = attachments.find((a) => a.mime.startsWith('image/'));
+      await ctx.runArt(
+        {
+          brief: String(art.args.brief ?? ''),
+          editCurrentArt: art.args.editCurrentArt === true,
+        },
+        photo?.dataUrl,
+      );
     }
     for (const call of toolCalls) {
       if (this.get(null)) return;
