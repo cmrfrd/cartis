@@ -12,7 +12,8 @@
     "typecheck": "tsc --noEmit",
     "check": "biome check --write .",
     "verify": "biome ci . && tsc --noEmit && vitest run",
-    "e2e:agent": "bun e2e/agentic/runner.ts"
+    "e2e:agent": "bun e2e/agentic/runner.ts",
+    "e2e:scripted": "playwright test"
   },
   "dependencies": {
     "@effect/platform": "^0.97.1",
@@ -38,6 +39,7 @@
     "@earendil-works/pi-ai": "0.83.0",
     "@earendil-works/pi-coding-agent": "0.83.0",
     "@modelcontextprotocol/sdk": "1.30.0",
+    "@playwright/test": "^1.62.1",
     "@tailwindcss/vite": "^4.3.3",
     "@types/node": "^26.1.2",
     "@types/react": "^19.2.18",
