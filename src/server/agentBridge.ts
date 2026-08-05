@@ -467,8 +467,27 @@ export function cartisBridge(): Plugin {
         loggers[scope].info(message, { timestamp: true });
       const runtime = makeBridgeRuntime(DATA_ROOT, viteSink);
       // In-process pi agent runtime (migration spec §2) — lazy heavy import.
-      const piRt = makePiRuntime(DATA_ROOT);
-      if (process.env.ANTHROPIC_API_KEY === undefined && process.env.OPENAI_API_KEY === undefined) {
+      // CARTIS_FAKE_AGENT=1 (scripted e2e, test-hardening §Track B): the SAME
+      // runtime over a scripted faux model — real loop, real tools, real
+      // persistence, zero network. The thunk keeps fakeAgent (and pi) out of
+      // the config-load graph.
+      const fakeAgent = process.env.CARTIS_FAKE_AGENT === '1';
+      if (fakeAgent) {
+        process.env.CARTIS_MODEL = 'faux/faux-model';
+        loggers.agent.info('CARTIS_FAKE_AGENT=1 — scripted faux model (no network)', {
+          timestamp: true,
+        });
+      }
+      const piRt = fakeAgent
+        ? makePiRuntime(DATA_ROOT, {
+            modelRuntime: () => import('./pi/fakeAgent.ts').then((m) => m.fakeAgentRuntime()),
+          })
+        : makePiRuntime(DATA_ROOT);
+      if (
+        !fakeAgent &&
+        process.env.ANTHROPIC_API_KEY === undefined &&
+        process.env.OPENAI_API_KEY === undefined
+      ) {
         loggers.agent.info(
           'no ANTHROPIC_API_KEY / OPENAI_API_KEY set — chat turns will fail until one is configured in .env',
           { timestamp: true },

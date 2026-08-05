@@ -59,7 +59,9 @@ function fileIdOf(fileName: string): string | undefined {
 
 export function makePiRuntime(
   dataRoot: string,
-  injected?: { modelRuntime: ModelRuntime },
+  // A thunk keeps heavyweight/test runtimes OUT of the config-load graph —
+  // it is awaited lazily inside deps() (the CARTIS_FAKE_AGENT seam).
+  injected?: { modelRuntime: ModelRuntime | (() => Promise<ModelRuntime>) },
 ): PiRuntime {
   const chatsDir = join(dataRoot, 'chats');
   let depsPromise: Promise<PiDeps> | undefined;
@@ -70,11 +72,14 @@ export function makePiRuntime(
       const pi = await import('@earendil-works/pi-coding-agent');
       const { InMemoryCredentialStore } = await import('@earendil-works/pi-ai');
       const modelRuntime =
-        injected?.modelRuntime ??
-        (await pi.ModelRuntime.create({
-          credentials: new InMemoryCredentialStore(),
-          modelsPath: null,
-        }));
+        injected === undefined
+          ? await pi.ModelRuntime.create({
+              credentials: new InMemoryCredentialStore(),
+              modelsPath: null,
+            })
+          : typeof injected.modelRuntime === 'function'
+            ? await injected.modelRuntime()
+            : injected.modelRuntime;
       // In-memory settings: compaction OFF (entry-based rehydration must
       // never see a compaction collapse); file-backed setters are never used.
       const settings = pi.SettingsManager.inMemory({ compaction: { enabled: false } });
