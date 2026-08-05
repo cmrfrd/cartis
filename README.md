@@ -274,13 +274,26 @@ This is the only place where Effect exits into Expressive-mvc.
 
 ### Testing
 
-Tests use `test/effect.ts` — a minimal `@effect/vitest`-compatible adapter over
-vitest 4 + effect core. It exposes `it.effect` (TestClock-controlled),
-`it.scoped` (body may require `Scope`), and `it.live` (real clock). When
-`@effect/vitest` adds vitest 4 support, the adapter collapses to
-`export * from '@effect/vitest'`. TestClock drives all polling tests
-(ReplicateClient) so time advances are deterministic; agent behavior runs
-full-loop against pi's scripted **faux provider** (`src/server/pi/faux.ts`) —
-real agent loop, real tool validation, real session persistence, no network.
-`scripts/pi-canary.ts` is a permanent API-assumption canary (re-run on pi
-version bumps).
+Three layers (spec: `docs/superpowers/specs/2026-08-04-test-hardening-design.md`):
+
+| Command | What runs | Needs | When |
+|---|---|---|---|
+| `bun run verify` | biome + tsc + vitest (unit, mounted, full-loop faux, adversarial corpus) | nothing | every commit |
+| `bun run e2e:scripted` | Playwright + real Chromium + real dev server on the **scripted faux model** (`CARTIS_FAKE_AGENT=1`, port 5198, scratch data root) — deterministic golden paths incl. SSE-ghost reload, durable branching, validation UX, render parity | one-time `bunx playwright install chromium` | pre-merge |
+| `bun run e2e:agent [id…]` | a real-model **pi driver** steers real Chrome to user-voice objectives; a mechanical harness judges (port 5199, scratch data root) | Chrome + `ANTHROPIC_API_KEY`/`OPENAI_API_KEY` | manual, before merges touching chat/browser surfaces |
+
+**The bug→fixture rule:** every live-caught bug lands as a permanent
+artifact — model-behavior bugs → an entry in
+`src/server/pi/adversarial.corpus.test.ts` (scripted faux sequence, dated);
+lifecycle bugs → a scripted spec; capability bugs → an agentic criterion.
+
+Unit tests use `test/effect.ts` — a minimal `@effect/vitest`-compatible
+adapter over vitest 4 + effect core (`it.effect` / `it.scoped` / `it.live`;
+TestClock drives polling tests). Agent behavior runs full-loop against pi's
+scripted **faux provider** (`src/server/pi/faux.ts`) — real agent loop, real
+tool validation, real session persistence, no network. `scripts/pi-canary.ts`
+is a permanent API-assumption canary (re-run on pi version bumps);
+`e2e/agentic/canary.ts` is the MCP-browser-bridge canary (re-run on
+chrome-devtools-mcp / MCP-SDK bumps). E2e harnesses spawn their dev server +
+browser only for the duration of a manual run — the app itself runs all AI
+in-process.

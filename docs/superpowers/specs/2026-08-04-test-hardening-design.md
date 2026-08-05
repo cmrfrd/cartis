@@ -1,8 +1,8 @@
 # Test & E2E Hardening — Design (revised for the pi runtime)
 
 **Date:** 2026-08-04
-**Status:** Approved; **REVISED 2026-08-04 after the pi runtime migration
-landed** (merged to main, `e856194`). The original three tracks were designed
+**Status:** IMPLEMENTED 2026-08-05 (all three tracks live and green); REVISED 2026-08-04 after the pi runtime migration
+landed (merged to main, `e856194`). The original three tracks were designed
 against the opencode runtime and its v1 JSON transport — both gone. This
 revision re-grounds each track on what shipped: the in-process pi runtime,
 real provider-validated tool calls, and the faux-provider test seam
