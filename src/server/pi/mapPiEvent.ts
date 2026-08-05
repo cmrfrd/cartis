@@ -17,15 +17,27 @@ import type { ThreadEventT, ThreadPartT } from '../../contracts/thread.ts';
 const TEXT_THROTTLE_MS = 2000;
 
 export interface PiWatchState {
-  /** Bridge-minted id for the assistant message currently streaming. */
+  /** Bridge-minted id for THIS TURN's assistant message. Pi fires one
+   * `message_start` per agent-loop round (toolcall round, text round, …);
+   * all rounds merge into ONE streamed message — exactly how entries.ts
+   * merges them on rehydration and how finalizeAssistant replaces them. */
   readonly messageId?: MessageIdT;
-  /** contentIndex → last text emit time (throttle). */
+  /** Global part-index offset for the CURRENT round (rounds restart at 0). */
+  readonly partBase: number;
+  /** Highest global part index emitted so far (next round's base − 1). */
+  readonly maxPartIndex: number;
+  /** GLOBAL part index → last text emit time (throttle). */
   readonly lastTextEmit: Readonly<Record<number, number>>;
-  /** toolCallId → contentIndex (execution events don't carry an index). */
+  /** toolCallId → GLOBAL part index (execution events don't carry one). */
   readonly toolIndex: Readonly<Record<string, number>>;
 }
 
-export const initialPiWatchState: PiWatchState = { lastTextEmit: {}, toolIndex: {} };
+export const initialPiWatchState: PiWatchState = {
+  partBase: 0,
+  maxPartIndex: -1,
+  lastTextEmit: {},
+  toolIndex: {},
+};
 
 /** Loose structural view of the pi events we consume (type-only safety net). */
 interface PiEventView {
@@ -61,25 +73,34 @@ export function mapPiEvent(
   switch (event.type) {
     case 'message_start': {
       if (event.message?.role !== 'assistant') return { events: [], state };
+      // Later rounds CONTINUE the same streamed message at offset indexes.
+      if (state.messageId !== undefined) {
+        return {
+          events: [],
+          state: { ...state, partBase: state.maxPartIndex + 1 },
+        };
+      }
       const messageId = MessageId.make(mintId());
       return {
         events: [{ _tag: 'TurnStarted', sessionId, messageId }],
-        state: { messageId, lastTextEmit: {}, toolIndex: {} },
+        state: { messageId, partBase: 0, maxPartIndex: -1, lastTextEmit: {}, toolIndex: {} },
       };
     }
     case 'message_update': {
       const inner = event.assistantMessageEvent;
       const messageId = state.messageId;
       if (inner === undefined || messageId === undefined) return { events: [], state };
-      const index = inner.contentIndex ?? 0;
-      const block = inner.partial?.content?.[index];
+      const roundIndex = inner.contentIndex ?? 0;
+      const block = inner.partial?.content?.[roundIndex];
+      const index = state.partBase + roundIndex; // global part index
+      const bumped = Math.max(state.maxPartIndex, index);
       if (inner.type === 'text_delta' || inner.type === 'text_end' || inner.type === 'text_start') {
         const text = block?.type === 'text' ? (block.text ?? '') : '';
         const last = state.lastTextEmit[index] ?? 0;
         // Cumulative text from `partial`; throttled, but the final flush
         // (text_end) always emits.
         if (inner.type !== 'text_end' && now - last < TEXT_THROTTLE_MS) {
-          return { events: [], state };
+          return { events: [], state: { ...state, maxPartIndex: bumped } };
         }
         return {
           events: [
@@ -91,7 +112,11 @@ export function mapPiEvent(
               part: { _tag: 'Text', text },
             },
           ],
-          state: { ...state, lastTextEmit: { ...state.lastTextEmit, [index]: now } },
+          state: {
+            ...state,
+            maxPartIndex: bumped,
+            lastTextEmit: { ...state.lastTextEmit, [index]: now },
+          },
         };
       }
       if (inner.type === 'toolcall_end') {
@@ -106,7 +131,11 @@ export function mapPiEvent(
         };
         return {
           events: [{ _tag: 'PartDelta', sessionId, messageId, partIndex: index, part }],
-          state: { ...state, toolIndex: { ...state.toolIndex, [callId]: index } },
+          state: {
+            ...state,
+            maxPartIndex: bumped,
+            toolIndex: { ...state.toolIndex, [callId]: index },
+          },
         };
       }
       if (inner.type === 'error') {

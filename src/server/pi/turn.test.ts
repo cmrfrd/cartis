@@ -65,9 +65,17 @@ describe('runTurn (full loop, faux provider)', () => {
     expect(out.toolErrors).toEqual([]);
     expect(out.userEntryId).toMatch(/^[0-9a-f]{8}$/); // pi 8-hex entry ids
     expect(out.assistantEntryId).toMatch(/^[0-9a-f]{8}$/);
-    // live SSE mapping ran: a TurnStarted + at least one ToolCall part
-    expect(events.some((e) => e._tag === 'TurnStarted')).toBe(true);
-    expect(events.some((e) => e._tag === 'PartDelta' && e.part._tag === 'ToolCall')).toBe(true);
+    // live SSE mapping ran: ONE TurnStarted for the whole multi-round turn
+    // (pi fires message_start per round; extra rounds must NOT open a second
+    // streamed bubble — live-caught ghost), all deltas on that one message,
+    // and later rounds' parts at OFFSET indexes (text lands after the tools).
+    expect(events.filter((e) => e._tag === 'TurnStarted')).toHaveLength(1);
+    const deltas = events.filter((e) => e._tag === 'PartDelta');
+    expect(new Set(deltas.map((e) => e.messageId)).size).toBe(1);
+    const toolIndexes = deltas.filter((e) => e.part._tag === 'ToolCall').map((e) => e.partIndex);
+    const textIndexes = deltas.filter((e) => e.part._tag === 'Text').map((e) => e.partIndex);
+    expect(toolIndexes.length).toBeGreaterThan(0);
+    expect(Math.min(...textIndexes)).toBeGreaterThan(Math.max(...toolIndexes));
     // turn_meta persisted, keyed to the user entry
     const sm = await rt.getSession(out.sessionId);
     const meta = (
