@@ -6,3 +6,7 @@ dist/
 *.log
 .DS_Store
 cartis-data/
+e2e/runs/
+e2e/.scratch/
+test-results/
+playwright-report/

@@ -417,7 +417,8 @@ export const replicateClientLive: Layer.Layer<
 
 // ---------- vite plugin ----------
 
-const DATA_ROOT = 'cartis-data';
+/** E2e harnesses point this at a scratch dir so runs never touch real data. */
+const DATA_ROOT = process.env.CARTIS_DATA_ROOT ?? 'cartis-data';
 const STORES: readonly StoreName[] = ['images', 'cards', 'exports'];
 
 function parseStorePath(url: string): { store: StoreName; rest: string } | undefined {
