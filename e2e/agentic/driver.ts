@@ -19,6 +19,21 @@ import type { Browser } from './browser.ts';
 
 export const APP_URL = 'http://localhost:5199';
 
+/** The driver's system prompt (spec §Driver preamble). */
+export const PREAMBLE =
+  'You are a USER of the Cartis card app at {{APP_URL}}, driving a real browser ' +
+  'through the provided browser tools. Act ONLY through the UI — never read or ' +
+  'modify source files or data directories directly. Take a page snapshot before ' +
+  'interacting. Prefer snapshots over screenshots. The app has its own AI: after ' +
+  'sending a chat message, WAIT until its Stop button reverts to Send before your ' +
+  'next action. When the objective is complete, reply exactly ' +
+  '`DONE: <one-paragraph summary>`. If truly blocked, reply `BLOCKED: <why>`.';
+
+/** {{APP_URL}} / {{STAGE_DIR}} substitution for objectives + the preamble. */
+export function template(text: string, vars: { APP_URL: string; STAGE_DIR: string }): string {
+  return text.replaceAll('{{APP_URL}}', vars.APP_URL).replaceAll('{{STAGE_DIR}}', vars.STAGE_DIR);
+}
+
 const TOOL_CALL_CAP = 40;
 
 export interface DriverRun {

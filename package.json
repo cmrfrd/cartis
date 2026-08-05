@@ -11,7 +11,8 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "check": "biome check --write .",
-    "verify": "biome ci . && tsc --noEmit && vitest run"
+    "verify": "biome ci . && tsc --noEmit && vitest run",
+    "e2e:agent": "bun e2e/agentic/runner.ts"
   },
   "dependencies": {
     "@effect/platform": "^0.97.1",
