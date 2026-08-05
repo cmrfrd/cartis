@@ -116,7 +116,9 @@ describe('foldThreadEvent', () => {
     expect(parts.filter((p) => p._tag === 'ToolCall').length).toBe(1);
   });
 
-  it('Art updates the materialized art part in place (no duplicate)', () => {
+  it('Art updates the turn-response intent chip in place (no duplicate)', () => {
+    // The intent chip from partsFromTurn carries a SYNTHETIC callId — the
+    // Art upsert must match by name (live-caught duplicate strip).
     const seeded: ThreadMessageT[] = [
       {
         id: MessageId.make('m1'),
@@ -126,7 +128,7 @@ describe('foldThreadEvent', () => {
           { _tag: 'Text', text: 'Making it fiercer.' },
           {
             _tag: 'ToolCall',
-            callId: CARD_GENERATE_ART_TOOL,
+            callId: 'intent-1',
             name: CARD_GENERATE_ART_TOOL,
             title: 'Generate art',
             status: 'completed',

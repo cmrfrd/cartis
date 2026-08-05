@@ -17,6 +17,7 @@
 
 import type { SessionManager } from '@earendil-works/pi-coding-agent';
 import { MessageId } from '../../contracts/ids.ts';
+import { toolTitleOf } from '../../contracts/materialize.ts';
 import type { ThreadMessageT, ThreadPartT } from '../../contracts/thread.ts';
 
 interface ContentBlock {
@@ -133,6 +134,7 @@ export function mapSessionEntries(sessionManager: SessionManager): ThreadMessage
             _tag: 'ToolCall',
             callId: block.id ?? 'call',
             name: block.name ?? 'tool',
+            title: toolTitleOf(block.name ?? 'tool'),
             status: 'running',
             argsText: JSON.stringify(block.arguments ?? {}),
           });

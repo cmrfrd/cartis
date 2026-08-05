@@ -23,6 +23,9 @@ export const CARD_SET_LAYOUT_TOOL = 'card_set_layout';
 export const CARD_SET_THEME_TOOL = 'card_set_theme';
 export const CARD_SET_HOLO_TOOL = 'card_set_holo';
 
+/** Display title for a tool name (chips; falls back to the raw name). */
+export const toolTitleOf = (name: string): string => TITLES[name] ?? name;
+
 const TITLES: Record<string, string> = {
   [CARD_PATCH_TOOL]: 'Edit card fields',
   [CARD_GENERATE_ART_TOOL]: 'Generate art',

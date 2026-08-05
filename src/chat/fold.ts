@@ -98,8 +98,11 @@ export function foldThreadEvent(messages: ThreadMessageT[], event: ThreadEventT)
       const message = messages[index];
       if (message === undefined) return [...messages];
       const parts = [...message.parts];
+      // Match by NAME: the turn response's intent chip carries a synthetic
+      // callId (`intent-N`), and Art events must update THAT part in place
+      // (live-caught: matching callId appended a duplicate strip).
       const pIdx = parts.findIndex(
-        (p) => p._tag === 'ToolCall' && p.callId === CARD_GENERATE_ART_TOOL,
+        (p) => p._tag === 'ToolCall' && p.name === CARD_GENERATE_ART_TOOL,
       );
       const existing = pIdx >= 0 ? parts[pIdx] : undefined;
       const updated: ThreadPartT =
