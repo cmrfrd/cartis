@@ -10,12 +10,9 @@ import {
   AspectRatio,
   CardDataSchema,
   ConcreteAspectRatio,
-  decodePatchLenient,
   FieldKind,
   FieldSpecSchema,
-  type FieldSummaryT,
   FieldValue,
-  schemaFromFields,
   summarizeField,
 } from './fields';
 
@@ -43,44 +40,6 @@ describe('FieldValue', () => {
   it('CardDataSchema decodes a mixed record', () => {
     const data = { name: 'Nyra', cost: 3, holo: true, flavor: undefined };
     expect(Schema.decodeUnknownSync(CardDataSchema)(data)).toEqual(data);
-  });
-});
-
-describe('decodePatchLenient', () => {
-  const fields: FieldSummaryT[] = [
-    { kind: 'text', key: 'name', label: 'Name' },
-    { kind: 'number', key: 'might', label: 'Might', min: 0, max: 20 },
-    { kind: 'toggle', key: 'showStats', label: 'Stats' },
-    { kind: 'select', key: 'rarity', label: 'Rarity', options: ['common', 'rare'] },
-  ];
-
-  it('keeps valid fields and DROPS invalid ones instead of failing (live-caught)', () => {
-    // The reproduced turn-killer: the model "clears" might/ward with null when
-    // asked for "no might/ward stuff" — one bad value must not nuke the turn.
-    const { patch, dropped } = decodePatchLenient(fields, {
-      name: 'Tinker',
-      showStats: false,
-      might: null,
-      rarity: 'banana',
-      hacker: 'x',
-    });
-    expect(patch).toEqual({ name: 'Tinker', showStats: false });
-    expect(dropped.sort()).toEqual(['hacker', 'might', 'rarity']);
-  });
-
-  it('a fully valid patch passes through with nothing dropped', () => {
-    const { patch, dropped } = decodePatchLenient(fields, {
-      name: 'X',
-      might: 5,
-      rarity: 'rare',
-    });
-    expect(patch).toEqual({ name: 'X', might: 5, rarity: 'rare' });
-    expect(dropped).toEqual([]);
-  });
-
-  it('non-object input yields an empty patch', () => {
-    expect(decodePatchLenient(fields, null)).toEqual({ patch: {}, dropped: [] });
-    expect(decodePatchLenient(fields, 'nope')).toEqual({ patch: {}, dropped: [] });
   });
 });
 
@@ -142,58 +101,6 @@ describe('FieldSpecSchema', () => {
 
   it('rejects an unknown kind', () => {
     expect(() => decodeSpec({ kind: 'slider', key: 'x', label: 'X' })).toThrow();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// schemaFromFields — the agent-patch validator MUST honor field constraints
-// (spec §6: a chat agent could previously set cost: 999 or an invalid select
-// value and it validated and applied).
-// ---------------------------------------------------------------------------
-
-describe('schemaFromFields', () => {
-  const fields = [
-    { kind: 'text', key: 'name', label: 'Name' },
-    { kind: 'number', key: 'cost', label: 'Cost', min: 0, max: 9 },
-    { kind: 'select', key: 'essence', label: 'Essence', options: ['ember', 'tide'] },
-    { kind: 'toggle', key: 'showStats', label: 'Stats' },
-  ] as const;
-  const decode = Schema.decodeUnknownSync(schemaFromFields(fields));
-
-  it('accepts an in-constraint patch', () => {
-    expect(decode({ name: 'Vorak', cost: 5, essence: 'tide', showStats: true })).toEqual({
-      name: 'Vorak',
-      cost: 5,
-      essence: 'tide',
-      showStats: true,
-    });
-  });
-
-  it('rejects an out-of-range number (the cost:999 hole)', () => {
-    expect(() => decode({ cost: 999 })).toThrow();
-    expect(() => decode({ cost: -1 })).toThrow();
-  });
-
-  it('rejects a non-integer number', () => {
-    expect(() => decode({ cost: 1.5 })).toThrow();
-  });
-
-  it('rejects a select value outside its options', () => {
-    expect(() => decode({ essence: 'banana' })).toThrow();
-  });
-
-  it('still drops unknown keys and rejects wrong-typed values', () => {
-    expect(decode({ name: 'X', hacker: 'y' })).toEqual({ name: 'X' });
-    expect(() => decode({ cost: 'expensive' })).toThrow();
-    expect(() => decode({ showStats: 'yes' })).toThrow();
-  });
-
-  it('a number summary without min/max validates as a plain integer', () => {
-    const loose = Schema.decodeUnknownSync(
-      schemaFromFields([{ kind: 'number', key: 'n', label: 'N' }]),
-    );
-    expect(loose({ n: 42 })).toEqual({ n: 42 });
-    expect(() => loose({ n: 1.5 })).toThrow();
   });
 });
 

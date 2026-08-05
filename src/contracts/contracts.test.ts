@@ -502,7 +502,8 @@ describe('ChatTurnRequest / Response + history + session refs', () => {
   });
 });
 
-// schemaFromFields constraint tests live in src/contracts/fields.test.ts.
+// Tool-argument constraints are enforced by the per-turn typebox schemas
+// (src/server/pi/cardTools.ts) — covered by the pi full-loop suites.
 
 describe('ImageGenerateRequest / ImageGenerateResponse', () => {
   it('decodes request with aspectRatio', () => {

@@ -181,8 +181,6 @@ export const SessionAction = Schema.Struct({
 });
 export type SessionActionT = typeof SessionAction.Type;
 
-// schemaFromFields lives in ./fields.ts (constraint-honoring; spec §6).
-
 // ---------------------------------------------------------------------------
 // POST /api/image/generate
 //
