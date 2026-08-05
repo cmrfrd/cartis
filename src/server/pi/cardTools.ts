@@ -97,13 +97,19 @@ export function cardTools(
     tool(
       CARD_GENERATE_ART_TOOL,
       'Generate art',
-      'Generate or edit the card art from a short visual brief.',
+      'Generate or edit the art illustration from a short visual brief.',
       Type.Object(
         { brief: Type.String(), editCurrentArt: Type.Boolean() },
         { additionalProperties: false },
       ),
       collector,
-      ['Set editCurrentArt true only when modifying the existing art rather than replacing it.'],
+      [
+        'Set editCurrentArt true only when modifying the existing art rather than replacing it.',
+        'The brief describes ONLY the artwork — subject, scene, mood, style. ' +
+          'NEVER mention a card, frame, border, text, title, stats, or layout in the brief: ' +
+          'the image model paints just the art slot, and any mention of "card" makes it ' +
+          'hallucinate card frames and text inside the artwork.',
+      ],
     ),
     tool(CARD_SAVE_TOOL, 'Save card', 'Save the current card.', Type.Object({}), collector),
     tool(

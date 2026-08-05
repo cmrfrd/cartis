@@ -88,8 +88,12 @@ async function composeArtPromptPi(
     .map(([k, v]) => `- ${k}: ${v}`)
     .join('\n');
   const instruction = [
-    'You are writing a single image-generation prompt for a trading-card art slot. ' +
-      'Return ONLY the prompt text — no preamble, no markdown, one paragraph.',
+    'You are writing a single image-generation prompt for a standalone artwork. ' +
+      'Return ONLY the prompt text — no preamble, no markdown, one paragraph. ' +
+      'Describe ONLY the artwork: subject, scene, mood, lighting, style. ' +
+      'NEVER use the words "card", "trading card", "frame", "border", or ask for any ' +
+      'text, title, stats, or layout elements in the image — the model must paint ' +
+      'pure illustration (mentioning a card makes it render card frames and text).',
     `Look and feel: ${themeContext.lookAndFeel}`,
     themeContext.palette.length > 0 ? `Palette: ${themeContext.palette}` : '',
     argLines.length > 0 ? `Card arguments:\n${argLines}` : '',
