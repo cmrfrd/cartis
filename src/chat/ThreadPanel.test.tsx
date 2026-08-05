@@ -157,7 +157,7 @@ describe('ThreadPanel', () => {
     unmount();
   });
 
-  it('locks the composer and swaps Send→Stop while a turn is running', async () => {
+  it('locks the composer, swaps Send→Stop, and shows the busy spinner while running', async () => {
     setAppLayer(
       testAppLayerWith({
         thread: chatStub({
@@ -167,12 +167,19 @@ describe('ThreadPanel', () => {
       }),
     );
     const { unmount } = await mountApp();
+    expect(document.querySelector('[data-testid="busy-strip"]')).toBeNull(); // idle
     await setInput(composer(), 'hello');
     await click(document.querySelector('[data-testid="composer-send"]'));
     await vi.waitFor(() => {
       expect(document.querySelector('[data-testid="composer-cancel"]')).not.toBeNull();
       expect(document.querySelector('[data-testid="composer-send"]')).toBeNull();
       expect((composer() as HTMLTextAreaElement | null)?.disabled).toBe(true);
+      // the busy strip is visible for the WHOLE turn (before any stream event)
+      expect(document.querySelector('[data-testid="busy-strip"]')).not.toBeNull();
+    });
+    await vi.waitFor(() => {
+      // and it clears when the turn settles
+      expect(document.querySelector('[data-testid="busy-strip"]')).toBeNull();
     });
     unmount();
   });

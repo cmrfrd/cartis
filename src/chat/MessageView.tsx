@@ -284,6 +284,9 @@ function DocActionChip(props: { part: Extract<ThreadPartT, { _tag: 'ToolCall' }>
       data-testid="tool-doc-action"
       className="inline-flex items-center gap-1 rounded-base border border-accent/40 bg-accent/10 px-2 py-1 text-[11px] text-ink"
     >
+      {part.status === 'running' && (
+        <span className="h-2 w-2 animate-pulse rounded-full bg-accent" />
+      )}
       <span className="font-base uppercase tracking-wide text-accent">{verb}</span>
       <span className="font-mono">{label}</span>
     </span>
@@ -307,6 +310,9 @@ function PatchChip(props: { part: Extract<ThreadPartT, { _tag: 'ToolCall' }> }) 
       data-testid="tool-card-patch"
       className="inline-flex items-center gap-1 rounded-base border border-accent/40 bg-accent/10 px-2 py-1 text-[11px] text-ink"
     >
+      {props.part.status === 'running' && (
+        <span className="h-2 w-2 animate-pulse rounded-full bg-accent" />
+      )}
       <span className="font-base uppercase tracking-wide text-accent">edited</span>
       <span className="font-mono">{keys.length > 0 ? keys.join(', ') : 'card'}</span>
     </span>

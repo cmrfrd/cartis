@@ -6,7 +6,7 @@
  * via MessageView; ‹ n/m › arrows live there too.
  */
 
-import { ChevronDown } from 'lucide-react';
+import { ChevronDown, LoaderCircle } from 'lucide-react';
 import { BuilderView } from '@/builder/BuilderView';
 import type { ThreadMessageT } from '@/contracts/thread';
 import { Composer, NoteStrip } from './Composer';
@@ -54,6 +54,7 @@ export function ThreadPanel() {
         <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-5 p-4">
           <h2 className="text-center text-ink text-lg">What should this card become?</h2>
           <div className="w-full">
+            <BusyStrip />
             <NoteStrip />
             <Composer />
           </div>
@@ -63,6 +64,7 @@ export function ThreadPanel() {
           <Viewport messages={messages} running={running} />
           <div className="relative border-edge border-t p-3">
             <ScrollToBottom />
+            <BusyStrip />
             <NoteStrip />
             <Composer />
           </div>
@@ -115,6 +117,26 @@ function ResizeHandle() {
         view.chatWidth = DEFAULT_WIDTH;
       }}
     />
+  );
+}
+
+/**
+ * Always-on turn indicator: visible for the WHOLE turn (model latency, tool
+ * rounds, streaming) — the streamed bubble alone leaves dead air before the
+ * first event arrives.
+ */
+function BusyStrip() {
+  const { thread } = BuilderView.get();
+  const { running } = thread;
+  if (!running) return null;
+  return (
+    <div
+      data-testid="busy-strip"
+      className="flex items-center gap-2 px-2 pb-2 text-[11px] text-ink-dim"
+    >
+      <LoaderCircle className="size-3.5 animate-spin text-accent" />
+      working…
+    </div>
   );
 }
 
