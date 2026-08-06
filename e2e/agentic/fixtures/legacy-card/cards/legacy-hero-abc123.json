@@ -1,0 +1,23 @@
+{
+  "id": "11111111-2222-3333-4444-555555555555",
+  "name": "Legacy Hero",
+  "themeId": "arcane",
+  "layoutId": "classic",
+  "holo": false,
+  "updatedAt": 1722600000000,
+  "data": {
+    "name": "Legacy Hero",
+    "essence": "ember",
+    "cost": 4,
+    "typeLine": "Hero — Veteran",
+    "ability": "A survivor of the opencode era.",
+    "flavor": "",
+    "showStats": true,
+    "might": 3,
+    "ward": 3,
+    "rarity": "rare",
+    "foilStyle": "full",
+    "collector": "001/001 · Cartis Original"
+  },
+  "chatSessionId": "ses_0378oldopencodeid42XYZ"
+}
