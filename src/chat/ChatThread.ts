@@ -110,24 +110,23 @@ export const chatThreadLive: Layer.Layer<ChatThread, never, HttpClient.HttpClien
         );
       });
 
+    /** Encode with the route's OWN schema (no casts), then post. */
     const postTurn = (
       url: string,
-      req: ChatTurnRequestT,
-      extra?: Record<string, unknown>,
+      encoded: Effect.Effect<unknown, unknown>,
     ): Effect.Effect<ChatTurnResponseT, ChatRequestError | NetworkError> =>
       Effect.gen(function* () {
-        const schema = extra === undefined ? ChatTurnRequest : ChatEditRequest;
-        const wire = yield* Schema.encode(schema as typeof ChatTurnRequest)({
-          ...req,
-          ...extra,
-        } as ChatTurnRequestT).pipe(Effect.mapError((cause) => new NetworkError({ url, cause })));
+        const wire = yield* encoded.pipe(
+          Effect.mapError((cause) => new NetworkError({ url, cause })),
+        );
         return yield* post(url, wire, ChatTurnResponse);
       });
 
     return ChatThread.of({
-      turn: (req) => postTurn('/api/chat/turn', req),
-      edit: (req, targetMessageId) => postTurn('/api/chat/edit', req, { targetMessageId }),
-      regenerate: (req) => postTurn('/api/chat/regenerate', req),
+      turn: (req) => postTurn('/api/chat/turn', Schema.encode(ChatTurnRequest)(req)),
+      edit: (req, targetMessageId) =>
+        postTurn('/api/chat/edit', Schema.encode(ChatEditRequest)({ ...req, targetMessageId })),
+      regenerate: (req) => postTurn('/api/chat/regenerate', Schema.encode(ChatTurnRequest)(req)),
       history: (sessionId) =>
         getDecoded(
           `/api/chat/history?sessionId=${encodeURIComponent(sessionId)}`,

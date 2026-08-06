@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { ChatTurnRequestT } from '@/contracts/api';
+import { DataUrl, FileName, MimeType } from '@/contracts/ids';
 import { computeAnchors, mapSessionEntries, switchBranch } from './entries';
 import { fauxAssistantMessage, fauxRuntime, fauxText, fauxToolCall } from './faux';
 import { makePiRuntime, type PiRuntime } from './runtime';
@@ -66,9 +67,9 @@ describe('mapSessionEntries + anchors + durable switch (full loop)', () => {
         userPrompt: 'use this lore',
         attachments: [
           {
-            name: 'lore.txt' as never,
-            mime: 'text/plain' as never,
-            dataUrl: `data:text/plain;base64,${lore}` as never,
+            name: FileName.make('lore.txt'),
+            mime: MimeType.make('text/plain'),
+            dataUrl: DataUrl.make(`data:text/plain;base64,${lore}`),
           },
         ],
       }),
@@ -88,7 +89,7 @@ describe('mapSessionEntries + anchors + durable switch (full loop)', () => {
     faux.setResponses([fauxAssistantMessage([fauxText('reply two')])]);
     const second = await runTurn(
       rt,
-      req({ sessionId: first.sessionId as never, userPrompt: 'edited message' }),
+      req({ sessionId: first.sessionId, userPrompt: 'edited message' }),
       io,
       { kind: 'edit', targetUserEntryId: first.userEntryId },
     );
@@ -121,7 +122,7 @@ describe('mapSessionEntries + anchors + durable switch (full loop)', () => {
     faux.setResponses([fauxAssistantMessage([fauxText('take two')])]);
     const second = await runTurn(
       rt,
-      req({ sessionId: first.sessionId as never, userPrompt: 'IGNORED' }),
+      req({ sessionId: first.sessionId, userPrompt: 'IGNORED' }),
       io,
       { kind: 'regenerate' },
     );

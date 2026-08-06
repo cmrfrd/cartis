@@ -96,10 +96,12 @@ export function mapPiEvent(
       const bumped = Math.max(state.maxPartIndex, index);
       if (inner.type === 'text_delta' || inner.type === 'text_end' || inner.type === 'text_start') {
         const text = block?.type === 'text' ? (block.text ?? '') : '';
-        const last = state.lastTextEmit[index] ?? 0;
-        // Cumulative text from `partial`; throttled, but the final flush
-        // (text_end) always emits.
-        if (inner.type !== 'text_end' && now - last < TEXT_THROTTLE_MS) {
+        const last = state.lastTextEmit[index];
+        // Cumulative text from `partial`; throttled, but the FIRST emit per
+        // part and the final flush (text_end) always go through. (`last
+        // undefined` must emit explicitly — `?? 0` only worked because real
+        // clock values dwarf the window.)
+        if (inner.type !== 'text_end' && last !== undefined && now - last < TEXT_THROTTLE_MS) {
           return { events: [], state: { ...state, maxPartIndex: bumped } };
         }
         return {

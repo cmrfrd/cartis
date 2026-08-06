@@ -11,7 +11,7 @@
  * contract vocabulary, shared by client and server.
  */
 
-import { Option, Schema } from 'effect';
+import { Schema } from 'effect';
 
 // ---------------------------------------------------------------------------
 // FieldValue / CardData

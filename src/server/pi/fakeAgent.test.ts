@@ -85,15 +85,11 @@ describe('fakeAgentRuntime (full loop)', () => {
     expect(first.reply).toBe('Understood.');
     const second = await runTurn(
       rt,
-      req('rename this card to Again', { sessionId: first.sessionId as never }),
+      req('rename this card to Again', { sessionId: first.sessionId }),
       io,
     );
     expect(second.toolCalls).toEqual([{ name: 'card_patch', args: { name: 'Again' } }]);
-    const third = await runTurn(
-      rt,
-      req('and hello again', { sessionId: first.sessionId as never }),
-      io,
-    );
+    const third = await runTurn(rt, req('and hello again', { sessionId: first.sessionId }), io);
     expect(third.reply).toBe('Understood.');
   });
 

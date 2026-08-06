@@ -10,10 +10,8 @@ import {
   Option,
   Redacted,
   Ref,
-  Runtime,
   Schedule,
   Schema,
-  Scope,
   Stream,
 } from 'effect';
 import { createLogger, type Logger, type Plugin } from 'vite';
@@ -25,18 +23,13 @@ import {
   SessionAction,
   StorePutRequest,
 } from '../contracts/api.ts';
-import {
-  AgentError,
-  type FileStoreError,
-  NetworkError,
-  ReplicateError,
-} from '../contracts/errors.ts';
+import { AgentError, NetworkError, ReplicateError } from '../contracts/errors.ts';
 import {
   type AspectRatioT,
   ConcreteAspectRatio,
   type ConcreteAspectRatioT,
 } from '../contracts/fields.ts';
-import { type DataUrlT, SessionId } from '../contracts/ids.ts';
+import type { DataUrlT } from '../contracts/ids.ts';
 
 import { Prediction, type PredictionT } from '../contracts/replicate.ts';
 import type { ThemeContextT } from '../contracts/theme.ts';
@@ -55,7 +48,7 @@ import { runTurn, TurnBusyError, type TurnResult } from './pi/turn.ts';
 import { type LogScope, type LogSink, ThreadBus } from './threadBus.ts';
 
 /** Env-at-request-time read; empty values treated as unset. */
-function envOption(name: string): Effect.Effect<Option.Option<string>> {
+function _envOption(name: string): Effect.Effect<Option.Option<string>> {
   return Effect.orDie(Config.option(Config.string(name))).pipe(
     Effect.map(Option.filter((value) => value.length > 0)),
   );

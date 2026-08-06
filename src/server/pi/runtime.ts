@@ -39,7 +39,7 @@ export interface PiRuntime {
 }
 
 /** `CARTIS_MODEL=provider/model-id`; default kept in one place. */
-export const DEFAULT_MODEL = 'anthropic/claude-sonnet-4-6';
+const DEFAULT_MODEL = 'anthropic/claude-sonnet-4-6';
 
 export function parseModelRef(raw: string | undefined): { provider: string; modelId: string } {
   const value = raw !== undefined && raw.trim().length > 0 ? raw.trim() : DEFAULT_MODEL;

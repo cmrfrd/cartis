@@ -18,7 +18,7 @@ import { type LogSink, type ThreadBus, threadBusLive } from './threadBus.ts';
  */
 
 /** The full bridge service surface, provided with the live HTTP client. */
-export function bridgeLive(
+function bridgeLive(
   root: string,
   sink?: LogSink,
 ): Layer.Layer<ThreadBus | FileStore | ReplicateSdk | ReplicateClient> {

@@ -9,6 +9,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { ChatTurnRequestT } from '@/contracts/api';
+import { SessionId } from '@/contracts/ids';
 import type { ThreadEventT } from '@/contracts/thread';
 import { fauxAssistantMessage, fauxRuntime, fauxText, fauxToolCall } from './faux';
 import { makePiRuntime, type PiRuntime } from './runtime';
@@ -122,11 +123,11 @@ describe('runTurn (full loop, faux provider)', () => {
       fauxAssistantMessage([fauxText('second')]),
     ]);
     const sessionId = crypto.randomUUID();
-    const first = runTurn(rt, req({ sessionId: sessionId as never }), io());
+    const first = runTurn(rt, req({ sessionId: SessionId.make(sessionId) }), io());
     await new Promise((r) => setTimeout(r, 50)); // let the first turn register
-    await expect(runTurn(rt, req({ sessionId: sessionId as never }), io())).rejects.toBeInstanceOf(
-      TurnBusyError,
-    );
+    await expect(
+      runTurn(rt, req({ sessionId: SessionId.make(sessionId) }), io()),
+    ).rejects.toBeInstanceOf(TurnBusyError);
     release?.();
     const out = await first;
     expect(out.reply).toBe('slow reply');
@@ -136,7 +137,7 @@ describe('runTurn (full loop, faux provider)', () => {
     faux.setResponses([fauxAssistantMessage([fauxText('one')])]);
     const first = await runTurn(rt, req(), io());
     faux.setResponses([fauxAssistantMessage([fauxText('two')])]);
-    const second = await runTurn(rt, req({ sessionId: first.sessionId as never }), io());
+    const second = await runTurn(rt, req({ sessionId: first.sessionId }), io());
     expect(second.sessionId).toBe(first.sessionId);
     const sm = await rt.getSession(first.sessionId);
     const users = (

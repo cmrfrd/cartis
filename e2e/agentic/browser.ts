@@ -17,11 +17,12 @@
  *     criteria and screenshots never relay through the agent).
  */
 
+import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 
-/* biome-ignore-start lint/suspicious/noExplicitAny: pi's ToolDefinition generics need a loose slot */
-type AnyTool = any;
+/* biome-ignore-start lint/suspicious/noExplicitAny: pi's ToolDefinition generics need a loose schema slot (same seam as src/server/pi/cardTools.ts) */
+type AnyTool = ToolDefinition<any, any, any>;
 /* biome-ignore-end lint/suspicious/noExplicitAny: pi's ToolDefinition generics */
 
 export interface Browser {
@@ -42,12 +43,17 @@ interface McpContentBlock {
   mimeType?: string;
 }
 
+type PiToolContent =
+  | { type: 'text'; text: string }
+  | { type: 'image'; data: string; mimeType: string };
+
 /** MCP tool result content → pi tool-result content (text + images). */
-function toPiContent(blocks: McpContentBlock[]): Array<Record<string, unknown>> {
-  return blocks.map((b) =>
-    b.type === 'image'
-      ? { type: 'image', data: b.data ?? '', mimeType: b.mimeType ?? 'image/png' }
-      : { type: 'text', text: b.text ?? '' },
+function toPiContent(blocks: McpContentBlock[]): PiToolContent[] {
+  return blocks.map(
+    (b): PiToolContent =>
+      b.type === 'image'
+        ? { type: 'image', data: b.data ?? '', mimeType: b.mimeType ?? 'image/png' }
+        : { type: 'text', text: b.text ?? '' },
   );
 }
 

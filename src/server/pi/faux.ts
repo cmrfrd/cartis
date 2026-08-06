@@ -10,7 +10,6 @@
 
 import {
   createFauxCore,
-  type FauxContentBlock,
   fauxAssistantMessage,
   fauxText,
   fauxToolCall,
@@ -18,7 +17,6 @@ import {
 } from '@earendil-works/pi-ai';
 import { ModelRuntime } from '@earendil-works/pi-coding-agent';
 
-export type { FauxContentBlock };
 export { fauxAssistantMessage, fauxText, fauxToolCall };
 
 export interface FauxRuntime {

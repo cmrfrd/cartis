@@ -42,7 +42,7 @@ export class ThreadBus extends Context.Tag('cartis/ThreadBus')<
 >() {}
 
 /** A rendered terminal line, split so sinks can tag the scope themselves. */
-export interface ScopedLine {
+interface ScopedLine {
   readonly scope: LogScope;
   readonly message: string;
 }
@@ -83,7 +83,7 @@ const renderPartMessage = (part: ThreadPartT): string | undefined =>
   );
 
 /** The event's terminal line as (scope, message) — what sinks consume. */
-export function renderScoped(event: ThreadEventT): Option.Option<ScopedLine> {
+function renderScoped(event: ThreadEventT): Option.Option<ScopedLine> {
   return Option.fromNullable(
     Match.value(event).pipe(
       Match.tag('TurnStarted', (): ScopedLine => ({ scope: 'agent', message: 'turn started' })),

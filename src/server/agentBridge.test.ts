@@ -1,4 +1,4 @@
-import { type Context, Effect, Fiber, Layer, Option, Redacted, Ref, TestClock } from 'effect';
+import { Effect, Fiber, Layer, Option, Redacted, Ref, TestClock } from 'effect';
 import { describe, expect } from 'vitest';
 import { DataUrl } from '@/contracts/ids.ts';
 import type { PredictionT } from '@/contracts/replicate.ts';

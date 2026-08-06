@@ -11,20 +11,21 @@
 import { join } from 'node:path';
 import type { SessionManager } from '@earendil-works/pi-coding-agent';
 import type { ChatAttachmentT, ChatTurnRequestT } from '../../contracts/api.ts';
-import { SessionId, type SessionIdT } from '../../contracts/ids.ts';
+import { MessageId, type MessageIdT, SessionId, type SessionIdT } from '../../contracts/ids.ts';
 import type { ThreadEventT } from '../../contracts/thread.ts';
 import { cardTools, type IntentCollector, personaPrompt } from './cardTools.ts';
 import { initialPiWatchState, mapPiEvent } from './mapPiEvent.ts';
 import { type PiRuntime, parseModelRef } from './runtime.ts';
 
-/** Structured turn result (wire contract v2, spec §3.2). */
+/** Structured turn result (wire contract v2, spec §3.2). Branded like the
+ * wire schema, so callers and tests never need to re-brand. */
 export interface TurnResult {
-  sessionId: string;
+  sessionId: SessionIdT;
   reply: string;
   toolCalls: Array<{ name: string; args: Record<string, unknown> }>;
   toolErrors: Array<{ name: string; message: string }>;
-  userEntryId: string;
-  assistantEntryId: string;
+  userEntryId: MessageIdT;
+  assistantEntryId: MessageIdT;
 }
 
 export class TurnBusyError extends Error {
@@ -32,7 +33,7 @@ export class TurnBusyError extends Error {
     super('a turn is already running for this session');
   }
 }
-export class TurnFailedError extends Error {}
+class TurnFailedError extends Error {}
 
 const WALL_CLOCK_TIMEOUT_MS = 180_000;
 
@@ -81,7 +82,7 @@ type Entry = {
 };
 
 /** Everything the caller derives from the branch tail after a prompt. */
-export function readTurnTail(sessionManager: SessionManager): {
+function readTurnTail(sessionManager: SessionManager): {
   userEntryId: string;
   assistantEntryId: string;
   reply: string;
@@ -291,8 +292,8 @@ export async function runTurn(
       reply: tail.reply,
       toolCalls,
       toolErrors: tail.toolErrors,
-      userEntryId: tail.userEntryId,
-      assistantEntryId: tail.assistantEntryId,
+      userEntryId: MessageId.make(tail.userEntryId),
+      assistantEntryId: MessageId.make(tail.assistantEntryId),
     };
   } finally {
     clearTimeout(timeout);

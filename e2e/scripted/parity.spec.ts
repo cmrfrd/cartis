@@ -5,7 +5,6 @@
  */
 
 import { expect, test } from '@playwright/test';
-import { sendChat } from './helpers.ts';
 
 const ABILITY_TEXT = 'When Nyra enters play, deal 2 damage to any target.';
 

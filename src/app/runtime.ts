@@ -27,7 +27,7 @@ import { type StoreClient, storeClientLive, storeClientMemory } from '@/storage/
 export type AppServices = StoreClient | ImageProvider | ChatThread | ChatEvents;
 
 /** Live app layer: real services over the live (fetch) HTTP client. */
-export const appLive: Layer.Layer<AppServices> = Layer.mergeAll(
+const appLive: Layer.Layer<AppServices> = Layer.mergeAll(
   storeClientLive,
   imageProviderLive,
   chatThreadLive,
@@ -60,10 +60,6 @@ export function testAppLayerWith(overrides: TestAppOverrides = {}): Layer.Layer<
 export const testAppLayer: Layer.Layer<AppServices> = testAppLayerWith();
 
 let current: ManagedRuntime.ManagedRuntime<AppServices, never> = ManagedRuntime.make(appLive);
-
-/** Run an app effect to a Promise (rejects on failure/defect). */
-export const runApp = <A, E>(effect: Effect.Effect<A, E, AppServices>): Promise<A> =>
-  current.runPromise(effect);
 
 /** Run an app effect to an Exit (never rejects; inspect success/failure). */
 export const runAppExit = <A, E>(effect: Effect.Effect<A, E, AppServices>) =>

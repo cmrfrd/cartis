@@ -93,8 +93,8 @@ export async function runDriver(
     settingsManager: settings,
     resourceLoader: loader,
     noTools: 'all',
-    customTools: browser.tools as never,
-    tools: browser.tools.map((t: { name: string }) => t.name),
+    customTools: browser.tools,
+    tools: browser.tools.map((t) => t.name),
   });
 
   const events: unknown[] = [];
